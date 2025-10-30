@@ -1,0 +1,14 @@
+# JMComic 配置文件示例
+# 复制此文件并重命名为 option.yml 以使用自定义配置
+
+download:
+  image:
+    suffix: .jpg  # 下载图片的格式，可选 .jpg, .png 等
+  dir:
+    base: ./downloads  # 基础下载目录
+
+
+# 代理设置（可选）
+# proxy:
+#   http: "http://127.0.0.1:7890"
+#   https: "http://127.0.0.1:7890"
