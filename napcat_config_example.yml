@@ -15,24 +15,9 @@
 
 # 默认中间件配置
 default-middlewares &default:
-  access-token: ''
+  access-token: ''    # 与.env 中的 ACCESS_TOKEN 保持一致
   filter: ''
   rate-limit:
     enabled: false
     frequency: 1
     bucket: 6
-
-# 数据库相关
-# 如果你不需要数据库功能，可以保留默认配置
-database:
-  leveldb:
-    enable: true
-    path: ./leveldb
-  sqlite:
-    enable: false
-    cache-size: 1024
-    database: data.db
-    journal-mode: WAL
-    synchronous: NORMAL
-    foreign-keys: true
-    busy-timeout: 5000

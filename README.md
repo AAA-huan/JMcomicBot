@@ -54,10 +54,12 @@
 1. **安装 Python**
    - 访问 [Python官网](https://www.python.org/downloads/) 下载最新版Python
    - 安装时勾选「Add Python to PATH」选项
-   - 验证安装：`python --version`
 
 2. **安装依赖包**
    ```bash
+   # 验证 Python 安装
+   python --version
+
    # 使用 pip 安装依赖
    pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple --upgrade
    ```
@@ -106,18 +108,9 @@
    
    # 启动机器人
    python bot.py
-   ```
 
-2. **后台运行（可选）**
-   ```bash
-   # 使用 nohup 在后台运行（Linux风格，Windows可使用其他方式）
-   nohup python bot.py > bot.log 2>&1 &
-   
-   # 查看运行状态
-   ps aux | grep python
-   
    # 停止机器人
-   pkill -f "python bot.py"
+   Ctrl+C
    ```
 
 ### 🎯 使用方法
@@ -137,7 +130,7 @@
 
 - 🐍 Python >= 3.7
 - 🐧 **Ubuntu 18.04 或更高版本（推荐）**
-- 💾 至少 2GB 可用存储空间
+- 💾 至少 4GB 可用存储空间
 - 🌐 稳定的网络连接
 - 🔧 系统管理员权限
 
@@ -158,9 +151,9 @@
 2. **创建项目目录**
    ```bash
    # 创建项目文件夹
-   sudo mkdir -p /opt/mangabot
-   sudo chown $USER:$USER /opt/mangabot
-   cd /opt/mangabot
+   sudo mkdir -p /opt/JMBot
+   sudo chown $USER:$USER /opt/JMBot
+   cd /opt/JMBot
    ```
 
 3. **使用 Git 克隆项目**
@@ -208,7 +201,7 @@
 2. **编辑配置文件**
    ```bash
    # 编辑环境变量配置
-   nano .env
+   vim .env
    ```
    
    修改以下配置：
@@ -217,14 +210,13 @@
    NAPCAT_WS_URL=ws://localhost:6099/wsapi
    
    # 漫画下载路径
-   MANGA_DOWNLOAD_PATH=/var/lib/mangabot/downloads
-   ```
+   MANGA_DOWNLOAD_PATH=/var/lib/JMBot/downloads
 
 3. **创建数据目录**
    ```bash
    # 创建下载目录
-   sudo mkdir -p /var/lib/mangabot/downloads
-   sudo chown $USER:$USER /var/lib/mangabot/downloads
+   sudo mkdir -p /var/lib/JMBot/downloads
+   sudo chown $USER:$USER /var/lib/JMBot/downloads
    ```
 
 #### 四、系统服务配置（可选）
@@ -239,31 +231,31 @@
 1. **创建系统服务用户**
    ```bash
    # 创建专用用户
-   sudo useradd -r -s /bin/false mangabot
+   sudo useradd -r -s /bin/false JMBot
    
    # 设置目录权限
-   sudo chown -R mangabot:mangabot /opt/mangabot
-   sudo chown -R mangabot:mangabot /var/lib/mangabot
+   sudo chown -R JMBot:JMBot /opt/JMBot
+   sudo chown -R JMBot:JMBot /var/lib/JMBot
    ```
 
 2. **创建系统服务文件**
    ```bash
    # 创建服务文件
-   sudo nano /etc/systemd/system/mangabot.service
+   sudo vim /etc/systemd/system/JMBot.service
    ```
    
    添加以下内容：
    ```ini
    [Unit]
-   Description=MangaBot QQ Robot
+   Description=JMBot QQ Robot
    After=network.target
    
    [Service]
    Type=simple
-   User=mangabot
-   WorkingDirectory=/opt/mangabot
-   Environment=PATH=/opt/mangabot/venv/bin
-   ExecStart=/opt/mangabot/venv/bin/python bot.py
+   User=JMBot
+   WorkingDirectory=/opt/JMBot
+   Environment=PATH=/opt/JMBot/venv/bin
+   ExecStart=/opt/JMBot/venv/bin/python bot.py
    Restart=always
    RestartSec=10
    
@@ -289,7 +281,7 @@
 #### 五、配置 NapCat
 
 1. **安装 NapCat**
-   - 参考 NapCatQQ 文档安装 NapCat
+   - 参考 NapCatQQ 文档安装 NapCat https://github.com/NapNeko/NapCatQQ
    - 配置 WebSocket 服务端与机器人配置匹配
 
 ### 🎯 使用方法
@@ -297,19 +289,19 @@
 #### 系统服务管理
 ```bash
 # 启动服务
-sudo systemctl start mangabot
+sudo systemctl start JMBot
 
 # 停止服务
-sudo systemctl stop mangabot
+sudo systemctl stop JMBot
 
 # 重启服务
-sudo systemctl restart mangabot
+sudo systemctl restart JMBot
 
 # 查看服务状态
-sudo systemctl status mangabot
+sudo systemctl status JMBot
 
 # 查看实时日志
-sudo journalctl -u mangabot -f
+sudo journalctl -u JMBot -f
 ```
 
 #### QQ命令使用
@@ -370,8 +362,8 @@ sudo journalctl -u mangabot -f
 1. **获取项目文件**
    ```bash
    # 创建项目目录（简化目录结构）
-   mkdir -p ~/mangabot
-   cd ~/mangabot
+   mkdir -p ~/JMBot
+   cd ~/JMBot
    
    # 使用Git克隆项目
    git clone https://github.com/AAA-huan/JM-QQ-Bot.git .
@@ -434,7 +426,7 @@ sudo journalctl -u mangabot -f
 1. **在 Ubuntu 环境中启动**
    ```bash
    # 进入项目目录
-   cd /opt/mangabot
+   cd /opt/JMBot
    
    # 启动机器人
    python3 bot.py
@@ -452,7 +444,7 @@ sudo journalctl -u mangabot -f
 proot-distro login ubuntu
 
 # 在Ubuntu中启动机器人
-cd ~/mangabot && python3 bot.py
+cd ~/JMBot && python3 bot.py
 ```
 
 #### 进程管理
@@ -542,7 +534,7 @@ A: 在禁漫天堂网站浏览漫画时，URL中的数字即为漫画ID。
 ### Linux 环境问题
 
 #### Q: 服务启动失败？
-A: 检查系统日志：`sudo journalctl -u mangabot -n 50`
+A: 检查系统日志：`sudo journalctl -u JMBot -n 50`
 
 #### Q: 端口被占用？
 A: 停止占用端口的进程或检查NapCat WebSocket端口配置。
@@ -565,7 +557,7 @@ A: 使用 Termux 的 wakelock 功能或考虑使用 Termux:Boot。
 ### 日志查看
 
 - **Windows**: 查看命令行窗口输出
-- **Linux**: `sudo journalctl -u mangabot -f`
+- **Linux**: `sudo journalctl -u JMBot -f`
 - **Android**: Termux 终端输出
 
 ### 错误代码说明

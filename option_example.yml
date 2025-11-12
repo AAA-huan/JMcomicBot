@@ -5,10 +5,4 @@ download:
   image:
     suffix: .jpg  # 下载图片的格式，可选 .jpg, .png 等
   dir:
-    base: ./downloads  # 基础下载目录
-
-
-# 代理设置（可选）
-# proxy:
-#   http: "http://127.0.0.1:7890"
-#   https: "http://127.0.0.1:7890"
+    base: ./downloads  # 基础下载目录, 不用改
