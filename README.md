@@ -79,10 +79,6 @@
    # NapCat WebSocket 服务配置
    NAPCAT_WS_URL=ws://localhost:6099/wsapi
    
-   # Flask HTTP 服务配置
-   FLASK_HOST=127.0.0.1
-   FLASK_PORT=8000
-   
    # 漫画下载路径
    MANGA_DOWNLOAD_PATH=./downloads
    
@@ -103,16 +99,25 @@
 
 #### 五、启动机器人
 
-1. **使用启动脚本（推荐）**
+1. **手动启动（推荐）**
    ```bash
-   # 双击运行 start.bat 文件
-   # 或者命令行运行
-   start.bat
+   # 进入项目目录
+   cd JMComicBot
+   
+   # 启动机器人
+   python bot.py
    ```
 
-2. **手动启动**
+2. **后台运行（可选）**
    ```bash
-   python bot.py
+   # 使用 nohup 在后台运行（Linux风格，Windows可使用其他方式）
+   nohup python bot.py > bot.log 2>&1 &
+   
+   # 查看运行状态
+   ps aux | grep python
+   
+   # 停止机器人
+   pkill -f "python bot.py"
    ```
 
 ### 🎯 使用方法
@@ -120,8 +125,8 @@
 在QQ群或私聊中发送以下命令：
 
 - `漫画帮助` - 查看所有可用命令
-- `漫画下载 [漫画ID]` - 下载指定ID的漫画
-- `发送 [漫画ID]` - 发送已下载的漫画文件
+- `漫画下载 350234` - 下载指定ID的漫画
+- `发送 350234` - 发送已下载的漫画文件
 - `查询已下载漫画` - 查看已下载漫画列表
 
 ---
@@ -131,7 +136,7 @@
 ### 📋 环境要求
 
 - 🐍 Python >= 3.7
-- 🐧 Ubuntu 18.04 或更高版本 / Debian 10+
+- 🐧 **Ubuntu 18.04 或更高版本（推荐）**
 - 💾 至少 2GB 可用存储空间
 - 🌐 稳定的网络连接
 - 🔧 系统管理员权限
@@ -140,7 +145,17 @@
 
 #### 一、获取必要的文件
 
-1. **创建项目目录**
+1. **安装 Git（如未安装）**
+   ```bash
+   # 更新包管理器并安装 Git
+   sudo apt update
+   sudo apt install git -y
+   
+   # 验证安装
+   git --version
+   ```
+
+2. **创建项目目录**
    ```bash
    # 创建项目文件夹
    sudo mkdir -p /opt/mangabot
@@ -148,7 +163,7 @@
    cd /opt/mangabot
    ```
 
-2. **使用 Git 克隆项目**
+3. **使用 Git 克隆项目**
    ```bash
    # 使用 Git 克隆项目到当前目录
    git clone https://github.com/your-repo/JMComicBot.git .
@@ -201,10 +216,6 @@
    # NapCat WebSocket 服务配置
    NAPCAT_WS_URL=ws://localhost:6099/wsapi
    
-   # Flask HTTP 服务配置
-   FLASK_HOST=0.0.0.0
-   FLASK_PORT=20010
-   
    # 漫画下载路径
    MANGA_DOWNLOAD_PATH=/var/lib/mangabot/downloads
    ```
@@ -216,19 +227,55 @@
    sudo chown $USER:$USER /var/lib/mangabot/downloads
    ```
 
-#### 四、系统服务配置
+#### 四、系统服务配置（可选）
 
-1. **安装系统服务**
+> **💡 重要提示**：系统服务配置是可选的，仅在以下情况下需要：
+> - 需要在服务器上24小时运行机器人
+> - 需要开机自动启动功能
+> - 需要自动故障恢复和重启
+> 
+> **如果只是临时使用或测试，可以直接跳过此步骤，使用手动启动方式即可。**
+
+1. **创建系统服务用户**
    ```bash
-   # 给安装脚本执行权限
-   chmod +x install_linux_service.sh
+   # 创建专用用户
+   sudo useradd -r -s /bin/false mangabot
    
-   # 运行安装脚本（需要root权限）
-   sudo ./install_linux_service.sh
+   # 设置目录权限
+   sudo chown -R mangabot:mangabot /opt/mangabot
+   sudo chown -R mangabot:mangabot /var/lib/mangabot
    ```
 
-2. **启动服务**
+2. **创建系统服务文件**
    ```bash
+   # 创建服务文件
+   sudo nano /etc/systemd/system/mangabot.service
+   ```
+   
+   添加以下内容：
+   ```ini
+   [Unit]
+   Description=MangaBot QQ Robot
+   After=network.target
+   
+   [Service]
+   Type=simple
+   User=mangabot
+   WorkingDirectory=/opt/mangabot
+   Environment=PATH=/opt/mangabot/venv/bin
+   ExecStart=/opt/mangabot/venv/bin/python bot.py
+   Restart=always
+   RestartSec=10
+   
+   [Install]
+   WantedBy=multi-user.target
+   ```
+
+3. **配置系统服务**
+   ```bash
+   # 重新加载系统服务
+   sudo systemctl daemon-reload
+   
    # 启动服务
    sudo systemctl start mangabot
    
@@ -272,63 +319,80 @@ sudo journalctl -u mangabot -f
 
 ---
 
-## 📱 Android 部署
+## 📱 Android 部署（使用 proot + Ubuntu）
 
 ### 📋 环境要求
 
-- 📱 Android 7.0+ 系统
-- 💾 至少 2GB 可用存储空间
+- 📱 **Android 7.0+ 系统（推荐）**
+- 💾 至少 4GB 可用存储空间（Ubuntu系统需要更多空间）
 - 🐍 Python >= 3.7
 - 🌐 稳定的网络连接
 
 ### 🚀 部署步骤
 
-#### 一、安装 Termux 环境
+#### 一、安装 Termux 和 proot
 
 1. **安装 Termux**
    - 从 F-Droid 或 Google Play 安装 Termux
    - 或者下载 Termux APK 文件手动安装
 
-2. **配置 Termux**
+2. **配置 Termux 并安装 proot**
    ```bash
    # 更新包管理器
    pkg update && pkg upgrade
    
+   # 安装 proot-distro（更简单的Ubuntu安装方式）
+   pkg install proot-distro -y
+   ```
+
+#### 二、安装 Ubuntu 系统
+
+1. **使用 proot-distro 安装 Ubuntu**
+   ```bash
+   # 安装 Ubuntu 系统
+   proot-distro install ubuntu
+   
+   # 登录 Ubuntu 系统
+   proot-distro login ubuntu
+   ```
+
+2. **配置 Ubuntu 系统**
+   ```bash
+   # 更新包管理器
+   apt update && apt upgrade -y
+   
    # 安装必要工具
-   pkg install python git wget curl
+   apt install sudo vim git python3-dev python3-venv build-essential screen curl python3-pip
    ```
 
-#### 二、获取必要的文件
+#### 四、在 Ubuntu 中部署机器人
 
-1. **创建项目目录**
+1. **获取项目文件**
    ```bash
-   # 创建项目文件夹
-   mkdir -p ~/JMComicBot
-   cd ~/JMComicBot
+   # 创建项目目录（简化目录结构）
+   mkdir -p ~/mangabot
+   cd ~/mangabot
+   
+   # 使用Git克隆项目
+   git clone https://github.com/AAA-huan/JM-QQ-Bot.git .
    ```
 
-2. **使用 Git 克隆项目**
+2. **安装 Python 依赖**
    ```bash
-   # 使用 Git 克隆项目
-   git clone https://github.com/your-repo/JMComicBot.git
-   cd JMComicBot
-   ```
+   # 确认Python版本
+   python3 --version
 
-#### 三、环境配置
-
-1. **安装 Python 依赖**
-   ```bash
    # 安装项目依赖
-   pip install -r requirements.txt
+   pip3 install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple --upgrade
    ```
 
-2. **配置环境变量**
+3. **配置环境变量**
    ```bash
    # 复制配置文件
    cp .env.example .env
    
    # 编辑配置
-   nano .env
+   vim .env
    ```
 
    修改以下配置：
@@ -336,56 +400,71 @@ sudo journalctl -u mangabot -f
    # NapCat WebSocket 服务配置
    NAPCAT_WS_URL=ws://localhost:6099/wsapi
    
-   # Flask HTTP 服务配置（使用Termux可访问的端口）
-   FLASK_HOST=127.0.0.1
-   FLASK_PORT=8080
-   
-   # 漫画下载路径
+   # 漫画下载路径（使用相对路径，简化目录结构）
    MANGA_DOWNLOAD_PATH=./downloads
    ```
 
-#### 四、配置 NapCat（Android版）
+4. **创建数据目录**
+   ```bash
+   # 创建下载目录（在当前项目目录下）
+   mkdir -p downloads
+   chmod 755 downloads
+   ```
 
-1. **安装 NapCat Android 版**
-   - 下载 NapCat Android APK 并安装
-   - 启动并登录 QQ 账号
+#### 五、配置 NapCat
+
+1. **安装 NapCat**
+   ```bash
+   # 安装 NapCat
+   curl -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh
+   sudo bash napcat.sh --docker n --cli y
+
+   # 打开NapCat
+   sudo napcat
+   ```
 
 2. **配置 WebSocket**
+   - 用方向键和回车键选择
    - 在 NapCat 中配置 WebSocket 服务端
    - 确保端口与机器人配置一致
+   - 配置完成后启动 NapCat
 
-#### 五、启动机器人
+#### 六、启动机器人
 
-1. **手动启动**
+1. **在 Ubuntu 环境中启动**
    ```bash
    # 进入项目目录
-   cd ~/JMComicBot
+   cd /opt/mangabot
    
    # 启动机器人
-   python bot.py
+   python3 bot.py
+
+   # 停止机器人
+   CTRL + C
    ```
 
-2. **使用启动脚本**
-   ```bash
-   # 给脚本执行权限
-   chmod +x start.sh
-   
-   # 启动机器人
-   ./start.sh
-   ```
 
 ### 🎯 使用方法
 
-#### 在 Termux 中管理机器人
+#### 启动和进入 Ubuntu 环境
 ```bash
-# 查看进程
+# 登录 Ubuntu 系统
+proot-distro login ubuntu
+
+# 在Ubuntu中启动机器人
+cd ~/mangabot && python3 bot.py
+```
+
+#### 进程管理
+```bash
+# 查看机器人进程
 ps aux | grep python
 
-# 停止机器人（如果有多个Python进程，确认PID）
-kill <pid>
+# 停止机器人
+pkill -f "python3 bot.py"
 
-# 重新启动
-cd ~/JMComicBot && python bot.py
+# 退出Ubuntu环境
+exit
 ```
 
 #### QQ命令使用
@@ -407,14 +486,6 @@ cd ~/JMComicBot && python bot.py
 # ======================
 # WebSocket 服务地址
 NAPCAT_WS_URL=ws://localhost:6099/wsapi
-
-# ======================
-# Flask 服务配置
-# ======================
-# 服务监听地址
-FLASK_HOST=127.0.0.1
-# 服务监听端口
-FLASK_PORT=8000
 
 # ======================
 # 下载配置
@@ -473,11 +544,8 @@ A: 在禁漫天堂网站浏览漫画时，URL中的数字即为漫画ID。
 #### Q: 服务启动失败？
 A: 检查系统日志：`sudo journalctl -u mangabot -n 50`
 
-#### Q: 权限问题？
-A: 确保目录权限正确：`sudo chown -R mangabot:mangabot /var/lib/mangabot`
-
 #### Q: 端口被占用？
-A: 修改 `.env` 中的 `FLASK_PORT` 或停止占用端口的进程。
+A: 停止占用端口的进程或检查NapCat WebSocket端口配置。
 
 ### Android 环境问题
 
@@ -517,7 +585,7 @@ A: 使用 Termux 的 wakelock 功能或考虑使用 Termux:Boot。
 
 ## 📄 许可证
 
-本项目仅供学习和研究使用。使用本工具时，请遵守相关法律法规，尊重原创内容版权。
+本项目仅供学习和研究使用。使用本工具时，请遵守相关法律法规。
 
 ## ⚠️ 免责声明
 

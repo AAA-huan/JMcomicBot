@@ -10,12 +10,14 @@ from typing import Any, Callable, Dict, List, Optional, Union
 import jmcomic
 import websocket
 from dotenv import load_dotenv
-from flask import Flask, abort, jsonify, request
 
 
 class MangaBot:
     def __init__(self) -> None:
         """初始化MangaBot机器人，添加跨平台兼容性检查"""
+        # 配置日志（先初始化日志系统）
+        self._setup_logger()
+
         # 检查操作系统兼容性
         self._check_platform_compatibility()
 
@@ -26,27 +28,18 @@ class MangaBot:
         self.config: Dict[str, Union[str, int]] = {
             "MANGA_DOWNLOAD_PATH": os.getenv("MANGA_DOWNLOAD_PATH", "./downloads"),
             "NAPCAT_WS_URL": os.getenv("NAPCAT_WS_URL", "ws://localhost:8080/qq"),
-            "FLASK_HOST": os.getenv("FLASK_HOST", "0.0.0.0"),
-            "FLASK_PORT": int(os.getenv("FLASK_PORT", "20010")),
             "API_TOKEN": os.getenv("API_TOKEN", ""),
         }
 
         # 初始化属性
-        self.app: Flask = Flask(__name__)
         self.ws: Optional[websocket.WebSocketApp] = None  # WebSocket连接对象
         self.SELF_ID: Optional[str] = None  # 存储机器人自身的QQ号
         self.downloading_mangas: Dict[str, bool] = (
             {}
         )  # 跟踪正在下载的漫画 {manga_id: True}
 
-        # 配置日志
-        self._setup_logger()
-
         # 创建下载目录
         os.makedirs(self.config["MANGA_DOWNLOAD_PATH"], exist_ok=True)
-
-        # 注册Flask路由
-        self._register_routes()
 
     def _check_platform_compatibility(self) -> None:
         """检查操作系统兼容性，确保在Linux和Windows上都能正常运行"""
@@ -235,40 +228,6 @@ class MangaBot:
 
         root_logger.addHandler(root_console_handler)
         root_logger.addHandler(root_file_handler)
-
-    def _register_routes(self):
-        # Flask路由，用于接收HTTP事件（如果NapCat配置了HTTP上报）
-        @self.app.route("/", methods=["POST"])
-        @self._check_token()
-        def handle_http_event():
-            data = request.json
-            self.logger.info(f"收到HTTP事件: {data}")
-            self.handle_event(data)
-            return jsonify({"status": "ok"})
-
-    def _check_token(self) -> Callable:
-        """检查Token的装饰器"""
-
-        def decorator(f: Callable) -> Callable:
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
-                # 如果配置了Token验证
-                if self.config["API_TOKEN"]:
-                    # 从请求头获取Token
-                    token: Optional[str] = request.headers.get("Authorization")
-                    if token and token.startswith("Bearer "):
-                        token = token[7:]  # 去掉 'Bearer ' 前缀
-                    else:
-                        token = request.headers.get("token")
-
-                    # 验证Token
-                    if token != self.config["API_TOKEN"]:
-                        self.logger.warning("Token验证失败")
-                        abort(401, description="Token验证失败")
-                return f(*args, **kwargs)
-
-            return wrapper
-
-        return decorator
 
     def send_message(
         self,
@@ -965,18 +924,9 @@ class MangaBot:
             error_msg = f"❌ 发送失败：{str(e)}\n快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
             self.send_message(user_id, error_msg, group_id, private)
 
-    def start_flask(self) -> None:
-        """启动Flask服务的函数"""
-        host = str(self.config["FLASK_HOST"])
-        port = int(self.config["FLASK_PORT"])
-        self.app.run(host=host, port=port, debug=False)
-
     def run(self):
         # 运行机器人主函数
         self.logger.info("JMComic下载机器人启动中...")
-
-        # 启动Flask服务线程
-        threading.Thread(target=self.start_flask, daemon=True).start()
 
         # 连接WebSocket
         self.connect_websocket()

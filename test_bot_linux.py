@@ -38,7 +38,6 @@ class TestMangaBotLinuxCompatibility(unittest.TestCase):
         
         # 创建MangaBot实例
         with patch('bot.load_dotenv'), \
-             patch('bot.Flask'), \
              patch('bot.logging.getLogger'), \
              patch('os.makedirs'):
             
@@ -54,7 +53,6 @@ class TestMangaBotLinuxCompatibility(unittest.TestCase):
         
         # 创建MangaBot实例
         with patch('bot.load_dotenv'), \
-             patch('bot.Flask'), \
              patch('bot.logging.getLogger'), \
              patch('os.makedirs'):
             
@@ -70,7 +68,6 @@ class TestMangaBotLinuxCompatibility(unittest.TestCase):
         
         # 创建MangaBot实例，应该抛出异常
         with patch('bot.load_dotenv'), \
-             patch('bot.Flask'), \
              patch('bot.logging.getLogger'), \
              patch('os.makedirs'), \
              self.assertRaises(OSError):
@@ -85,7 +82,6 @@ class TestMangaBotLinuxCompatibility(unittest.TestCase):
         
         # 创建MangaBot实例，应该抛出异常
         with patch('bot.load_dotenv'), \
-             patch('bot.Flask'), \
              patch('bot.logging.getLogger'), \
              patch('os.makedirs'), \
              self.assertRaises(RuntimeError):
@@ -99,10 +95,9 @@ class TestMangaBotLinuxCompatibility(unittest.TestCase):
         
         # 创建MangaBot实例
         with patch('bot.load_dotenv'), \
-             patch('bot.Flask'), \
              patch('bot.logging.getLogger'), \
              patch('os.makedirs'), \
-             patch('bot.subprocess.run') as mock_subprocess:
+             patch('subprocess.run') as mock_subprocess:
             
             # 模拟subprocess.run返回成功
             mock_subprocess.return_value.returncode = 0
@@ -119,7 +114,6 @@ class TestMangaBotLinuxCompatibility(unittest.TestCase):
         
         # 创建MangaBot实例
         with patch('bot.load_dotenv'), \
-             patch('bot.Flask'), \
              patch('bot.logging.getLogger') as mock_get_logger, \
              patch('os.makedirs'), \
              patch('bot.logging.StreamHandler'), \
@@ -150,16 +144,13 @@ class TestMangaBotLinuxCompatibility(unittest.TestCase):
         
         # 创建MangaBot实例
         with patch('bot.load_dotenv') as mock_load_dotenv, \
-             patch('bot.Flask'), \
              patch('bot.logging.getLogger'), \
              patch('os.makedirs'), \
              patch.dict('os.environ', {
-                 'MANGA_DOWNLOAD_PATH': '/home/user/downloads',
-                 'NAPCAT_WS_URL': 'ws://localhost:8080/qq',
-                 'FLASK_HOST': '0.0.0.0',
-                 'FLASK_PORT': '20010',
-                 'API_TOKEN': 'test_token'
-             }):
+                'MANGA_DOWNLOAD_PATH': '/home/user/downloads',
+                'NAPCAT_WS_URL': 'ws://localhost:8080/qq',
+                'API_TOKEN': 'test_token'
+            }):
             
             bot = MangaBot()
             
@@ -168,7 +159,6 @@ class TestMangaBotLinuxCompatibility(unittest.TestCase):
             
             # 验证配置正确设置
             self.assertEqual(bot.config['MANGA_DOWNLOAD_PATH'], '/home/user/downloads')
-            self.assertEqual(bot.config['FLASK_PORT'], 20010)
 
 
 class TestStartScript(unittest.TestCase):
@@ -200,7 +190,6 @@ class TestStartScript(unittest.TestCase):
             # 检查关键依赖
             self.assertIn('websocket-client', content)
             self.assertIn('jmcomic', content)
-            self.assertIn('flask', content)
             self.assertIn('platformdirs', content)  # 跨平台路径处理
 
 

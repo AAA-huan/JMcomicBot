@@ -1,68 +1,7 @@
-# NapCat 配置说明
-# 本文件提供了与NapCat对接的配置指南
+# 本文件提供了与NapCat对接的配置
 
-# 一、NapCat基本介绍
-# NapCat是一个基于NTQQ协议的高性能QQ机器人框架，提供标准的OneBot API接口
-# 支持WebSocket和HTTP两种通信方式，可与本JMComic下载机器人无缝对接
 
-# 二、NapCat配置步骤
-
-## 1. 安装NapCat
-# 请从官方渠道下载并安装NapCat
-# 官方地址: https://github.com/NapNeko/NapCatQQ
-
-## 2. 配置WebSocket服务（推荐）
-# 1) 启动NapCat并登录QQ
-# 2) 访问WebUI界面：http://localhost:6099/webui?token=你的token
-#    (token可在启动日志中找到)
-# 3) 进入「网络配置」
-# 4) 点击「新建」，创建WebSocket服务
-# 5) 配置如下：
-#    - 名称: JMComic_Bot
-#    - 类型: WebSocket服务端
-#    - 地址: 0.0.0.0
-#    - 端口: 8080
-#    - 路径: /qq
-#    - 启用Token: 可选，建议启用
-#    - Token: 自定义token（如果启用）
-# 6) 保存配置
-
-## 3. 确保机器人已启动
-# 1) 先启动NapCat的WebSocket服务
-# 2) 再启动JMComic机器人（作为客户端连接到NapCat）
-# 3) 检查连接状态是否显示为「已连接」
-
-## 3. 配置HTTP上报（可选）
-# 如果需要使用HTTP方式接收事件，可按以下步骤配置：
-# 1) 在WebUI的「网络配置」中点击「新建」
-# 2) 配置如下：
-#    - 名称: JMComic_HTTP
-#    - 类型: HTTP上报
-#    - URL: http://localhost:20010/
-#    - 启用Token: 可选
-#    - Token: 自定义token（如果启用）
-#    - 上报事件: 勾选消息事件、通知事件等
-# 3) 保存配置
-
-# 三、与JMComic机器人对接注意事项
-# 1. WebSocket对接
-#    - 现在NapCat作为WebSocket服务端运行，请确保JMComic机器人配置为WebSocket客户端模式
-#    - 确保机器人的WebSocket客户端连接地址与NapCat的服务配置匹配
-#    - 推荐配置：NapCat监听在8080端口，路径/qq
-
-# 2. HTTP对接
-#    - 确保HTTP上报URL与.env文件中的FLASK_HOST:FLASK_PORT匹配
-#    - 如启用了Token验证，需要在Flask路由中添加token验证
-
-# 3. 推荐配置
-#    - WebSocket通信：稳定性更好，推荐使用
-#    - HTTP上报：作为备用方案
-
-# 4. 安全建议
-#    - 生产环境请启用Token验证
-#    - 限制访问IP（如仅允许本地访问）
-
-# WebSocket 服务配置（推荐）
+# WebSocket 服务配置
   - type: websocket-server
     # 监听地址
     host: 0.0.0.0
@@ -73,13 +12,6 @@
     # 是否启用访问令牌（用于认证）
     token: ""
 
-# 事件上报配置
-上报:
-  # HTTP 上报（将事件通过HTTP POST发送到指定URL）
-  - type: http
-    url: "http://localhost:20010/"
-    # 是否启用上报令牌（用于认证）
-    token: ""
 
 # 默认中间件配置
 default-middlewares &default:
