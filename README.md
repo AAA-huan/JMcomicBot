@@ -534,6 +534,9 @@ Ctrl+C
 
       **配置NapCat配置文件：**
    ```bash
+    # 复制NapCat配置示例
+    cp napcat_config_example.yml napcat_config.yml
+    
    # 使用编辑器打开配置文件
    vim napcat_config.yml
    ```
