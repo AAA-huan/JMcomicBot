@@ -254,7 +254,8 @@ python bot.py
    cp .env.example .env
    
    # 复制NapCat配置示例
-   cp napcat_config_example.yml napcat_config.yml
+    cp napcat_config_example.yml napcat_config.yml
+    
    ```
 
 2. **编辑配置文件**
@@ -271,6 +272,21 @@ python bot.py
    
    # 漫画下载路径
    MANGA_DOWNLOAD_PATH=/var/lib/JMBot/downloads
+   ```
+
+   **配置NapCat配置文件：**
+   ```bash
+   # 使用编辑器打开配置文件
+   vim napcat_config.yml
+   ```
+
+   ```ini
+   修改以下配置
+   - `port`: WebSocket服务端口
+   - `token`: 连接验证令牌（建议修改为安全的值）
+
+   修改完成后，保存文件并退出编辑器。
+   ```
 
 3. **创建数据目录**
    ```bash
@@ -516,6 +532,20 @@ Ctrl+C
    MANGA_DOWNLOAD_PATH=./downloads
    ```
 
+      **配置NapCat配置文件：**
+   ```bash
+   # 使用编辑器打开配置文件
+   vim napcat_config.yml
+   ```
+
+   ```ini
+   修改以下配置
+   - `port`: WebSocket服务端口
+   - `token`: 连接验证令牌（建议修改为安全的值）
+
+   修改完成后，保存文件并退出编辑器。
+   ```
+
 5. **创建数据目录**
    ```bash
    # 创建下载目录（在当前项目目录下）
@@ -546,7 +576,7 @@ Ctrl+C
 1. **在 Ubuntu 环境中启动**
    ```bash
    # 进入项目目录
-   cd ~/JMBot
+   cd ~/JMBot/JM-QQ-Bot
    
    # 启动机器人
    python3 bot.py
@@ -575,7 +605,7 @@ sudo napcat
 ##### 3. 启动机器人
 ```bash
 # 进入项目目录
-cd ~/JMBot
+cd ~/JMBot/JM-QQ-Bot
 
 # 激活虚拟环境
 source venv/bin/activate
@@ -604,39 +634,6 @@ exit
 - `漫画下载 350234` - 下载指定ID的漫画
 - `发送 350234` - 发送已下载的漫画文件
 - `查询已下载漫画` - 查看已下载漫画列表
-
----
-
-## ⚙️ 配置说明
-
-### 环境变量配置
-
-编辑 `.env` 文件进行配置：
-
-```ini
-# ======================
-# NapCat 配置
-# ======================
-# WebSocket 服务地址 - 连接NapCat WebSocket服务的URL
-# 格式：ws://主机地址:端口/wsapi
-NAPCAT_WS_URL=ws://host:port/wsapi
-
-# ======================
-# 下载配置
-# ======================
-# 漫画下载存储路径 - 漫画文件下载的存储目录
-# 支持相对路径（相对于项目根目录）或绝对路径
-MANGA_DOWNLOAD_PATH=./downloads
-
-# ======================
-# 安全配置
-# ======================
-# API访问令牌 - 用于API接口的安全认证（可选但建议设置）
-# 设置后需要在NapCat中配置相同的Token进行验证
-API_TOKEN=your_secure_token_here
-
-```
-
 
 ---
 
