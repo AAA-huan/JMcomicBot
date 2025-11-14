@@ -26,11 +26,12 @@ class MangaBot:
 
         # 初始化配置
         # 优先使用NAPCAT_TOKEN，如果未设置则使用ACCESS_TOKEN作为备用，最后使用API_TOKEN保持兼容性
-        token = os.getenv("NAPCAT_TOKEN", "")
+        # 按优先级顺序：NAPCAT_TOKEN > ACCESS_TOKEN > API_TOKEN
+        token = os.getenv("NAPCAT_TOKEN", "")  # 最高优先级：NAPCAT_TOKEN
         if not token:
-            token = os.getenv("ACCESS_TOKEN", "")
+            token = os.getenv("ACCESS_TOKEN", "")  # 第二优先级：ACCESS_TOKEN
         if not token:
-            token = os.getenv("API_TOKEN", "")
+            token = os.getenv("API_TOKEN", "")  # 最低优先级：API_TOKEN (保持向后兼容)
             
         self.config: Dict[str, Union[str, int]] = {
             "MANGA_DOWNLOAD_PATH": os.getenv("MANGA_DOWNLOAD_PATH", "./downloads"),
