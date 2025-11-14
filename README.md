@@ -646,10 +646,10 @@ Ctrl+C
    vim napcat_config.yml
    ```
 
-   ```ini
-   修改以下配置
-   - `port`: WebSocket服务端口
-   - `access-token`: 连接验证令牌（建议修改为安全的值，与.env中的ACCESS_TOKEN保持一致）
+y   ```ini
+   确保以下配置正确：
+   - `port`: WebSocket服务端口与.env文件中的端口保持一致
+   - `token`和`access-token`: 与.env文件中的NAPCAT_TOKEN保持一致
 
    修改完成后，保存文件并退出编辑器。
    ```
@@ -684,13 +684,13 @@ Ctrl+C
 1. **在 Ubuntu 环境中启动**
    ```bash
    # 进入项目目录
-cd ~/JMBot
+   cd ~/JMBot
 
-# 启动机器人
-python3 bot.py
+   # 启动机器人
+   python3 bot.py
 
    # 停止机器人
-   ctrl + C
+   Ctrl+C
    ```
 
 #### 🔄 六、常态化启动机器人
