@@ -100,6 +100,9 @@ copy .env.example .env
 
 # 复制NapCat配置示例
 copy napcat_config_example.yml napcat_config.yml
+
+# 复制漫画下载配置示例
+copy option_example.yml option.yml
 ```
 
 ##### 2. 编辑配置文件
@@ -315,6 +318,8 @@ python bot.py
    # 复制NapCat配置示例
    cp napcat_config_example.yml napcat_config.yml
     
+   # 复制漫画下载配置示例
+   cp option_example.yml option.yml
    ```
 
 2. **编辑配置文件**
@@ -430,10 +435,10 @@ python bot.py
    # 启动服务
 sudo systemctl start JMBot
 
-# 设置开机自启
+#### 设置开机自启
 sudo systemctl enable JMBot
 
-# 查看服务状态
+##### 查看服务状态
 sudo systemctl status JMBot
    ```
 
@@ -599,6 +604,9 @@ Ctrl+C
 
 4. **配置环境变量**
    ```bash
+   # 复制漫画下载配置
+   cp option_example.yml option.yml
+
    # 复制配置文件
    cp .env.example .env
    
