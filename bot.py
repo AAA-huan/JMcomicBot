@@ -13,10 +13,15 @@ from dotenv import load_dotenv
 
 
 class MangaBot:
+    # 机器人版本号
+    VERSION = "2.0.0"
+    
     def __init__(self) -> None:
         """初始化MangaBot机器人，添加跨平台兼容性检查"""
         # 配置日志（先初始化日志系统）
         self._setup_logger()
+        # 记录启动信息，包含版本号
+        logging.info(f"JMComic QQ机器人 版本 {self.VERSION} 启动中...")
 
         # 检查操作系统兼容性
         self._check_platform_compatibility()
@@ -535,6 +540,9 @@ class MangaBot:
         # 查询指定漫画ID是否已下载
         elif cmd in ["查询漫画", "漫画查询", "checkmanga"]:
             self.query_manga_existence(user_id, args, group_id, private)
+        # 漫画版本查询命令
+        elif cmd in ["漫画版本", "版本", "version"]:
+            self.send_version_info(user_id, group_id, private)
         # 测试命令，显示当前SELF_ID状态
         elif cmd in ["测试id", "testid", "selfid"]:
             # 测试命令，显示机器人当前的SELF_ID状态
@@ -692,7 +700,7 @@ class MangaBot:
 
     def send_help(self, user_id, group_id, private):
         # 发送帮助信息
-        help_text = "📚 本小姐的帮助 📚\n\n"
+        help_text = f"📚 本小姐的帮助 📚(版本{self.VERSION})\n\n"
 
         # 群聊中添加@说明
         if not private:
@@ -703,15 +711,25 @@ class MangaBot:
         help_text += "- 发送 <漫画ID>：发送指定ID的已下载漫画（只支持PDF格式）\n"
         help_text += "- 查询漫画 <漫画ID>：查询指定ID的漫画是否已下载\n"
         help_text += "- 漫画列表：查询已下载的所有漫画\n"
-        help_text += "- 漫画帮助：显示此帮助信息\n\n"
+        help_text += "- 漫画帮助：显示此帮助信息\n"
+        help_text += "- 漫画版本：显示机器人当前版本信息\n\n"
         help_text += "⚠️ 注意事项：\n"
         help_text += "- 命令与漫画ID之间记得加空格\n"
         help_text += "- 请确保输入正确的漫画ID\n"
         help_text += "- 下载过程可能需要一些时间，请耐心等待\n"
         help_text += "- 下载的漫画将保存在配置的目录中\n"
         help_text += "- 发送漫画前请确保该漫画已成功下载并转换为PDF格式\n"
-        help_text += "- 当前版本只支持发送PDF格式的漫画文件"
+        help_text += f"- 当前版本只支持发送PDF格式的漫画文件\n\n" + f"🔖 当前版本: {self.VERSION}"
         self.send_message(user_id, help_text, group_id, private)
+        
+    def send_version_info(self, user_id, group_id, private):
+        # 发送版本信息
+        version_text = f"🔖 JMComic QQ机器人\n" \
+                      f"📌 当前版本: {self.VERSION}\n" \
+                      f"💻 运行平台: {platform.system()} {platform.release()}\n" \
+                      f"✨ 感谢使用JMComic QQ机器人！\n" \
+                      f"📚 输入'漫画帮助'查看所有可用命令" 
+        self.send_message(user_id, version_text, group_id, private)
 
     def handle_manga_download(self, user_id, manga_id, group_id, private):
         # 处理漫画下载
