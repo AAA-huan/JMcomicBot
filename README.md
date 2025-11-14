@@ -113,8 +113,8 @@ copy option_example.yml option.yml
 # NapCat WebSocket 服务配置
 # ======================
 # WebSocket 服务地址 - 连接NapCat WebSocket服务的URL
-# 把host和port替换为你实际的NapCat WebSocket服务地址
-NAPCAT_WS_URL=ws://host:port/qq
+# 把port替换为你实际的NapCat WebSocket服务端口
+NAPCAT_WS_URL=ws://localhost:port/qq
 
 # ======================
 # 下载配置
@@ -334,9 +334,9 @@ python bot.py
    修改以下配置：
    ```ini
    # NapCat WebSocket 服务配置
-   # 把host和port替换为你实际的NapCat WebSocket服务地址
+   # 把port替换为你实际的NapCat WebSocket服务端口
    # 系统会自动将token添加到连接URL中，无需手动添加
-   NAPCAT_WS_URL=ws://host:port/qq
+   NAPCAT_WS_URL=ws://localhost:port/qq
    
    # 漫画下载路径
    MANGA_DOWNLOAD_PATH=/var/lib/JMBot/downloads
@@ -625,9 +625,9 @@ Ctrl+C
    修改以下配置：
    ```ini
    # NapCat WebSocket 服务配置
-   # 把host和port替换为你实际的NapCat WebSocket服务地址
+   # 把port替换为你实际的NapCat WebSocket服务端口
    # 系统会自动将token添加到连接URL中，无需手动添加
-   NAPCAT_WS_URL=ws://host:port/qq
+   NAPCAT_WS_URL=ws://localhost:port/qq
    
    # 漫画下载路径（使用相对路径，简化目录结构）
    MANGA_DOWNLOAD_PATH=./downloads
@@ -754,14 +754,14 @@ exit
 **解决方案：**
 - 检查 NapCat 是否正常运行
 - 确认 `.env` 文件中的 `NAPCAT_WS_URL` 配置正确
-- 检查防火墙设置，确保端口 6099 未被阻止
+- 检查防火墙设置，确保端口 `port` 未被阻止
 - 查看日志文件获取详细错误信息
 
 #### 2. WebSocket 连接失败
 **问题描述：** 无法连接到 NapCat WebSocket 服务
 **解决方案：**
 - 确认 NapCat 服务已启动并监听正确端口
-- 检查 `NAPCAT_WS_URL` 格式是否正确（ws://host:port/qq）
+- 检查 `NAPCAT_WS_URL` 格式是否正确（ws://localhost:port/qq）
 - 验证网络连接和防火墙设置
 - 如果启用了token验证，请确保.env文件中的`NAPCAT_TOKEN`与NapCat配置中的token和access-token字段值完全一致
 - 检查WebSocket路径是否正确设置为`/qq`
@@ -841,10 +841,6 @@ exit
 
 ---
 
-## 🤝 贡献指南
-
-我们欢迎任何形式的贡献！如果您想为项目做出贡献，请遵循以下指南：
-
 ### 如何贡献
 
 1. **报告问题**
@@ -854,26 +850,6 @@ exit
 2. **功能建议**
    - 提出新的功能想法或改进建议
    - 描述使用场景和预期效果
-
-
-### 开发环境搭建
-
-```bash
-# 1. 克隆项目
-git clone https://github.com/AAA-huan/JM-QQ-Bot.git
-cd JM-QQ-Bot
-
-# 2. 创建虚拟环境
-python -m venv venv
-source venv/bin/activate  # Linux/Mac
-# 或 venv\Scripts\activate  # Windows
-
-# 3. 安装开发依赖
-pip install -r requirements.txt
-
-# 4. 运行测试
-python bot.py
-```
 
 ## 📄 许可证
 
