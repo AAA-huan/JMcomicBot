@@ -11,14 +11,14 @@
 
 **平台状态说明：**
 - ✅ **Windows系统**：已稳定可用
-- 🧪 **Linux系统**：正在测试中，暂不推荐生产环境使用
-- 🧪 **Android系统**：正在测试中，暂不推荐生产环境使用
+- 🧪 **Linux系统**：安卓模仿的是Linux，理论可行但我没有Linux无法测试，有愿意帮助的人请按照教程部署之后把问题反馈到issue里感谢
+- ✅ **Android系统**：已稳定可用
 
-> **注意**：Linux和Android平台的部署文档目前为测试版本，可能存在兼容性问题，请等待稳定版本发布后再进行部署。
+> **注意**：Linux平台的部署文档目前为测试版本，可能存在兼容性问题，请等待稳定版本发布后再进行部署。
 
 > ✨ **智能漫画下载助手** - 基于 NapCat 的高性能 QQ 机器人，专为漫画爱好者设计
 
-一个功能强大的 QQ 机器人，能够帮助用户轻松下载、管理和分享禁漫天堂的漫画内容。支持多平台部署，提供直观的交互界面和丰富的功能特性。
+一个功能强大的 QQ 机器人，能够帮助用户轻松下载、管理和分享禁漫天堂的漫画内容，支持多平台部署。
 
 
 ### 🎯 核心功能
@@ -88,8 +88,8 @@ pip --version
 
 ##### 3. 安装项目依赖
 ```bash
-# 使用 pip 安装依赖（使用阿里云镜像加速）
-pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple --upgrade
+# 使用 pip 安装依赖
+pip install -r requirements.txt  --upgrade
 ```
 
 #### 🔧 第三步：配置机器人
@@ -110,6 +110,8 @@ copy option_example.yml option.yml
 打开 `.env` 文件，修改以下关键配置：
 
 ```ini
+# 只需要修改port与NAPCAT_TOKEN即可
+
 # ======================
 # NapCat WebSocket 服务配置
 # ======================
@@ -146,6 +148,8 @@ ACCESS_TOKEN=
 
 1. **配置 WebSocket 服务**
    ```yaml
+   # 只需要修改port与token即可
+
    # WebSocket 服务配置
      - type: websocket-server
        # 监听地址（通常保持默认即可）
@@ -157,7 +161,7 @@ ACCESS_TOKEN=
        # 是否启用访问令牌（用于认证）
        # 此token需要与.env文件中的NAPCAT_TOKEN保持一致
        # 留空表示不启用Token验证
-       token: "your_secure_token_here"
+       token: ""
    ```
 
 2. **配置中间件的访问令牌**
@@ -166,7 +170,7 @@ ACCESS_TOKEN=
    default-middlewares &default:
      # 与.env文件中的NAPCAT_TOKEN或ACCESS_TOKEN保持一致
      # 留空表示不启用Token验证
-     access-token: 'your_secure_token_here'
+     access-token: ''
    ```
 
 3. **重要配置说明**：
@@ -309,7 +313,7 @@ python bot.py
 3. **安装依赖包**
    ```bash
    # 安装项目依赖
-   pip install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple --upgrade
+   pip install -r requirements.txt --upgrade
    ```
 
 #### 三、配置机器人
@@ -333,19 +337,37 @@ python bot.py
    ```
    
    修改以下配置：
-   ```ini
+```ini
+   # 只需要修改port与NAPCAT_TOKEN即可
+
+   # ======================
    # NapCat WebSocket 服务配置
+   # ======================
+   # WebSocket 服务地址 - 连接NapCat WebSocket服务的URL
    # 把port替换为你实际的NapCat WebSocket服务端口
-   # 系统会自动将token添加到连接URL中，无需手动添加
    NAPCAT_WS_URL=ws://localhost:port/qq
-   
-   # 漫画下载路径
-   MANGA_DOWNLOAD_PATH=/var/lib/JMBot/downloads
-   
+
+   # ======================
+   # 下载配置
+   # ======================
+   # 漫画下载存储路径 - 漫画文件下载的存储目录
+   MANGA_DOWNLOAD_PATH=./downloads
+
+   # ======================
    # 安全配置
+   # ======================
+   # WebSocket服务令牌，与NapCat配置中的两个位置保持一致：
+   # - WebSocket服务配置部分的`token`字段
+   # - 中间件配置部分的`access-token`字段
+   # 
    # 简化配置：只需设置NAPCAT_TOKEN一个字段即可
+   # 系统会自动将token添加到WebSocket连接URL中，无需手动添加
    NAPCAT_TOKEN=""
-   ```
+
+   # 为兼容原配置保留的令牌字段（优先级低于NAPCAT_TOKEN）
+   # 如果NAPCAT_TOKEN未设置，系统会尝试使用此值
+   ACCESS_TOKEN=
+```
 
    **配置NapCat配置文件：**
    ```bash
@@ -356,22 +378,24 @@ python bot.py
    修改以下配置内容：
    
    ```yaml
+   # 只需要修改port与token即可
+
    # WebSocket 服务配置
-     - type: websocket-server
-       # 监听地址（通常保持默认即可）
-       host: 0.0.0.0
-       # 监听端口（确保与.env文件中的NAPCAT_WS_URL端口一致）
-       port: 8080
-       # 路径（必须设置为/qq，与.env文件中的NAPCAT_WS_URL路径一致）
-       path: /qq
-       # 是否启用访问令牌（用于认证）
-       # 此token需要与.env文件中的NAPCAT_TOKEN保持一致
-       token: "your_secure_token_here"
+   type: websocket-server
+      # 监听地址（通常保持默认即可）
+      host: 0.0.0.0
+      # 监听端口（确保与.env文件中的NAPCAT_WS_URL端口一致）
+      port: 8080
+      # 路径（必须设置为/qq，与.env文件中的NAPCAT_WS_URL路径一致）
+      path: /qq
+      # 是否启用访问令牌（用于认证）
+      # 此token需要与.env文件中的NAPCAT_TOKEN保持一致
+      token: ""
 
    # 默认中间件配置
    default-middlewares &default:
-     # 与.env文件中的NAPCAT_TOKEN或ACCESS_TOKEN保持一致
-     access-token: 'your_secure_token_here'
+   # 与.env文件中的NAPCAT_TOKEN或ACCESS_TOKEN保持一致
+   access-token: ''
    ```
 
    **重要配置说明**：
@@ -442,13 +466,16 @@ python bot.py
    sudo systemctl daemon-reload
    
    # 启动服务
-sudo systemctl start JMBot
+   sudo systemctl start JMBot
 
-#### 设置开机自启
-sudo systemctl enable JMBot
+   # 停止服务
+   sudo systemctl stop JMBot
 
-##### 查看服务状态
-sudo systemctl status JMBot
+   # 设置开机自启
+   sudo systemctl enable JMBot
+
+   # 查看服务状态
+   sudo systemctl status JMBot
    ```
 
 #### 五、配置 NapCat
@@ -608,7 +635,7 @@ Ctrl+C
 3. **安装 Python 依赖**
    ```bash
    # 安装项目依赖
-   pip3 install -r requirements.txt -i https://mirrors.aliyun.com/pypi/simple --upgrade
+   pip3 install -r requirements.txt --upgrade
    ```
 
 4. **配置环境变量**
@@ -618,42 +645,91 @@ Ctrl+C
 
    # 复制配置文件
    cp .env.example .env
-   
-   # 编辑配置
+
+   # 复制NapCat配置示例
+   cp napcat_config_example.yml napcat_config.yml
+   ```
+
+   **编辑配置文件**
+   ```bash
+   # 使用编辑器打开配置文件
    vim .env
    ```
 
    修改以下配置：
    ```ini
+   # 只需要修改port与NAPCAT_TOKEN即可
+
+   # ======================
    # NapCat WebSocket 服务配置
+   # ======================
+   # WebSocket 服务地址 - 连接NapCat WebSocket服务的URL
    # 把port替换为你实际的NapCat WebSocket服务端口
-   # 系统会自动将token添加到连接URL中，无需手动添加
    NAPCAT_WS_URL=ws://localhost:port/qq
-   
-   # 漫画下载路径（使用相对路径，简化目录结构）
+
+   # ======================
+   # 下载配置
+   # ======================
+   # 漫画下载存储路径 - 漫画文件下载的存储目录
    MANGA_DOWNLOAD_PATH=./downloads
-   
+
+   # ======================
    # 安全配置
+   # ======================
+   # WebSocket服务令牌，与NapCat配置中的两个位置保持一致：
+   # - WebSocket服务配置部分的`token`字段
+   # - 中间件配置部分的`access-token`字段
+   # 
    # 简化配置：只需设置NAPCAT_TOKEN一个字段即可
+   # 系统会自动将token添加到WebSocket连接URL中，无需手动添加
    NAPCAT_TOKEN=""
+
+   # 为兼容原配置保留的令牌字段（优先级低于NAPCAT_TOKEN）
+   # 如果NAPCAT_TOKEN未设置，系统会尝试使用此值
+   ACCESS_TOKEN=
    ```
 
-      **配置NapCat配置文件：**
+   **配置NapCat配置文件：**
+
    ```bash
-   # 复制NapCat配置示例
-   cp napcat_config_example.yml napcat_config.yml
-    
    # 使用编辑器打开配置文件
    vim napcat_config.yml
    ```
 
-y   ```ini
-   确保以下配置正确：
-   - `port`: WebSocket服务端口与.env文件中的端口保持一致
-   - `token`和`access-token`: 与.env文件中的NAPCAT_TOKEN保持一致
+   ```yaml
+   # 只需要修改port与token即可
 
-   修改完成后，保存文件并退出编辑器。
+   # WebSocket 服务配置
+     - type: websocket-server
+       # 监听地址（通常保持默认即可）
+       host: 0.0.0.0
+       # 监听端口（确保与.env文件中的NAPCAT_WS_URL端口一致）
+       port: 8080
+       # 路径（必须设置为/qq，与.env文件中的NAPCAT_WS_URL路径一致）
+       path: /qq
+       # 是否启用访问令牌（用于认证）
+       # 此token需要与.env文件中的NAPCAT_TOKEN保持一致
+       # 留空表示不启用Token验证
+       token: ""
    ```
+
+   **配置中间件的访问令牌**
+   ```yaml
+   # 默认中间件配置
+   default-middlewares &default:
+     # 与.env文件中的NAPCAT_TOKEN或ACCESS_TOKEN保持一致
+     # 留空表示不启用Token验证
+     access-token: ''
+   ```
+
+3. **重要配置说明**：
+   - **端口一致性**：确保`port`值与`.env`文件中`NAPCAT_WS_URL`的端口部分一致
+   - **路径设置**：`path`必须设置为`/qq`，这是机器人正常工作的必要条件
+   - **Token一致性**：如果启用token验证，必须确保以下三个位置的token值完全相同：
+     * `napcat_config.yml`中的WebSocket服务`token`字段
+     * `napcat_config.yml`中的中间件`access-token`字段
+     * `.env`文件中的`NAPCAT_TOKEN`或`ACCESS_TOKEN`字段
+   - **禁用token验证**：如果不需要身份验证，请将所有token字段都留空（""或''）
 
 5. **创建数据目录**
    ```bash
