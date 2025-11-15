@@ -1,20 +1,21 @@
 import json
 import logging
 import os
+import re
 import platform
 import sys
 import threading
 import time
+import signal
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import jmcomic
 import websocket
 from dotenv import load_dotenv
 
-
 class MangaBot:
     # 机器人版本号
-    VERSION = "2.0.2"
+    VERSION = "2.2.2"
     
     def __init__(self) -> None:
         """初始化MangaBot机器人，添加跨平台兼容性检查"""
@@ -395,7 +396,11 @@ class MangaBot:
                 on_close=self.on_close,
                 # 可选：添加额外的HTTP头进行token认证
                 header={
-                    'Authorization': f'Bearer {self.config["ACCESS_TOKEN"]}' if self.config["ACCESS_TOKEN"] else None
+                    'Authorization': (
+                        f'Bearer {self.config["ACCESS_TOKEN"]}'
+                        if self.config["ACCESS_TOKEN"]
+                        else None
+                    )
                 }
             )
 
@@ -834,6 +839,8 @@ class MangaBot:
             if manga_dir and os.path.exists(manga_dir):
                 # 从manga_dir路径中提取文件夹名称
                 folder_name = os.path.basename(manga_dir)
+                # 针对Linux环境下的napcat无法识别特殊字符的情况，把文件名中的所有特殊字符替换为下划线，并去除文件名中的空格
+                folder_name = re.sub(r'[\\/:*?"<>|[\](){}]', "_", folder_name).strip()
                 pdf_path = os.path.join(download_path, f"{folder_name}.pdf")
                 import shutil
                 import sys
@@ -947,6 +954,8 @@ class MangaBot:
                     if file_name.startswith(f"{manga_id}-") and file_name.endswith(
                         ".pdf"
                     ):
+                        # 针对Linux环境下的的napcat无法识别特殊字符的情况，把文件名中的所有特殊字符替换为下划线，并去除文件名中的空格
+                        file_name = re.sub(r'[\\/:*?"<>|[\](){}]', "_", file_name).strip()
                         pdf_path = os.path.join(download_path, file_name)
                         break
 
@@ -986,10 +995,106 @@ class MangaBot:
         while True:
             time.sleep(1)
 
+    def handle_safe_close(self) -> None:
+        """安全关闭机器人，确保所有资源都被正确释放"""
+        signal.signal(signal.SIGINT, self._safe_sigint_handler)
+
+    def _get_one_char(self) -> str:
+        """跨平台获取单个字符输入"""
+        # 检查是否为Linux系统
+        if platform.system() != "Linux":
+            # 在非Linux系统上，使用通用的输入方法
+            return input()
+        
+        # Linux系统：使用termios和tty进行原始输入
+        try:
+            import termios
+            import tty
+        except ImportError:
+            # 如果导入失败，回退到普通输入
+            return input()
+            
+        fd = sys.stdin.fileno()
+        old_settings = termios.tcgetattr(fd)
+        try:
+            tty.setraw(fd)
+            ch = sys.stdin.read(1)
+        finally:
+            termios.tcsetattr(fd, termios.TCSADRAIN, old_settings)
+        return ch
+
+    def _confirm_close(self) -> bool:
+        """询问用户是否确认关闭机器人"""
+        print("是否确认关闭JMComic下载机器人？(y/n)")
+        ch = self._get_one_char()
+        return ch.lower() == "y"
+
+    def _safe_sigint_handler(self, signum, frame) -> None:
+        """安全处理SIGINT信号"""
+        if self._confirm_close():
+            try:
+                # 关闭所有资源 - Fail Fast原则：失败就抛出异常
+                self._close_resources()
+                print("JMComic下载机器人已安全关闭")
+            except Exception as e:
+                # Fail Fast：关闭资源失败，抛出异常并退出程序
+                self.logger.error(f"关闭资源时发生严重错误: {e}")
+                print(f"关闭过程中发生严重错误，但仍将强制退出: {e}")
+                # 不继续抛出异常，而是直接退出，因为用户已经确认要关闭
+            finally:
+                # 恢复默认信号处理并重新触发信号强制退出
+                signal.signal(signal.SIGINT, signal.SIG_DFL)
+                signal.raise_signal(signal.SIGINT)
+                return
+        else:
+            # 用户取消操作程序继续运行
+            print("关闭操作被取消，程序继续运行")
+    
+    def _close_resources(self) -> None:
+        """关闭所有资源，确保程序安全退出"""
+        try:
+            self.logger.info("开始关闭JMComic下载机器人资源...")
+            
+            # 1. 关闭WebSocket连接
+            if self.ws is not None:
+                try:
+                    if self.ws.sock and self.ws.sock.connected:
+                        self.logger.info("关闭WebSocket连接...")
+                        self.ws.close()
+                        self.logger.info("WebSocket连接已成功关闭")
+                    else:
+                        self.logger.info("WebSocket连接已断开，无需关闭")
+                except Exception as ws_error:
+                    self.logger.error(f"关闭WebSocket连接时出错: {ws_error}")
+                    raise ws_error  # Fail Fast：重新抛出异常，让调用者知道关闭过程失败
+            
+            # 2. 清理下载状态
+            if self.downloading_mangas:
+                self.logger.info(f"清理正在下载的漫画任务: {list(self.downloading_mangas.keys())}")
+                self.downloading_mangas.clear()
+            
+            # 3. 重置实例状态
+            self.ws = None
+            self.SELF_ID = None
+            
+            # 4. 执行其他资源清理
+            self.logger.info("执行其他资源清理...")
+            
+            print("JMComic下载机器人已安全关闭")
+            self.logger.info("JMComic下载机器人资源关闭完成")
+            
+        except Exception as e:
+            self.logger.error(f"关闭资源时发生严重错误: {e}")
+            print(f"关闭资源时发生错误: {e}")
+            raise  # Fail Fast：重新抛出异常，让调用者知道关闭过程失败
+        
+
 
 # 如果直接运行此文件
 if __name__ == "__main__":
     # 创建机器人实例
     bot = MangaBot()
+    # 设置安全关闭机制，确保程序可以正确响应Ctrl+C信号
+    bot.handle_safe_close()
     # 运行机器人
     bot.run()
