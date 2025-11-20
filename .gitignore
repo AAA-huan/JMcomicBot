@@ -25,6 +25,7 @@ downloads/
 *.swp
 *.swo
 *~
+JMBot.code-workspace
 
 # OS
 .DS_Store
@@ -43,6 +44,7 @@ test_bot_linux.py
 # Temporary files
 *.tmp
 *.temp
+jmbot待办.txt
 
 # Configuration files
 rule.txt
