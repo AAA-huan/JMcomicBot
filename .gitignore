@@ -40,6 +40,7 @@ env/
 *.pytest_cache/
 .coverage/
 test_bot_linux.py
+test_whitelist.py
 
 # Temporary files
 *.tmp
