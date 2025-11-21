@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 class MangaBot:
     # 机器人版本号
-    VERSION = "2.3.0"
+    VERSION = "2.3.2"
     
     def _parse_id_list(self, id_string: str) -> List[str]:
         """
@@ -159,8 +159,13 @@ class MangaBot:
         else:
             ws_url = base_ws_url
             
+        # 获取下载路径配置
+        download_path = os.getenv("MANGA_DOWNLOAD_PATH", "./downloads")
+        # 将相对路径转换为绝对路径，确保父级目录引用能正确解析
+        absolute_download_path = os.path.abspath(download_path)
+        
         self.config: Dict[str, Union[str, int]] = {
-            "MANGA_DOWNLOAD_PATH": os.getenv("MANGA_DOWNLOAD_PATH", "./downloads"),
+            "MANGA_DOWNLOAD_PATH": absolute_download_path,
             "NAPCAT_WS_URL": ws_url,  # 存储完整的WebSocket URL（可能包含token）
             "NAPCAT_TOKEN": token,  # 使用NAPCAT_TOKEN作为配置键
         }
@@ -182,6 +187,7 @@ class MangaBot:
 
         # 创建下载目录
         os.makedirs(self.config["MANGA_DOWNLOAD_PATH"], exist_ok=True)
+        self.logger.info(f"下载路径设置为: {self.config['MANGA_DOWNLOAD_PATH']}")
 
     def _check_platform_compatibility(self) -> None:
         """检查操作系统兼容性，确保在Linux和Windows上都能正常运行"""
