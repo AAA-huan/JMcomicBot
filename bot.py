@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 class MangaBot:
     # 机器人版本号
-    VERSION = "2.3.2"
+    VERSION = "2.3.4"
     
     def _parse_id_list(self, id_string: str) -> List[str]:
         """
@@ -161,6 +161,9 @@ class MangaBot:
             
         # 获取下载路径配置
         download_path = os.getenv("MANGA_DOWNLOAD_PATH", "./downloads")
+        # 处理Linux系统中的波浪号(~)路径，将其扩展为用户主目录
+        if download_path.startswith('~'):
+            download_path = os.path.expanduser(download_path)
         # 将相对路径转换为绝对路径，确保父级目录引用能正确解析
         absolute_download_path = os.path.abspath(download_path)
         
