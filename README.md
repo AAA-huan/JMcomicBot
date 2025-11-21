@@ -10,9 +10,9 @@
 </div>
 
 **平台状态说明：**
-- ✅ **Windows系统**：已稳定可用
-- 🧪 **Linux系统**：安卓模仿的是Linux，理论可行但我没有Linux无法测试，有愿意帮助的人请按照教程部署之后把问题反馈到issue里感谢
-- ✅ **Android系统**：已稳定可用
+- ✅ **Windows系统**：已稳定可用    [部署教程](#📦-Windows-部署)
+- 🧪 **Linux系统**：安卓模仿的是Linux，理论可行但我没有Linux无法测试，有愿意帮助的人请按照教程部署之后把问题反馈到issue里感谢    [部署教程](#🐧-Linux-部署)
+- ✅ **Android系统**：已稳定可用     [部署教程](#📱-Android-部署-使用-proot-+-Ubuntu）)
 
 > **注意**：Linux平台的部署文档目前为测试版本，可能存在兼容性问题，请等待稳定版本发布后再进行部署。
 
@@ -28,6 +28,31 @@
 - 📚 **内容管理** - 查看和管理已下载的漫画列表
 - 📄 **格式转换** - 自动将图片转换为PDF格式，便于阅读
 - 📱 **跨平台** - 支持Windows、Linux、Android
+
+### 🔧 命令大全
+
+- `漫画帮助` - 查看帮助信息
+- `漫画下载 350234` - 下载指定ID的漫画
+- `发送漫画 350234` - 发送已下载的指定ID的漫画文件
+- `漫画列表` - 查看已下载漫画列表
+- `查询漫画 350234` - 查询指定ID的漫画是否已下载
+---
+
+## 感谢以下两个项目的贡献
+
+- [NapCat](https://github.com/NapNeko/NapCat) - 一个基于 NTQQ 协议的聊天机器人框架
+- [JMcomic](https://github.com/JMasann/JMComic) - 提供Python API访问禁漫天堂，同时支持网页端和移动端
+---
+
+## ⚠️ 免责声明
+
+本项目仅作为技术学习和研究用途，作者不对任何不当使用本工具造成的后果负责。请用户自行承担使用风险，并确保遵守所在国家或地区的相关法律法规。
+
+**重要提示：**
+- 请尊重版权，仅下载和使用您拥有合法权限的内容
+- 请勿将本项目用于商业用途
+- 请遵守您所在国家或地区的法律法规
+- 使用本工具产生的任何后果由使用者自行承担
 
 ---
 
@@ -59,7 +84,7 @@ mkdir JMBot
 cd JMBot
 
 # 使用 Git 克隆项目
-git clone https://github.com/AAA-huan/JM-QQ-Bot.git .
+git clone https://github.com/AAA-huan/JMcomicBot.git .
 # 注意：使用.参数表示将代码克隆到当前JMBot目录，不会创建额外的子目录
 ```
 
@@ -99,9 +124,6 @@ pip install -r requirements.txt  --upgrade
 # 复制环境变量示例文件
 copy .env.example .env
 
-# 复制NapCat配置示例
-copy napcat_config_example.yml napcat_config.yml
-
 # 复制漫画下载配置示例
 copy option_example.yml option.yml
 ```
@@ -136,53 +158,9 @@ MANGA_DOWNLOAD_PATH=./downloads
 # 系统会自动将token添加到WebSocket连接URL中，无需手动添加
 NAPCAT_TOKEN=""
 
-# 为兼容原配置保留的令牌字段（优先级低于NAPCAT_TOKEN）
-# 如果NAPCAT_TOKEN未设置，系统会尝试使用此值
-ACCESS_TOKEN=
 ```
 
-#### 四、配置 napcat_config.yml
-
-打开`napcat_config.yml`文件进行配置
-
-
-1. **配置 WebSocket 服务**
-   ```yaml
-   # 只需要修改port与token即可
-
-   # WebSocket 服务配置
-     - type: websocket-server
-       # 监听地址（通常保持默认即可）
-       host: 0.0.0.0
-       # 监听端口（确保与.env文件中的NAPCAT_WS_URL端口一致）
-       port: 8080
-       # 路径（必须设置为/qq，与.env文件中的NAPCAT_WS_URL路径一致）
-       path: /qq
-       # 是否启用访问令牌（用于认证）
-       # 此token需要与.env文件中的NAPCAT_TOKEN保持一致
-       # 留空表示不启用Token验证
-       token: ""
-   ```
-
-2. **配置中间件的访问令牌**
-   ```yaml
-   # 默认中间件配置
-   default-middlewares &default:
-     # 与.env文件中的NAPCAT_TOKEN或ACCESS_TOKEN保持一致
-     # 留空表示不启用Token验证
-     access-token: ''
-   ```
-
-3. **重要配置说明**：
-   - **端口一致性**：确保`port`值与`.env`文件中`NAPCAT_WS_URL`的端口部分一致
-   - **路径设置**：`path`必须设置为`/qq`，这是机器人正常工作的必要条件
-   - **Token一致性**：如果启用token验证，必须确保以下三个位置的token值完全相同：
-     * `napcat_config.yml`中的WebSocket服务`token`字段
-     * `napcat_config.yml`中的中间件`access-token`字段
-     * `.env`文件中的`NAPCAT_TOKEN`或`ACCESS_TOKEN`字段
-   - **禁用token验证**：如果不需要身份验证，请将所有token字段都留空（""或''）
-
-#### 五、配置 NapCat
+#### 第四步：配置 NapCat
 
 1. **安装 NapCat**
    - 下载并安装 NapCat：https://github.com/NapNeko/NapCatQQ
@@ -198,12 +176,11 @@ ACCESS_TOKEN=
    - 确认路径(path)为 `/qq`
    - 确认token值与.env文件中的配置一致（如果启用了验证）
 
-#### 六、启动机器人
+#### 第五步：启动机器人
 
    ```bash
    # 进入项目目录
-   cd JMBot
-   
+   # 右键点击项目文件夹，选择在powershell中打开
    # 启动机器人
    python bot.py
 
@@ -211,23 +188,23 @@ ACCESS_TOKEN=
    Ctrl+C
    ```
 
-#### 🔄 七、常态化启动
+#### 🔄 六、常态化启动
 
 ##### 1. 启动 NapCat 服务
 - 确保 NapCat 已正确安装并配置
 - 启动 NapCat 服务
 
 ##### 2. 激活虚拟环境并启动机器人
-```bash
-# 进入项目目录
-cd JMBot
+   ```bash
+   # 进入项目目录
+   # 右键点击项目文件夹，选择在powershell中打开
 
-# 激活虚拟环境
-venv\Scripts\Activate
+   # 激活虚拟环境
+   venv\Scripts\Activate
 
-# 启动机器人
-python bot.py
-```
+   # 启动机器人
+   python bot.py
+   ```
 
 ##### 3. 验证运行状态
 - 检查任务管理器是否有 `python.exe` 进程
@@ -240,15 +217,6 @@ python bot.py
 # 方法二：使用 PowerShell 命令
    ctrl + C
 ```
-
-### 🎯 使用方法
-
-在QQ群或私聊中发送以下命令：
-
-- `漫画帮助` - 查看所有可用命令
-- `漫画下载 350234` - 下载指定ID的漫画
-- `发送 350234` - 发送已下载的漫画文件
-- `查询已下载漫画` - 查看已下载漫画列表
 
 ---
 
@@ -264,7 +232,7 @@ python bot.py
 
 ### 🚀 部署步骤
 
-#### 一、获取必要的文件
+#### 第一步：获取必要的文件
 
 1. **安装 Git（如未安装）**
    ```bash
@@ -287,11 +255,11 @@ python bot.py
 3. **使用 Git 克隆项目**
    ```bash
    # 使用 Git 克隆项目到当前目录
-   git clone https://github.com/AAA-huan/JM-QQ-Bot.git .
+   git clone https://github.com/AAA-huan/JMcomicBot.git .
    # 注意：使用.参数表示将代码克隆到当前JMBot目录，不会创建额外的子目录
    ```
 
-#### 二、环境配置
+#### 第二步：环境配置
 
 1. **安装系统依赖**
    ```bash
@@ -316,15 +284,12 @@ python bot.py
    pip install -r requirements.txt --upgrade
    ```
 
-#### 三、配置机器人
+#### 第三步：配置机器人
 
 1. **复制配置文件**
    ```bash
    # 复制环境变量示例文件
    cp .env.example .env
-   
-   # 复制NapCat配置示例
-   cp napcat_config_example.yml napcat_config.yml
     
    # 复制漫画下载配置示例
    cp option_example.yml option.yml
@@ -337,7 +302,7 @@ python bot.py
    ```
    
    修改以下配置：
-```ini
+   ```ini
    # 只需要修改port与NAPCAT_TOKEN即可
 
    # ======================
@@ -363,51 +328,8 @@ python bot.py
    # 简化配置：只需设置NAPCAT_TOKEN一个字段即可
    # 系统会自动将token添加到WebSocket连接URL中，无需手动添加
    NAPCAT_TOKEN=""
-
-   # 为兼容原配置保留的令牌字段（优先级低于NAPCAT_TOKEN）
-   # 如果NAPCAT_TOKEN未设置，系统会尝试使用此值
-   ACCESS_TOKEN=
-```
-
-   **配置NapCat配置文件：**
-   ```bash
-   # 使用编辑器打开配置文件
-   vim napcat_config.yml
    ```
-
-   修改以下配置内容：
-   
-   ```yaml
-   # 只需要修改port与token即可
-
-   # WebSocket 服务配置
-   type: websocket-server
-      # 监听地址（通常保持默认即可）
-      host: 0.0.0.0
-      # 监听端口（确保与.env文件中的NAPCAT_WS_URL端口一致）
-      port: 8080
-      # 路径（必须设置为/qq，与.env文件中的NAPCAT_WS_URL路径一致）
-      path: /qq
-      # 是否启用访问令牌（用于认证）
-      # 此token需要与.env文件中的NAPCAT_TOKEN保持一致
-      token: ""
-
-   # 默认中间件配置
-   default-middlewares &default:
-   # 与.env文件中的NAPCAT_TOKEN或ACCESS_TOKEN保持一致
-   access-token: ''
-   ```
-
-   **重要配置说明**：
-   - **端口一致性**：确保`port`值与`.env`文件中`NAPCAT_WS_URL`的端口部分一致
-   - **路径设置**：`path`必须设置为`/qq`，这是机器人正常工作的必要条件
-   - **Token一致性**：如果启用token验证，必须确保以下三个位置的token值完全相同：
-     * `napcat_config.yml`中的WebSocket服务`token`字段
-     * `napcat_config.yml`中的中间件`access-token`字段
-     * `.env`文件中的`NAPCAT_TOKEN`或`ACCESS_TOKEN`字段
-   - **禁用token验证**：如果不需要身份验证，请将所有token字段都留空（""或''）
-
-   修改完成后，保存文件并退出编辑器。
+   完成修改后保存并退出
 
 3. **创建数据目录**
    ```bash
@@ -416,7 +338,7 @@ python bot.py
    sudo chown $USER:$USER /var/lib/JMBot/downloads
    ```
 
-#### 四、系统服务配置（可选）
+#### 第四步：系统服务配置（可选）
 
 > **💡 重要提示**：系统服务配置是可选的，仅在以下情况下需要：
 > - 需要在服务器上24小时运行机器人
@@ -478,15 +400,15 @@ python bot.py
    sudo systemctl status JMBot
    ```
 
-#### 五、配置 NapCat
+#### 第五步：配置 NapCat
 
 1. **安装 NapCat**
    - 参考 NapCatQQ 文档安装 NapCat https://github.com/NapNeko/NapCatQQ
    - 配置 WebSocket 服务端与机器人配置匹配
 
-### 🎯 使用方法
+#### 第六步：使用方法
 
-#### 系统服务管理
+##### 系统服务管理
 ```bash
 # 启动服务
 sudo systemctl start JMBot
@@ -504,7 +426,7 @@ sudo systemctl status JMBot
 sudo journalctl -u JMBot -f
 ```
 
-#### 🔄 启动机器人
+##### 🔄 启动机器人
 
 ##### 1. 启动 NapCat 服务
 - 确保 NapCat 已正确安装并配置
@@ -525,12 +447,6 @@ python bot.py
 Ctrl+C
 ```
 
-#### QQ命令使用
-- `漫画帮助` - 查看帮助信息
-- `漫画下载 350234` - 下载指定ID的漫画
-- `发送 350234` - 发送已下载的漫画文件
-- `查询已下载漫画` - 查看已下载漫画列表
-
 ---
 
 ## 📱 Android 部署（使用 proot + Ubuntu）
@@ -544,7 +460,7 @@ Ctrl+C
 
 ### 🚀 部署步骤
 
-#### 一、安装 Termux 和 proot
+#### 第一步：安装 Termux 和 proot
 
 1. **安装 Termux**
    - 从 [F-Droid](https://f-droid.org/packages/com.termux/) 或 Google Play 安装 Termux
@@ -559,7 +475,7 @@ Ctrl+C
    pkg install proot-distro -y
    ```
 
-#### 二、安装 Ubuntu 系统
+#### 第二步：安装 Ubuntu 系统
 
 1. **使用 proot-distro 安装 Ubuntu**
    ```bash
@@ -604,7 +520,7 @@ Ctrl+C
    apt install sudo vim git python3-dev python3-venv build-essential screen curl python3-pip
    ```
 
-#### 三、在 Ubuntu 中部署机器人
+#### 第三步：在 Ubuntu 中部署机器人
 
 1. **获取项目文件**
    ```bash
@@ -616,7 +532,7 @@ Ctrl+C
    cd ~/JMBot
    
    # 使用Git克隆项目
-   git clone https://github.com/AAA-huan/JM-QQ-Bot.git .
+   git clone https://github.com/AAA-huan/JMcomicBot.git .
    # 注意：使用.参数表示将代码克隆到当前JMBot目录，不会创建额外的子目录
    ```
 
@@ -645,9 +561,6 @@ Ctrl+C
 
    # 复制配置文件
    cp .env.example .env
-
-   # 复制NapCat配置示例
-   cp napcat_config_example.yml napcat_config.yml
    ```
 
    **编辑配置文件**
@@ -683,54 +596,7 @@ Ctrl+C
    # 简化配置：只需设置NAPCAT_TOKEN一个字段即可
    # 系统会自动将token添加到WebSocket连接URL中，无需手动添加
    NAPCAT_TOKEN=""
-
-   # 为兼容原配置保留的令牌字段（优先级低于NAPCAT_TOKEN）
-   # 如果NAPCAT_TOKEN未设置，系统会尝试使用此值
-   ACCESS_TOKEN=
    ```
-
-   **配置NapCat配置文件：**
-
-   ```bash
-   # 使用编辑器打开配置文件
-   vim napcat_config.yml
-   ```
-
-   ```yaml
-   # 只需要修改port与token即可
-
-   # WebSocket 服务配置
-     - type: websocket-server
-       # 监听地址（通常保持默认即可）
-       host: 0.0.0.0
-       # 监听端口（确保与.env文件中的NAPCAT_WS_URL端口一致）
-       port: 8080
-       # 路径（必须设置为/qq，与.env文件中的NAPCAT_WS_URL路径一致）
-       path: /qq
-       # 是否启用访问令牌（用于认证）
-       # 此token需要与.env文件中的NAPCAT_TOKEN保持一致
-       # 留空表示不启用Token验证
-       token: ""
-   ```
-
-   **配置中间件的访问令牌**
-   ```yaml
-   # 默认中间件配置
-   default-middlewares &default:
-     # 与.env文件中的NAPCAT_TOKEN或ACCESS_TOKEN保持一致
-     # 留空表示不启用Token验证
-     access-token: ''
-   ```
-
-3. **重要配置说明**：
-   - **端口一致性**：确保`port`值与`.env`文件中`NAPCAT_WS_URL`的端口部分一致
-   - **路径设置**：`path`必须设置为`/qq`，这是机器人正常工作的必要条件
-   - **Token一致性**：如果启用token验证，必须确保以下三个位置的token值完全相同：
-     * `napcat_config.yml`中的WebSocket服务`token`字段
-     * `napcat_config.yml`中的中间件`access-token`字段
-     * `.env`文件中的`NAPCAT_TOKEN`或`ACCESS_TOKEN`字段
-   - **禁用token验证**：如果不需要身份验证，请将所有token字段都留空（""或''）
-
 5. **创建数据目录**
    ```bash
    # 创建下载目录（在当前项目目录下）
@@ -738,7 +604,7 @@ Ctrl+C
    chmod 755 downloads
    ```
 
-#### 四、配置 NapCat
+#### 第四步：配置 NapCat
 
 1. **安装 NapCat**
    ```bash
@@ -754,9 +620,10 @@ Ctrl+C
    - 用方向键和回车键选择
    - 在 NapCat 中配置 WebSocket 服务端
    - 确保端口与机器人配置一致
+   - 在最后记得空格勾选启用配置
    - 配置完成后启动 NapCat
 
-#### 五、启动机器人
+#### 第五步：启动机器人
 
 1. **在 Ubuntu 环境中启动**
    ```bash
@@ -814,120 +681,7 @@ pkill -f "python3 bot.py"
 exit
 ```
 
-#### QQ命令使用
-- `漫画帮助` - 查看帮助信息
-- `漫画下载 350234` - 下载指定ID的漫画
-- `发送 350234` - 发送已下载的漫画文件
-- `查询已下载漫画` - 查看已下载漫画列表
-
 ---
-
-## ❓ 常见问题解答
-
-### 🚨 启动与连接问题
-
-#### 1. 机器人无法启动
-**问题描述：** 启动机器人时出现错误或无法连接
-**解决方案：**
-- 检查 NapCat 是否正常运行
-- 确认 `.env` 文件中的 `NAPCAT_WS_URL` 配置正确
-- 检查防火墙设置，确保端口 `port` 未被阻止
-- 查看日志文件获取详细错误信息
-
-#### 2. WebSocket 连接失败
-**问题描述：** 无法连接到 NapCat WebSocket 服务
-**解决方案：**
-- 确认 NapCat 服务已启动并监听正确端口
-- 检查 `NAPCAT_WS_URL` 格式是否正确（ws://localhost:port/qq）
-- 验证网络连接和防火墙设置
-- 如果启用了token验证，请确保.env文件中的`NAPCAT_TOKEN`与NapCat配置中的token和access-token字段值完全一致
-- 检查WebSocket路径是否正确设置为`/qq`
-
-### 📥 下载相关问题
-
-#### 3. 漫画下载失败
-**问题描述：** 下载漫画时出现错误或下载中断
-**解决方案：**
-- 检查网络连接是否稳定
-- 确认下载路径 `MANGA_DOWNLOAD_PATH` 有写入权限
-- 检查磁盘空间是否充足
-- 尝试调整 `thread_count` 参数（降低并发数）
-
-#### 4. 下载速度过慢
-**问题描述：** 下载速度不理想或频繁中断
-**解决方案：**
-- 调整 `thread_count` 增加并发下载数
-- 配置代理服务器提高连接稳定性
-- 检查网络带宽和服务器状态
-
-### 💬 消息与通信问题
-
-#### 5. 消息发送失败
-**问题描述：** 机器人无法发送消息到QQ
-**解决方案：**
-- 确认 NapCat 与QQ客户端的连接正常
-- 检查机器人是否被QQ群或好友屏蔽
-- 查看 NapCat 日志确认消息发送状态
-
-#### 6. 命令无响应
-**问题描述：** 发送命令后机器人无反应
-**解决方案：**
-- 确认命令格式正确（如：`下载漫画 漫画ID`）
-- 检查机器人是否在线且正常运行
-- 查看日志文件排查错误信息
-
-### ⚡ 性能与优化
-
-#### 7. 性能优化建议
-**问题描述：** 机器人运行缓慢或占用资源过高
-**解决方案：**
-- 调整 `thread_count` 参数控制并发下载数
-- 设置合理的 `timeout` 值避免长时间等待
-- 定期清理下载目录释放磁盘空间
-- 考虑使用代理服务器提高下载稳定性
-
-#### 8. 内存占用过高
-**问题描述：** 机器人占用过多系统内存
-**解决方案：**
-- 限制同时下载的漫画数量
-- 定期重启机器人释放内存
-- 监控日志文件排查内存泄漏
-
----
-
-## 🔧 故障排除
-
-### 日志查看
-
-- **Windows**: 查看命令行窗口输出
-- **Linux**: `sudo journalctl -u JMBot -f`
-- **Android**: Termux 终端输出
-
-### 错误代码说明
-
-- **WebSocket连接失败**: 检查 NapCat 状态和配置
-- **下载失败**: 检查网络和漫画ID有效性
-- **权限错误**: 检查文件和目录权限
-- **存储空间不足**: 清理下载目录或调整存储路径
-
-### 性能优化
-
-1. **调整下载线程数**：在 `option.yml` 中修改 `thread_count`
-2. **使用代理**：如有网络限制，配置代理服务器
-3. **定期清理**：删除不再需要的漫画文件释放空间
-
----
-
-### 如何贡献
-
-1. **报告问题**
-   - 在GitHub Issues中描述您遇到的问题
-   - 提供详细的错误信息和复现步骤
-
-2. **功能建议**
-   - 提出新的功能想法或改进建议
-   - 描述使用场景和预期效果
-
 ## 📄 许可证
 
 本项目基于 MIT 许可证开源发布。
@@ -955,13 +709,3 @@ LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
 OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 SOFTWARE.
 ```
-
-## ⚠️ 免责声明
-
-本项目仅作为技术学习和研究用途，作者不对任何不当使用本工具造成的后果负责。请用户自行承担使用风险，并确保遵守所在国家或地区的相关法律法规。
-
-**重要提示：**
-- 请尊重版权，仅下载和使用您拥有合法权限的内容
-- 请勿将本项目用于商业用途
-- 请遵守您所在国家或地区的法律法规
-- 使用本工具产生的任何后果由使用者自行承担

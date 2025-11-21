@@ -15,7 +15,7 @@ from dotenv import load_dotenv
 
 class MangaBot:
     # 机器人版本号
-    VERSION = "2.2.6"
+    VERSION = "2.2.8"
     
     def __init__(self) -> None:
         """初始化MangaBot机器人，添加跨平台兼容性检查"""
@@ -530,25 +530,25 @@ class MangaBot:
         )
 
         # 帮助命令
-        if cmd in ["manga_help", "漫画帮助", "帮助漫画"]:
+        if cmd in ["漫画帮助", "帮助漫画"]:
             self.send_help(user_id, group_id, private)
         # 漫画下载命令
-        elif cmd in ["manga", "漫画下载", "下载漫画"]:
+        elif cmd in ["漫画下载", "下载漫画", "下载"]:
             self.handle_manga_download(user_id, args, group_id, private)
         # 发送已下载漫画命令
-        elif cmd in ["发送"]:
+        elif cmd in ["发送", "发送漫画", '漫画发送']:
             self.handle_manga_send(user_id, args, group_id, private)
         # 查询已下载漫画列表命令
-        elif cmd in ["漫画列表", "列表漫画", "list"]:
+        elif cmd in ["漫画列表", "列表漫画"]:
             self.query_downloaded_manga(user_id, group_id, private)
         # 查询指定漫画ID是否已下载
-        elif cmd in ["查询漫画", "漫画查询", "checkmanga"]:
+        elif cmd in ["查询漫画", "漫画查询"]:
             self.query_manga_existence(user_id, args, group_id, private)
         # 漫画版本查询命令
         elif cmd in ["漫画版本", "版本", "version"]:
             self.send_version_info(user_id, group_id, private)
         # 测试命令，显示当前SELF_ID状态
-        elif cmd in ["测试id", "testid", "selfid"]:
+        elif cmd in ["测试id"]:
             # 测试命令，显示机器人当前的SELF_ID状态
             if self.SELF_ID:
                 self.send_message(
@@ -556,7 +556,7 @@ class MangaBot:
                 )
             else:
                 self.send_message(user_id, "❌ 机器人ID未获取", group_id, private)
-        elif cmd in ["测试文件", "testfile"]:
+        elif cmd in ["测试文件"]:
             # 测试文件发送功能
             self.send_message(user_id, "🔍 开始测试文件发送功能...", group_id, private)
 
