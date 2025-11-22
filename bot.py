@@ -1,5 +1,4 @@
 import json
-import logging
 import os
 import re
 import platform
@@ -7,49 +6,205 @@ import sys
 import threading
 import time
 import signal
-from typing import Any, Callable, Dict, List, Optional, Union
+from typing import Any, Dict, List, Optional, Union, Tuple, Pattern
 
 import jmcomic
 import websocket
 from dotenv import load_dotenv
+from loguru import logger as loguru_logger  # type: ignore[import]
+
+
+class CommandParser:
+    """
+    命令解析器类，负责解析和验证用户输入的命令和参数
+    提供标准化的命令处理接口，强化输入校验，防止错误输入
+    """
+
+    def __init__(self) -> None:
+        """初始化命令解析器，定义命令别名映射和参数验证规则"""
+        # 定义命令别名映射，便于统一处理同义命令
+        self.command_aliases: Dict[str, List[str]] = {
+            "help": ["漫画帮助", "帮助漫画"],
+            "download": ["漫画下载", "下载漫画", "下载"],
+            "send": ["发送", "发送漫画", "漫画发送"],
+            "list": ["漫画列表", "列表漫画"],
+            "query": ["查询漫画", "漫画查询"],
+            "version": ["漫画版本", "版本", "version"],
+            "test_id": ["测试id"],
+            "test_file": ["测试文件"],
+        }
+
+        # 参数验证规则
+        self.param_validators: Dict[str, Optional[Pattern]] = {
+            "download": re.compile(r"^\d+$"),  # 下载命令需要纯数字ID
+            "send": re.compile(r"^\d+$"),  # 发送命令需要纯数字ID
+            "query": re.compile(r"^\d+$"),  # 查询命令需要纯数字ID
+        }
+
+    def parse(self, message: str) -> Tuple[str, str]:
+        """
+        解析用户输入的消息，提取命令和参数
+
+        Args:
+            message: 用户输入的原始消息
+
+        Returns:
+            Tuple[str, str]: (标准化的命令名, 参数部分)
+
+        Raises:
+            ValueError: 当消息为空或格式错误时
+        """
+        if not message or not message.strip():
+            raise ValueError("空消息或仅包含空白字符")
+
+        # 提取命令和参数
+        parts = message.strip().split(" ", 1)
+        raw_command = parts[0].strip().lower() if parts else ""
+        params = parts[1].strip() if len(parts) > 1 else ""
+
+        if not raw_command:
+            raise ValueError("未提供命令")
+
+        # 标准化命令名
+        standard_command = self._normalize_command(raw_command)
+
+        return standard_command, params
+
+    def _normalize_command(self, raw_command: str) -> str:
+        """
+        将原始命令名标准化，处理别名
+
+        Args:
+            raw_command: 原始命令名
+
+        Returns:
+            str: 标准化后的命令名
+        """
+        # 检查是否是已知命令的别名
+        for standard, aliases in self.command_aliases.items():
+            if raw_command in aliases:
+                return standard
+
+        # 检查是否是标准命令
+        if raw_command in self.command_aliases:
+            return raw_command
+
+        # 检查是否是欢迎语
+        welcome_keywords = ["你好", "hi", "hello", "在吗"]
+        if any(keyword in raw_command for keyword in welcome_keywords):
+            return "welcome"
+
+        # 未知命令
+        return "unknown"
+
+    def validate_params(self, command: str, params: str) -> bool:
+        """
+        严格验证命令参数是否符合要求
+
+        Args:
+            command: 标准化的命令名
+            params: 参数部分
+
+        Returns:
+            bool: 参数是否有效
+        """
+        # 清理参数，移除首尾空格
+        params = params.strip()
+
+        # 定义不需要参数的命令列表
+        no_param_commands = [
+            "help",
+            "list",
+            "version",
+            "test_id",
+            "test_file",
+            "unknown",
+        ]
+
+        # 如果命令不需要参数，但提供了参数，返回False
+        if command in no_param_commands and params:
+            return False
+
+        # 如果命令不需要参数且没有提供参数，返回True
+        if command in no_param_commands:
+            return True
+
+        # 如果命令需要参数但没有提供参数，返回False
+        if command not in no_param_commands and not params:
+            return False
+
+        # 使用正则表达式验证需要参数的命令
+        if command in self.param_validators:
+            validator = self.param_validators[command]
+            if validator and not validator.match(params):
+                return False
+
+        return True
+
+    def get_error_message(self, command: str) -> str:
+        """
+        获取参数错误时的友好提示消息
+
+        Args:
+            command: 标准化的命令名
+
+        Returns:
+            str: 错误提示消息
+        """
+        error_messages = {
+            "download": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n例如：漫画下载 350234",
+            "send": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n例如：发送 350234",
+            "query": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n例如：查询漫画 350234",
+            "help": "❌ 命令格式错误！'漫画帮助'命令不需要额外参数\n直接输入：漫画帮助",
+            "list": "❌ 命令格式错误！'漫画列表'命令不需要额外参数\n直接输入：漫画列表",
+            "version": "❌ 命令格式错误！'漫画版本'命令不需要额外参数\n直接输入：漫画版本",
+            "test_id": "❌ 命令格式错误！'测试id'命令不需要额外参数\n直接输入：测试id",
+            "test_file": "❌ 命令格式错误！'测试文件'命令不需要额外参数\n直接输入：测试文件",
+            "unknown": "❓ 未知命令，请输入'漫画帮助'查看所有可用命令",
+        }
+
+        return error_messages.get(command, "❌ 命令格式错误，请检查输入")
+
 
 class MangaBot:
     # 机器人版本号
-    VERSION = "2.3.4"
-    
+    VERSION = "2.3.8"
+
     def _parse_id_list(self, id_string: str) -> List[str]:
         """
         解析ID列表字符串，将逗号分隔的ID转换为列表
-        
+
         Args:
             id_string: 逗号分隔的ID字符串
-            
+
         Returns:
             清理后的ID列表
         """
         if not id_string or not id_string.strip():
             return []
-        
+
         # 分割字符串并清理每个ID
-        ids = [id.strip() for id in id_string.split(',') if id.strip()]
+        ids = [id.strip() for id in id_string.split(",") if id.strip()]
         return ids
-    
-    def _check_user_permission(self, user_id: str, group_id: Optional[str] = None, private: bool = True) -> bool:
+
+    def _check_user_permission(
+        self, user_id: str, group_id: Optional[str] = None, private: bool = True
+    ) -> bool:
         """
         检查用户是否有权限使用机器人
-        
+
         权限检查规则：
         1. 全局黑名单优先：如果用户在全局黑名单中，直接拒绝
         2. 白名单检查：
            - 私聊：检查用户是否在私信白名单中（如果白名单不为空）
            - 群聊：检查群组是否在群组白名单中（如果白名单不为空）
         3. 白名单为空表示不限制
-        
+
         Args:
             user_id: 用户ID
             group_id: 群组ID（群聊时提供）
             private: 是否为私聊
-            
+
         Returns:
             bool: 用户是否有权限使用机器人
         """
@@ -57,7 +212,7 @@ class MangaBot:
         if user_id in self.global_blacklist:
             self.logger.warning(f"用户 {user_id} 在全局黑名单中，拒绝访问")
             return False
-        
+
         # 私聊权限检查
         if private:
             # 如果私信白名单不为空，则检查用户是否在白名单中
@@ -67,21 +222,24 @@ class MangaBot:
         # 群聊权限检查
         else:
             # 如果群组白名单不为空，则检查群组是否在白名单中
-            if group_id and self.group_whitelist and group_id not in self.group_whitelist:
+            if (
+                group_id
+                and self.group_whitelist
+                and group_id not in self.group_whitelist
+            ):
                 self.logger.warning(f"群组 {group_id} 不在群组白名单中，拒绝访问")
                 return False
-        
+
         # 权限检查通过
         self.logger.debug(f"用户 {user_id} 权限检查通过")
         return True
-    
-  
+
     def __init__(self) -> None:
         """初始化MangaBot机器人，添加跨平台兼容性检查"""
         # 配置日志（先初始化日志系统）
         self._setup_logger()
         # 记录启动信息，包含版本号
-        logging.info(f"JMComic QQ机器人 版本 {self.VERSION} 启动中...")
+        self.logger.info(f"JMComic QQ机器人 版本 {self.VERSION} 启动中...")
 
         # 检查操作系统兼容性
         self._check_platform_compatibility()
@@ -92,7 +250,7 @@ class MangaBot:
         # 初始化配置
         # 简化token配置，只使用NAPCAT_TOKEN作为唯一的token配置项
         token = os.getenv("NAPCAT_TOKEN", "")  # 只使用NAPCAT_TOKEN
-            
+
         # 构建带token的WebSocket URL（如果有token）
         base_ws_url = os.getenv("NAPCAT_WS_URL", "ws://localhost:8080/qq")
         if token:
@@ -103,15 +261,15 @@ class MangaBot:
                 ws_url = f"{base_ws_url}?token={token}"
         else:
             ws_url = base_ws_url
-            
+
         # 获取下载路径配置
         download_path = os.getenv("MANGA_DOWNLOAD_PATH", "./downloads")
         # 处理Linux系统中的波浪号(~)路径，将其扩展为用户主目录
-        if download_path.startswith('~'):
+        if download_path.startswith("~"):
             download_path = os.path.expanduser(download_path)
         # 将相对路径转换为绝对路径，确保父级目录引用能正确解析
         absolute_download_path = os.path.abspath(download_path)
-        
+
         self.config: Dict[str, Union[str, int]] = {
             "MANGA_DOWNLOAD_PATH": absolute_download_path,
             "NAPCAT_WS_URL": ws_url,  # 存储完整的WebSocket URL（可能包含token）
@@ -124,18 +282,30 @@ class MangaBot:
         self.downloading_mangas: Dict[str, bool] = (
             {}
         )  # 跟踪正在下载的漫画 {manga_id: True}
-        
+
         # 初始化黑白名单配置
-        self.group_whitelist: List[str] = self._parse_id_list(os.getenv("GROUP_WHITELIST", ""))
-        self.private_whitelist: List[str] = self._parse_id_list(os.getenv("PRIVATE_WHITELIST", ""))
-        self.global_blacklist: List[str] = self._parse_id_list(os.getenv("GLOBAL_BLACKLIST", ""))
-        
+        self.group_whitelist: List[str] = self._parse_id_list(
+            os.getenv("GROUP_WHITELIST", "")
+        )
+        self.private_whitelist: List[str] = self._parse_id_list(
+            os.getenv("PRIVATE_WHITELIST", "")
+        )
+        self.global_blacklist: List[str] = self._parse_id_list(
+            os.getenv("GLOBAL_BLACKLIST", "")
+        )
+
         # 记录黑白名单配置信息
-        self.logger.info(f"黑白名单配置加载完成 - 群组白名单: {len(self.group_whitelist)}个, 私信白名单: {len(self.private_whitelist)}个, 全局黑名单: {len(self.global_blacklist)}个")
+        self.logger.info(
+            f"黑白名单配置加载完成 - 群组白名单: {len(self.group_whitelist)}个, 私信白名单: {len(self.private_whitelist)}个, 全局黑名单: {len(self.global_blacklist)}个"
+        )
 
         # 创建下载目录
         os.makedirs(self.config["MANGA_DOWNLOAD_PATH"], exist_ok=True)
         self.logger.info(f"下载路径设置为: {self.config['MANGA_DOWNLOAD_PATH']}")
+
+        # 初始化命令解析器
+        self.command_parser = CommandParser()
+        self.logger.info("命令解析器初始化完成")
 
     def _check_platform_compatibility(self) -> None:
         """检查操作系统兼容性，确保在Linux和Windows上都能正常运行"""
@@ -206,124 +376,35 @@ class MangaBot:
             self.logger.warning("路径分隔符可能不兼容Windows")
 
     def _setup_logger(self) -> None:
-        """配置日志系统，支持跨平台颜色显示"""
-        # 创建logger对象
-        self.logger: logging.Logger = logging.getLogger(__name__)
-        self.logger.setLevel(logging.DEBUG)
-        # 阻止日志消息向上传播到父logger，避免重复输出
-        self.logger.propagate = False
+        """配置loguru日志系统"""
+        # 清除已有的处理器
+        loguru_logger.remove()
 
-        # 定义跨平台颜色格式化器
-        class CrossPlatformFormatter(logging.Formatter):
-            # ANSI颜色代码（支持Linux和Windows 10+）
-            COLORS: Dict[str, str] = {
-                "DEBUG": "\033[36m",  # 青色
-                "INFO": "\033[34m",  # 蓝色
-                "WARNING": "\033[33m",  # 黄色
-                "ERROR": "\033[31m",  # 红色
-                "CRITICAL": "\033[41m\033[37m",  # 红色背景白色文字
-                "RESET": "\033[0m",  # 重置
-            }
-
-            def __init__(
-                self, fmt: Optional[str] = None, datefmt: Optional[str] = None
-            ) -> None:
-                super().__init__(fmt, datefmt)
-                self.supports_color: bool = self._check_color_support()
-
-            def _check_color_support(self) -> bool:
-                """检查终端是否支持颜色"""
-                # 检查是否在终端中运行
-                if not sys.stdout.isatty():
-                    return False
-
-                # 检查平台
-                current_platform: str = platform.system().lower()
-                if current_platform == "windows":
-                    # Windows 10+ 支持ANSI颜色
-                    try:
-                        import ctypes
-
-                        kernel32 = ctypes.windll.kernel32
-                        # 检查是否支持虚拟终端序列
-                        return bool(
-                            kernel32.GetConsoleMode(kernel32.GetStdHandle(-11)) & 0x0004
-                        )
-                    except:
-                        return False
-                elif current_platform == "linux":
-                    # Linux通常支持颜色
-                    return True
-                else:
-                    # 其他平台默认不支持
-                    return False
-
-            def format(self, record: logging.LogRecord) -> str:
-                """格式化日志记录"""
-                # 获取原始日志格式
-                log_message: str = super().format(record)
-
-                # 如果支持颜色，添加颜色
-                if self.supports_color:
-                    color_start: str = self.COLORS.get(record.levelname, "")
-                    color_end: str = self.COLORS["RESET"]
-                    return f"{color_start}{log_message}{color_end}"
-                else:
-                    # 不支持颜色，返回原始消息
-                    return log_message
-
-        # 创建文件格式化器（无颜色）
-        file_formatter: logging.Formatter = logging.Formatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-
-        # 创建控制台格式化器（跨平台颜色）
-        console_formatter: CrossPlatformFormatter = CrossPlatformFormatter(
-            "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
-        )
-
-        # 创建控制台处理器
-        console_handler: logging.StreamHandler = logging.StreamHandler()
-        console_handler.setLevel(logging.INFO)
-        console_handler.setFormatter(console_formatter)
-
-        # 创建文件处理器，每天一个日志文件
+        # 创建日志目录
         log_dir: str = "logs"
         os.makedirs(log_dir, exist_ok=True)
         log_file: str = os.path.join(log_dir, f'{time.strftime("%Y-%m-%d")}.log')
-        file_handler: logging.FileHandler = logging.FileHandler(
-            log_file, encoding="utf-8"
+
+        # 配置控制台日志（INFO级别，无彩色）
+        loguru_logger.add(
+            sys.stdout,
+            level="INFO",
+            format="{time:YYYY-MM-DD HH:mm:ss+08:00} - {name} - {level} - {message}",
+            colorize=False,
         )
-        file_handler.setLevel(logging.DEBUG)
-        file_handler.setFormatter(file_formatter)
 
-        # 清除已有的处理器
-        if self.logger.handlers:
-            self.logger.handlers.clear()
-
-        # 添加处理器到logger
-        self.logger.addHandler(console_handler)
-        self.logger.addHandler(file_handler)
-
-        # 重新定义根logger以确保所有模块的日志也被捕获
-        root_logger: logging.Logger = logging.getLogger()
-        root_logger.setLevel(logging.DEBUG)
-        if root_logger.handlers:
-            root_logger.handlers.clear()
-
-        # 为root logger创建新的处理器实例，避免与self.logger共享处理器
-        root_console_handler: logging.StreamHandler = logging.StreamHandler()
-        root_console_handler.setLevel(logging.INFO)
-        root_console_handler.setFormatter(console_formatter)
-
-        root_file_handler: logging.FileHandler = logging.FileHandler(
-            log_file, encoding="utf-8"
+        # 配置文件日志（DEBUG级别）
+        loguru_logger.add(
+            log_file,
+            level="DEBUG",
+            format="{time:YYYY-MM-DD HH:mm:ss+08:00} - {name} - {level} - {message}",
+            encoding="utf-8",
+            rotation="00:00",  # 每天凌晨滚动日志文件
+            retention="7 days",  # 保留7天的日志
         )
-        root_file_handler.setLevel(logging.DEBUG)
-        root_file_handler.setFormatter(file_formatter)
 
-        root_logger.addHandler(root_console_handler)
-        root_logger.addHandler(root_file_handler)
+        # 将loguru_logger赋值给self.logger供类使用
+        self.logger = loguru_logger
 
     def send_message(
         self,
@@ -333,8 +414,6 @@ class MangaBot:
         private: bool = True,
     ) -> None:
         """发送消息函数"""
-        # 生成消息唯一ID用于追踪
-        message_id = hash(str(time.time()) + message[:50])
         try:
             payload: Dict[str, Any]
             if private:
@@ -357,31 +436,51 @@ class MangaBot:
             # 通过WebSocket发送消息
             if self.ws and self.ws.sock and self.ws.sock.connected:
                 message_json: str = json.dumps(payload)
-                self.logger.info(f"[消息ID:{message_id}] 准备发送 - 用户:{user_id}, 类型:{'私聊' if private else '群聊'}")
+                self.logger.info(
+                    f"准备发送 - 用户:{user_id}, 类型:{'私聊' if private else '群聊'}"
+                )
                 self.ws.send(message_json)
-                self.logger.info(f"[消息ID:{message_id}] 发送成功: {message[:20]}...")
+                self.logger.info(f"发送成功: {message[:20]}...")
             else:
-                self.logger.warning(f"[消息ID:{message_id}] WebSocket连接未建立，消息发送失败")
+                self.logger.warning(f"WebSocket连接未建立，消息发送失败")
         except Exception as e:
-            self.logger.error(f"[消息ID:{message_id}] 发送消息失败: {e}")
+            self.logger.error(f"发送消息失败: {e}")
 
-    def send_file(self, user_id, file_path, group_id=None, private=True):
-        # 发送文件函数
+    def send_file(
+        self,
+        user_id: str,
+        file_path: str,
+        group_id: Optional[str] = None,
+        private: bool = True,
+    ) -> None:
+        """发送文件函数
+
+        Args:
+            user_id: 用户ID
+            file_path: 文件路径
+            group_id: 群组ID（群聊时提供）
+            private: 是否为私聊
+
+        Returns:
+            None
+        """
         try:
-            # 添加详细调试日志
+            # 敏感信息只在DEBUG级别记录
             self.logger.debug(
                 f"准备发送文件: {file_path}, 用户ID: {user_id}, 群ID: {group_id}, 私聊模式: {private}"
             )
 
             if not os.path.exists(file_path):
-                self.logger.error(f"文件不存在: {file_path}")
+                # 错误消息保持在ERROR级别，但不包含完整路径
+                self.logger.error(f"文件不存在: {os.path.basename(file_path)}")
                 error_msg = f"❌ 文件不存在哦~，请让我下载之后再发送(｡•﹃•｡)"
                 self.send_message(user_id, error_msg, group_id, private)
                 return
 
             # 检查文件是否可读
             if not os.access(file_path, os.R_OK):
-                self.logger.error(f"文件不可读: {file_path}")
+                # 错误消息保持在ERROR级别，但不包含完整路径
+                self.logger.error(f"文件不可读: {os.path.basename(file_path)}")
                 error_msg = f"❌ 文件不可读，叫主人帮我检查一下吧∑(O_O；)"
                 self.send_message(user_id, error_msg, group_id, private)
                 return
@@ -421,7 +520,8 @@ class MangaBot:
                 message_json = json.dumps(payload)
                 self.logger.debug(f"发送消息段数组文件: {message_json}")
                 self.ws.send(message_json)
-                self.logger.info(f"使用消息段数组发送文件请求已发送: {file_name}")
+                # 只记录文件名而非敏感的路径信息
+                self.logger.info(f"文件发送请求已发送: {file_name}")
                 # 等待一小段时间让API请求有机会返回结果
                 time.sleep(1)
             else:
@@ -459,12 +559,12 @@ class MangaBot:
         # 连接WebSocket的函数
         try:
             # 记录连接信息时不显示token，保护安全
-            ws_url_display = self.config['NAPCAT_WS_URL']
-            if 'token=' in ws_url_display:
+            ws_url_display = self.config["NAPCAT_WS_URL"]
+            if "token=" in ws_url_display:
                 # 隐藏token值，只显示部分信息
-                parts = ws_url_display.split('token=')
+                parts = ws_url_display.split("token=")
                 ws_url_display = f"{parts[0]}token=****"
-                
+
             self.logger.info(f"正在连接WebSocket: {ws_url_display}")
             self.ws = websocket.WebSocketApp(
                 self.config["NAPCAT_WS_URL"],  # 这里使用完整的URL，可能已包含token
@@ -474,12 +574,12 @@ class MangaBot:
                 on_close=self.on_close,
                 # 可选：添加额外的HTTP头进行token认证
                 header={
-                    'Authorization': (
+                    "Authorization": (
                         f'Bearer {self.config["NAPCAT_TOKEN"]}'
                         if self.config["NAPCAT_TOKEN"]
                         else None
                     )
-                }
+                },
             )
 
             # 启动WebSocket线程，添加重连选项
@@ -514,8 +614,8 @@ class MangaBot:
         # 生成唯一的事件ID用于追踪
         event_id = hash(str(data))
         # 获取时间戳
-        timestamp = data.get('time', time.time())
-        
+        timestamp = data.get("time", time.time())
+
         # 详细日志，记录事件的唯一标识符和时间戳
         self.logger.info(
             f"收到事件 [ID:{event_id}] - 类型: {data.get('post_type')}, {data.get('meta_event_type') or data.get('message_type')}, 时间戳: {timestamp}"
@@ -536,12 +636,12 @@ class MangaBot:
         if data.get("post_type") == "message" and data.get("message_type") == "private":
             user_id = str(data.get("user_id"))
             message = data.get("raw_message")
-            
+
             # 黑白名单权限检查
             if not self._check_user_permission(user_id, private=True):
                 self.logger.warning(f"拒绝处理私信 - 用户 {user_id} 权限不足")
                 return
-                
+
             self.logger.info(f"收到私聊消息 - 用户{user_id}: {message}")
             # 确保私聊消息始终被处理，不检查@
             try:
@@ -563,10 +663,14 @@ class MangaBot:
             group_id = str(data.get("group_id"))
             user_id = str(data.get("user_id"))
             message = data.get("raw_message")
-            
+
             # 黑白名单权限检查
-            if not self._check_user_permission(user_id, group_id=group_id, private=False):
-                self.logger.warning(f"拒绝处理群消息 - 群组 {group_id} 用户 {user_id} 权限不足")
+            if not self._check_user_permission(
+                user_id, group_id=group_id, private=False
+            ):
+                self.logger.warning(
+                    f"拒绝处理群消息 - 群组 {group_id} 用户 {user_id} 权限不足"
+                )
                 return
             message_content = data.get("message", "")
 
@@ -604,10 +708,21 @@ class MangaBot:
             self.handle_command(user_id, message, group_id=group_id, private=False)
 
     def handle_command(self, user_id, message, group_id=None, private=True):
+        """
+        处理用户命令的函数，使用命令解析器进行标准化处理
+
+        Args:
+            user_id: 用户ID
+            message: 原始消息内容
+            group_id: 群组ID（群聊时提供）
+            private: 是否为私聊
+        """
         # 命令处理函数
         command_id = hash(str(time.time()) + message[:50])
-        self.logger.info(f"[命令ID:{command_id}] 开始处理命令 - 用户{user_id}, 私聊={private}")
-        
+        self.logger.info(
+            f"[命令ID:{command_id}] 开始处理命令 - 用户{user_id}, 私聊={private}"
+        )
+
         # 确保message不为None
         if message is None:
             self.logger.warning(f"[命令ID:{command_id}] 收到空消息，忽略处理")
@@ -619,35 +734,40 @@ class MangaBot:
             )
             return
 
-        # 提取命令和参数
-        command_parts = message.strip().split(" ", 1)
-        cmd = command_parts[0].lower() if command_parts else ""
-        args = command_parts[1] if len(command_parts) > 1 else ""
+        # 使用命令解析器处理用户输入
+        cmd, args = self.command_parser.parse(message)
 
         self.logger.info(
-            f"[命令ID:{command_id}] 处理命令 - 用户{user_id}: 命令='{cmd}', 参数='{args}', 私聊={private}"
+            f"[命令ID:{command_id}] 处理命令 - 用户{user_id}: 标准化命令='{cmd}', 参数='{args}', 私聊={private}"
         )
 
+        # 验证命令参数
+        if not self.command_parser.validate_params(cmd, args):
+            error_msg = self.command_parser.get_error_message(cmd)
+            self.logger.warning(f"[命令ID:{command_id}] 参数验证失败: {error_msg}")
+            self.send_message(user_id, error_msg, group_id, private)
+            return
+
         # 帮助命令
-        if cmd in ["漫画帮助", "帮助漫画"]:
+        if cmd == "help":
             self.send_help(user_id, group_id, private)
         # 漫画下载命令
-        elif cmd in ["漫画下载", "下载漫画", "下载"]:
+        elif cmd == "download":
             self.handle_manga_download(user_id, args, group_id, private)
         # 发送已下载漫画命令
-        elif cmd in ["发送", "发送漫画", '漫画发送']:
+        elif cmd == "send":
             self.handle_manga_send(user_id, args, group_id, private)
         # 查询已下载漫画列表命令
-        elif cmd in ["漫画列表", "列表漫画"]:
+        elif cmd == "list":
             self.query_downloaded_manga(user_id, group_id, private)
         # 查询指定漫画ID是否已下载
-        elif cmd in ["查询漫画", "漫画查询"]:
+        elif cmd == "query":
             self.query_manga_existence(user_id, args, group_id, private)
         # 漫画版本查询命令
-        elif cmd in ["漫画版本", "版本", "version"]:
+        elif cmd == "version":
             self.send_version_info(user_id, group_id, private)
         # 测试命令，显示当前SELF_ID状态
-        elif cmd in ["测试id"]:
+        elif cmd == "test_id":
             # 测试命令，显示机器人当前的SELF_ID状态
             if self.SELF_ID:
                 self.send_message(
@@ -655,7 +775,7 @@ class MangaBot:
                 )
             else:
                 self.send_message(user_id, "❌ 机器人ID未获取", group_id, private)
-        elif cmd in ["测试文件"]:
+        elif cmd == "test_file":
             # 测试文件发送功能
             self.send_message(user_id, "🔍 开始测试文件发送功能...", group_id, private)
 
@@ -733,7 +853,9 @@ class MangaBot:
 
                 response += f"总计：{len(pdf_files)} 个漫画PDF文件"
 
-            self.logger.info(f"准备发送漫画列表消息 - 用户{user_id}, 消息长度: {len(response)}")
+            self.logger.info(
+                f"准备发送漫画列表消息 - 用户{user_id}, 消息长度: {len(response)}"
+            )
             self.send_message(user_id, response, group_id, private)
             self.logger.info(f"漫画列表消息发送完成 - 用户{user_id}")
         except Exception as e:
@@ -743,13 +865,17 @@ class MangaBot:
             )
 
     def query_manga_existence(self, user_id, manga_id, group_id, private):
-        # 查询指定漫画ID是否已下载或正在下载
+        """
+        查询指定漫画ID是否已下载或正在下载
+
+        参数:
+            user_id: 用户ID
+            manga_id: 漫画ID (由CommandParser验证)
+            group_id: 群ID
+            private: 是否为私聊
+        """
+        self.logger.info(f"查询漫画存在性 - 用户{user_id}, 漫画ID: {manga_id}")
         try:
-            if not manga_id:
-                self.send_message(
-                    user_id, "请输入漫画ID，例如：查询漫画 422866", group_id, private
-                )
-                return
 
             # 检查下载目录是否存在
             if not os.path.exists(self.config["MANGA_DOWNLOAD_PATH"]):
@@ -826,24 +952,34 @@ class MangaBot:
         help_text += "- 下载过程可能需要一些时间，请耐心等待\n"
         help_text += "- 下载的漫画将保存在配置的目录中\n"
         help_text += "- 发送漫画前请确保该漫画已成功下载并转换为PDF格式\n"
-        help_text += f"- 当前版本只支持发送PDF格式的漫画文件\n\n" + f"🔖 当前版本: {self.VERSION}"
+        help_text += (
+            f"- 当前版本只支持发送PDF格式的漫画文件\n\n"
+            + f"🔖 当前版本: {self.VERSION}"
+        )
         self.send_message(user_id, help_text, group_id, private)
-        
+
     def send_version_info(self, user_id, group_id, private):
         # 发送版本信息
-        version_text = f"🔖 JMComic QQ机器人\n" \
-                      f"📌 当前版本: {self.VERSION}\n" \
-                      f"💻 运行平台: {platform.system()} {platform.release()}\n" \
-                      f"✨ 感谢使用JMComic QQ机器人！\n" \
-                      f"📚 输入'漫画帮助'查看所有可用命令" 
+        version_text = (
+            f"🔖 JMComic QQ机器人\n"
+            f"📌 当前版本: {self.VERSION}\n"
+            f"💻 运行平台: {platform.system()} {platform.release()}\n"
+            f"✨ 感谢使用JMComic QQ机器人！\n"
+            f"📚 输入'漫画帮助'查看所有可用命令"
+        )
         self.send_message(user_id, version_text, group_id, private)
 
     def handle_manga_download(self, user_id, manga_id, group_id, private):
-        # 处理漫画下载
-        if not manga_id:
-            response = "请输入漫画ID，例如：漫画下载 422866"
-            self.send_message(user_id, response, group_id, private)
-            return
+        """
+        处理漫画下载请求
+
+        参数:
+            user_id: 用户ID
+            manga_id: 漫画ID (由CommandParser验证)
+            group_id: 群ID
+            private: 是否为私聊
+        """
+        self.logger.info(f"处理漫画下载请求 - 用户{user_id}, 漫画ID: {manga_id}")
 
         # 在下载前先检查漫画是否已存在
         try:
@@ -1022,11 +1158,16 @@ class MangaBot:
                 del self.downloading_mangas[manga_id]
 
     def handle_manga_send(self, user_id, manga_id, group_id, private):
-        # 处理漫画发送
-        if not manga_id:
-            response = "请输入漫画ID，例如：发送 422866"
-            self.send_message(user_id, response, group_id, private)
-            return
+        """
+        处理漫画发送请求
+
+        参数:
+            user_id: 用户ID
+            manga_id: 漫画ID (由CommandParser验证)
+            group_id: 群ID
+            private: 是否为私聊
+        """
+        self.logger.info(f"处理漫画发送请求 - 用户{user_id}, 漫画ID: {manga_id}")
 
         # 发送开始发送的消息
         response = f"ฅ( ̳• ·̫ • ̳ฅ)正在查找并准备发送漫画ID：{manga_id}，请稍候..."
@@ -1097,13 +1238,13 @@ class MangaBot:
         """安全关闭机器人，确保所有资源都被正确释放"""
         signal.signal(signal.SIGINT, self._safe_sigint_handler)
 
-    def _get_one_char(self) -> str|None:
+    def _get_one_char(self) -> str | None:
         """跨平台获取单个字符输入"""
         # 检查是否为Linux系统
         if platform.system() != "Linux":
             # 在非Linux系统上，使用通用的输入方法
             return input()
-        
+
         # Linux系统：使用termios和tty进行原始输入
         try:
             import termios
@@ -1111,7 +1252,7 @@ class MangaBot:
         except ImportError:
             # 如果导入失败，回退到普通输入
             return input()
-            
+
         fd = sys.stdin.fileno()
         old_settings = termios.tcgetattr(fd)
         try:
@@ -1147,12 +1288,12 @@ class MangaBot:
         else:
             # 用户取消操作程序继续运行
             print("关闭操作被取消，程序继续运行")
-    
+
     def _close_resources(self) -> None:
         """关闭所有资源，确保程序安全退出"""
         try:
             self.logger.info("开始关闭JMComic下载机器人资源...")
-            
+
             # 1. 关闭WebSocket连接
             if self.ws is not None:
                 try:
@@ -1165,27 +1306,28 @@ class MangaBot:
                 except Exception as ws_error:
                     self.logger.error(f"关闭WebSocket连接时出错: {ws_error}")
                     raise ws_error  # Fail Fast：重新抛出异常，让调用者知道关闭过程失败
-            
+
             # 2. 清理下载状态
             if self.downloading_mangas:
-                self.logger.info(f"清理正在下载的漫画任务: {list(self.downloading_mangas.keys())}")
+                self.logger.info(
+                    f"清理正在下载的漫画任务: {list(self.downloading_mangas.keys())}"
+                )
                 self.downloading_mangas.clear()
-            
+
             # 3. 重置实例状态
             self.ws = None
             self.SELF_ID = None
-            
+
             # 4. 执行其他资源清理
             self.logger.info("执行其他资源清理...")
-            
+
             print("JMComic下载机器人已安全关闭")
             self.logger.info("JMComic下载机器人资源关闭完成")
-            
+
         except Exception as e:
             self.logger.error(f"关闭资源时发生严重错误: {e}")
             print(f"关闭资源时发生错误: {e}")
             raise  # Fail Fast：重新抛出异常，让调用者知道关闭过程失败
-        
 
 
 # 如果直接运行此文件

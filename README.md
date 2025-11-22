@@ -132,32 +132,34 @@ copy option_example.yml option.yml
 打开 `.env` 文件，修改以下关键配置：
 
 ```ini
-# 只需要修改port与NAPCAT_TOKEN即可
+# 必须修改的只有NAPCAT_WS_URL的port
+# 其他配置根据实际情况修改即可
 
-# ======================
-# NapCat WebSocket 服务配置
-# ======================
-# WebSocket 服务地址 - 连接NapCat WebSocket服务的URL
-# 把port替换为你实际的NapCat WebSocket服务端口
+# WebSocket服务端配置
+# 修改port为实际的监听端口
 NAPCAT_WS_URL=ws://localhost:port/qq
 
-# ======================
-# 下载配置
-# ======================
-# 漫画下载存储路径 - 漫画文件下载的存储目录
-MANGA_DOWNLOAD_PATH=./downloads
-
-# ======================
-# 安全配置
-# ======================
-# WebSocket服务令牌，与NapCat配置中的两个位置保持一致：
-# - WebSocket服务配置部分的`token`字段
-# - 中间件配置部分的`access-token`字段
-# 
-# 简化配置：只需设置NAPCAT_TOKEN一个字段即可
-# 系统会自动将token添加到WebSocket连接URL中，无需手动添加
+# API Token配置（可选）
+# 用于NapCat WebSocket服务的身份验证
+# 系统会自动将token添加到WebSocket连接URL中
 NAPCAT_TOKEN=""
 
+# 漫画下载路径
+# 可以使用相对路径（如./downloads）或绝对路径（如D:/downloads）
+MANGA_DOWNLOAD_PATH=./downloads # 默认使用当前目录下的downloads文件夹
+
+# 黑白名单配置
+# 群组白名单：允许使用机器人的群聊ID列表，多个ID用逗号分隔
+# 留空表示不限制（所有群组都可以使用）
+GROUP_WHITELIST=""
+
+# 私信白名单：允许使用机器人的用户ID列表，多个ID用逗号分隔
+# 留空表示不限制（所有用户都可以私信使用）
+PRIVATE_WHITELIST=""
+
+# 全局黑名单：任何情况下都禁止使用机器人的用户ID列表，多个ID用逗号分隔
+# 黑名单优先级高于白名单
+GLOBAL_BLACKLIST=""
 ```
 
 #### 第四步：配置 NapCat
@@ -303,31 +305,34 @@ NAPCAT_TOKEN=""
    
    修改以下配置：
    ```ini
-   # 只需要修改port与NAPCAT_TOKEN即可
+   # 必须修改的只有NAPCAT_WS_URL的port
+   # 其他配置根据实际情况修改即可
 
-   # ======================
-   # NapCat WebSocket 服务配置
-   # ======================
-   # WebSocket 服务地址 - 连接NapCat WebSocket服务的URL
-   # 把port替换为你实际的NapCat WebSocket服务端口
+   # WebSocket服务端配置
+   # 修改port为实际的监听端口
    NAPCAT_WS_URL=ws://localhost:port/qq
 
-   # ======================
-   # 下载配置
-   # ======================
-   # 漫画下载存储路径 - 漫画文件下载的存储目录
-   MANGA_DOWNLOAD_PATH=./downloads
-
-   # ======================
-   # 安全配置
-   # ======================
-   # WebSocket服务令牌，与NapCat配置中的两个位置保持一致：
-   # - WebSocket服务配置部分的`token`字段
-   # - 中间件配置部分的`access-token`字段
-   # 
-   # 简化配置：只需设置NAPCAT_TOKEN一个字段即可
-   # 系统会自动将token添加到WebSocket连接URL中，无需手动添加
+   # API Token配置（可选）
+   # 用于NapCat WebSocket服务的身份验证
+   # 系统会自动将token添加到WebSocket连接URL中
    NAPCAT_TOKEN=""
+
+   # 漫画下载路径
+   # 可以使用相对路径（如./downloads）或绝对路径（如D:/downloads）
+   MANGA_DOWNLOAD_PATH=./downloads # 默认使用当前目录下的downloads文件夹
+
+   # 黑白名单配置
+   # 群组白名单：允许使用机器人的群聊ID列表，多个ID用逗号分隔
+   # 留空表示不限制（所有群组都可以使用）
+   GROUP_WHITELIST=""
+
+   # 私信白名单：允许使用机器人的用户ID列表，多个ID用逗号分隔
+   # 留空表示不限制（所有用户都可以私信使用）
+   PRIVATE_WHITELIST=""
+
+   # 全局黑名单：任何情况下都禁止使用机器人的用户ID列表，多个ID用逗号分隔
+   # 黑名单优先级高于白名单
+   GLOBAL_BLACKLIST=""
    ```
    完成修改后保存并退出
 
@@ -571,31 +576,34 @@ Ctrl+C
 
    修改以下配置：
    ```ini
-   # 只需要修改port与NAPCAT_TOKEN即可
+   # 必须修改的只有NAPCAT_WS_URL的port
+   # 其他配置根据实际情况修改即可
 
-   # ======================
-   # NapCat WebSocket 服务配置
-   # ======================
-   # WebSocket 服务地址 - 连接NapCat WebSocket服务的URL
-   # 把port替换为你实际的NapCat WebSocket服务端口
+   # WebSocket服务端配置
+   # 修改port为实际的监听端口
    NAPCAT_WS_URL=ws://localhost:port/qq
 
-   # ======================
-   # 下载配置
-   # ======================
-   # 漫画下载存储路径 - 漫画文件下载的存储目录
-   MANGA_DOWNLOAD_PATH=./downloads
-
-   # ======================
-   # 安全配置
-   # ======================
-   # WebSocket服务令牌，与NapCat配置中的两个位置保持一致：
-   # - WebSocket服务配置部分的`token`字段
-   # - 中间件配置部分的`access-token`字段
-   # 
-   # 简化配置：只需设置NAPCAT_TOKEN一个字段即可
-   # 系统会自动将token添加到WebSocket连接URL中，无需手动添加
+   # API Token配置（可选）
+   # 用于NapCat WebSocket服务的身份验证
+   # 系统会自动将token添加到WebSocket连接URL中
    NAPCAT_TOKEN=""
+
+   # 漫画下载路径
+   # 可以使用相对路径（如./downloads）或绝对路径（如D:/downloads）
+   MANGA_DOWNLOAD_PATH=./downloads # 默认使用当前目录下的downloads文件夹
+
+   # 黑白名单配置
+   # 群组白名单：允许使用机器人的群聊ID列表，多个ID用逗号分隔
+   # 留空表示不限制（所有群组都可以使用）
+   GROUP_WHITELIST=""
+
+   # 私信白名单：允许使用机器人的用户ID列表，多个ID用逗号分隔
+   # 留空表示不限制（所有用户都可以私信使用）
+   PRIVATE_WHITELIST=""
+
+   # 全局黑名单：任何情况下都禁止使用机器人的用户ID列表，多个ID用逗号分隔
+   # 黑名单优先级高于白名单
+   GLOBAL_BLACKLIST=""
    ```
 5. **创建数据目录**
    ```bash
