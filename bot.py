@@ -161,7 +161,7 @@ class CommandParser:
 
 class MangaBot:
     # 机器人版本号
-    VERSION = "2.3.4"
+    VERSION = "2.3.6"
     
     def _parse_id_list(self, id_string: str) -> List[str]:
         """
