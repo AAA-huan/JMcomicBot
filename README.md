@@ -474,8 +474,13 @@ Ctrl+C
 1. **安装 Termux**
    - 从 [F-Droid](https://f-droid.org/packages/com.termux/) 或 Google Play 安装 Termux
    - 或者下载 Termux APK 文件手动安装
+   - 或者前往[ZeroTermux-Github](https://github.com/hanxinhao000/ZeroTermux/releases/tag/release)下载ZeroTermux.apk安装(推荐)
 
-2. **配置 Termux 并安装 proot**
+2. **换源**
+   1. 如果下载的是原版termux，换源请前往短视频平台搜索教程，这里不过多赘述。
+   2. 如果下载的是ZeroTermux，双击屏幕左侧边缘（部分ZT版本是按音量上/下键），下滑并点击"切换源"，随意选择，推荐选择清华源，等待脚本运行完成， 如无特殊说明，当出现 (Y/I/N/O/D/Z)[default=?] 或 [Y/N] 时，直接点击回车，选择默认选项即可。
+
+3. **配置 Termux 并安装 proot**
    ```bash
    # 更新包管理器
    pkg update && pkg upgrade
