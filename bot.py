@@ -1,6 +1,7 @@
 import json
 import os
 import re
+import queue
 import platform
 import sys
 import threading
@@ -31,6 +32,7 @@ class CommandParser:
             "list": ["漫画列表", "列表漫画"],
             "query": ["查询漫画", "漫画查询"],
             "version": ["漫画版本", "版本", "version"],
+            "progress": ["下载进度", "漫画进度", "进度"],
             "test_id": ["测试id"],
             "test_file": ["测试文件"],
         }
@@ -117,6 +119,7 @@ class CommandParser:
             "help",
             "list",
             "version",
+            "progress",
             "test_id",
             "test_file",
             "unknown",
@@ -159,6 +162,7 @@ class CommandParser:
             "help": "❌ 命令格式错误！'漫画帮助'命令不需要额外参数\n直接输入：漫画帮助",
             "list": "❌ 命令格式错误！'漫画列表'命令不需要额外参数\n直接输入：漫画列表",
             "version": "❌ 命令格式错误！'漫画版本'命令不需要额外参数\n直接输入：漫画版本",
+            "progress": "❌ 命令格式错误！'下载进度'命令不需要额外参数\n直接输入：下载进度",
             "test_id": "❌ 命令格式错误！'测试id'命令不需要额外参数\n直接输入：测试id",
             "test_file": "❌ 命令格式错误！'测试文件'命令不需要额外参数\n直接输入：测试文件",
             "unknown": "❓ 未知命令，请输入'漫画帮助'查看所有可用命令",
@@ -169,7 +173,7 @@ class CommandParser:
 
 class MangaBot:
     # 机器人版本号
-    VERSION = "2.3.8"
+    VERSION = "2.3.10"
 
     def _parse_id_list(self, id_string: str) -> List[str]:
         """
@@ -235,6 +239,43 @@ class MangaBot:
         self.logger.debug(f"用户 {user_id} 权限检查通过")
         return True
 
+    def _start_download_queue_processor(self) -> None:
+        """
+        启动下载队列处理线程
+        该线程将不断从队列中取出下载任务并顺序执行
+        """
+
+        def process_queue() -> None:
+            """下载队列处理函数，顺序执行队列中的下载任务"""
+            while self.queue_running:
+                try:
+                    # 从队列中获取下载任务，设置超时以便定期检查running标志
+                    task = self.download_queue.get(timeout=1)
+
+                    # 解包任务数据
+                    user_id, manga_id, group_id, private = task
+
+                    # 执行下载任务
+                    self._process_download_task(user_id, manga_id, group_id, private)
+
+                    # 标记任务完成
+                    self.download_queue.task_done()
+                except queue.Empty:
+                    # 队列为空，继续循环检查running标志
+                    continue
+                except Exception as e:
+                    self.logger.error(f"处理下载队列任务时出错: {e}")
+                    # 确保即使出错也标记任务完成，避免队列阻塞
+                    try:
+                        self.download_queue.task_done()
+                    except:
+                        pass
+
+        # 创建并启动队列处理线程，设置为守护线程
+        queue_thread = threading.Thread(target=process_queue, daemon=True)
+        queue_thread.start()
+        self.logger.info("下载队列处理线程已启动")
+
     def __init__(self) -> None:
         """初始化MangaBot机器人，添加跨平台兼容性检查"""
         # 配置日志（先初始化日志系统）
@@ -283,6 +324,16 @@ class MangaBot:
         self.downloading_mangas: Dict[str, bool] = (
             {}
         )  # 跟踪正在下载的漫画 {manga_id: True}
+        # 初始化下载队列，用于顺序处理下载任务
+        # 队列中的元素是元组(user_id: str, manga_id: str, group_id: str, private: bool)
+        self.download_queue: queue.Queue = queue.Queue()
+        # 下载队列线程控制标志，用于安全地停止队列处理线程
+        self.queue_running: bool = True
+        # 跟踪队列中的下载任务
+        # 格式: {manga_id: (user_id, group_id, private)}
+        self.queued_tasks: Dict[str, Tuple[str, Optional[str], bool]] = {}
+        # 启动下载队列处理线程
+        self._start_download_queue_processor()
 
         # 初始化黑白名单配置
         self.group_whitelist: List[str] = self._parse_id_list(
@@ -388,13 +439,37 @@ class MangaBot:
 
         # 配置东八区时区转换函数
         def cst_formatter(record):
-            # 创建东八区时区对象
-            cst_timezone = timezone(timedelta(hours=8))
-            # 将UTC时间转换为东八区时间并格式化为字符串
-            cst_time = datetime.fromtimestamp(record["time"].timestamp(), cst_timezone)
-            formatted_time = cst_time.strftime("%Y-%m-%d %H:%M:%S")
-            # 返回完全格式化的日志消息，添加换行符以确保日志条目正确分隔
-            return f"{formatted_time} CST - {record['name']} - {record['level'].name} - {record['message']}\n"
+            try:
+                # 创建东八区时区对象
+                cst_timezone = timezone(timedelta(hours=8))
+                
+                # 安全地获取时间戳，防止KeyError
+                timestamp = record.get("time", time.time())
+                
+                # 处理不同类型的时间戳
+                if hasattr(timestamp, 'timestamp'):
+                    # 如果是datetime对象
+                    cst_time = datetime.fromtimestamp(timestamp.timestamp(), cst_timezone)
+                else:
+                    # 如果是数值型时间戳
+                    cst_time = datetime.fromtimestamp(timestamp, cst_timezone)
+                
+                # 格式化时间字符串
+                formatted_time = cst_time.strftime("%Y-%m-%d %H:%M:%S")
+                
+                # 安全获取其他必要字段
+                name = record.get('name', 'UNKNOWN')
+                level_name = record.get('level', type('obj', (object,), {'name': 'UNKNOWN'})).name
+                message = record.get('message', '')
+                
+                # 返回完全格式化的日志消息，确保所有特殊字符都正确处理
+                # 转义大括号以防止format错误
+                safe_message = str(message).replace('{', '{{').replace('}', '}}')
+                return f"{formatted_time} CST - {name} - {level_name} - {safe_message}\n"
+            except Exception as e:
+                # 如果格式化失败，返回基本错误信息
+                fallback_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                return f"{fallback_time} CST - ERROR - 日志格式化失败: {str(e)}\n"
 
         # 配置控制台日志（INFO级别，无彩色）
         loguru_logger.add(
@@ -621,23 +696,35 @@ class MangaBot:
                     self.logger.error(f"重连WebSocket失败: {e}")
 
     def handle_event(self, data):
-        # 事件处理函数
-        # 生成唯一的事件ID用于追踪
-        event_id = hash(str(data))
-        # 获取时间戳
-        timestamp = data.get("time", time.time())
+        """事件处理函数"""
+        try:
+            # 生成唯一的事件ID用于追踪
+            event_id = hash(str(data))
+            # 安全获取时间戳，确保不会出现KeyError
+            timestamp = data.get("time", time.time())
 
-        # 详细日志，记录事件的唯一标识符和时间戳
-        self.logger.info(
-            f"收到事件 [ID:{event_id}] - 类型: {data.get('post_type')}, {data.get('meta_event_type') or data.get('message_type')}, 时间戳: {timestamp}"
-        )
-        self.logger.debug(f"事件详细数据: {str(data)[:200]}...")
+            # 安全获取事件类型字段，防止KeyError
+            post_type = data.get('post_type', 'UNKNOWN')
+            event_type = data.get('meta_event_type', data.get('message_type', 'UNKNOWN'))
 
-        # 直接从消息的根级别获取self_id
-        if "self_id" in data and data["self_id"]:
-            if not self.SELF_ID or self.SELF_ID != data["self_id"]:
-                self.SELF_ID = data["self_id"]
-                self.logger.info(f"从消息中获取到自身ID: {self.SELF_ID}")
+            # 详细日志，记录事件的唯一标识符和时间戳
+            self.logger.info(
+                f"收到事件 [ID:{event_id}] - 类型: {post_type}, {event_type}, 时间戳: {timestamp}"
+            )
+            self.logger.debug(f"事件详细数据: {str(data)[:200]}...")
+
+            # 直接从消息的根级别获取self_id
+            self_id_value = data.get("self_id")
+            if self_id_value:
+                if not self.SELF_ID or self.SELF_ID != self_id_value:
+                    self.SELF_ID = self_id_value
+                    self.logger.info(f"从消息中获取到自身ID: {self.SELF_ID}")
+        except Exception as e:
+            # 捕获所有异常，防止事件处理中断
+            self.logger.error(f"处理事件时出错: {str(e)}")
+            # 使用更简单的错误记录方式
+            error_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+            print(f"{error_time} - 处理事件失败: {str(e)}")
 
         # 处理元事件
         if data.get("post_type") == "meta_event":
@@ -777,6 +864,9 @@ class MangaBot:
         # 漫画版本查询命令
         elif cmd == "version":
             self.send_version_info(user_id, group_id, private)
+        # 下载进度查询命令
+        elif cmd == "progress":
+            self.show_download_progress(user_id, group_id or "", private)
         # 测试命令，显示当前SELF_ID状态
         elif cmd == "test_id":
             # 测试命令，显示机器人当前的SELF_ID状态
@@ -951,11 +1041,12 @@ class MangaBot:
             help_text += "⚠️ 在群聊中请先@我再发送命令！\n\n"
 
         help_text += "💡 可用命令：\n"
+        help_text += "- 漫画帮助：显示此帮助信息\n"
         help_text += "- 漫画下载 <漫画ID>：下载指定ID的漫画\n"
-        help_text += "- 发送 <漫画ID>：发送指定ID的已下载漫画（只支持PDF格式）\n"
+        help_text += "- 发送漫画 <漫画ID>：发送指定ID的已下载漫画（只支持PDF格式）\n"
         help_text += "- 查询漫画 <漫画ID>：查询指定ID的漫画是否已下载\n"
         help_text += "- 漫画列表：查询已下载的所有漫画\n"
-        help_text += "- 漫画帮助：显示此帮助信息\n"
+        help_text += "- 下载进度：查看当前漫画下载队列的状况\n"
         help_text += "- 漫画版本：显示机器人当前版本信息\n\n"
         help_text += "⚠️ 注意事项：\n"
         help_text += "- 命令与漫画ID之间记得加空格\n"
@@ -980,15 +1071,81 @@ class MangaBot:
         )
         self.send_message(user_id, version_text, group_id, private)
 
-    def handle_manga_download(self, user_id, manga_id, group_id, private):
+    def show_download_progress(
+        self, user_id: str, group_id: Optional[str], private: bool
+    ) -> None:
+        """
+        显示当前下载队列的进度信息
+
+        此方法从下载队列状态管理字典中获取信息，并以结构化格式展示给用户，
+        包括正在下载的漫画列表、等待下载的漫画列表以及总任务数。
+
+        Args:
+            user_id: 用户ID，用于发送回复消息
+            group_id: 群组ID，如果是群聊则提供，私聊时为None
+            private: 是否为私聊消息
+
+        Returns:
+            None: 此方法不返回值，直接通过send_message发送消息给用户
+
+        Raises:
+            Exception: 当处理过程中出现任何错误时，会记录错误并向用户发送友好提示
+        """
+        self.logger.info(f"显示下载进度请求 - 用户{user_id}")
+
+        try:
+            # 获取正在下载的漫画列表
+            downloading_mangas: List[str] = list(self.downloading_mangas.keys())
+            # 获取队列中待下载的漫画列表
+            queued_mangas: List[str] = list(self.queued_tasks.keys())
+
+            # 构建响应消息
+            response: str = "📊 当前下载队列状态 📊\n\n"
+
+            # 添加正在下载的信息
+            if downloading_mangas:
+                response += f"⏳ 正在下载: {len(downloading_mangas)} 个漫画\n"
+                for manga_id in downloading_mangas:
+                    response += f"  • {manga_id}\n"
+            else:
+                response += "✅ 当前没有正在下载的漫画\n"
+
+            response += "\n"
+
+            # 添加队列等待信息
+            if queued_mangas:
+                response += f"📋 队列等待: {len(queued_mangas)} 个漫画\n"
+                for manga_id in queued_mangas:
+                    response += f"  • {manga_id}\n"
+            else:
+                response += "✅ 下载队列为空\n"
+
+            response += "\n"
+            response += (
+                f"📝 总任务数: {len(downloading_mangas) + len(queued_mangas)}\n"
+            )
+            response += "\n💡 提示: 下载任务将按顺序执行，请耐心等待"
+
+            # 发送响应消息
+            self.send_message(user_id, response, group_id, private)
+
+        except Exception as e:
+            self.logger.error(f"显示下载进度时出错: {e}")
+            error_msg = "❌ 查询下载进度失败：请稍后再试"
+            self.send_message(user_id, error_msg, group_id, private)
+
+    def handle_manga_download(
+        self, user_id: str, manga_id: str, group_id: str, private: bool
+    ) -> None:
         """
         处理漫画下载请求
+        检查漫画是否已存在，然后将下载任务添加到队列中
 
         参数:
-            user_id: 用户ID
+            user_id: 用户ID，请求下载的用户
             manga_id: 漫画ID (由CommandParser验证)
-            group_id: 群ID
-            private: 是否为私聊
+            group_id: 群ID，请求来源的群组
+            private: 是否为私聊，决定消息发送的方式
         """
         self.logger.info(f"处理漫画下载请求 - 用户{user_id}, 漫画ID: {manga_id}")
 
@@ -1034,14 +1191,30 @@ class MangaBot:
         response = f"开始下载漫画ID：{manga_id}啦~，请稍候..."
         self.send_message(user_id, response, group_id, private)
 
-        # 在新线程中下载漫画，避免阻塞
-        threading.Thread(
-            target=self.download_manga, args=(user_id, manga_id, group_id, private)
-        ).start()
+        # 将下载任务添加到队列（download_manga方法现在会将任务添加到队列中）
+        self.download_manga(user_id, manga_id, group_id, private)
 
-    def download_manga(self, user_id, manga_id, group_id, private):
+    def _process_download_task(
+        self, user_id: str, manga_id: str, group_id: str, private: bool
+    ) -> None:
+        """
+        处理队列中的下载任务
+        实际执行漫画下载的方法，确保下载任务按顺序执行，避免并发下载导致的资源竞争
+
+        参数:
+            user_id: 用户ID，用于回复下载状态
+            manga_id: 漫画ID，指定要下载的漫画
+            group_id: 群ID，用于在群聊中发送消息
+            private: 是否为私聊，决定消息发送的目标
+
+        异常:
+            所有下载相关的异常都会被捕获并记录，确保队列继续处理其他任务
+        """
         # 下载漫画函数
         try:
+            # 从队列任务跟踪中移除（已开始处理）
+            if manga_id in self.queued_tasks:
+                del self.queued_tasks[manga_id]
             # 标记该漫画正在下载中
             self.downloading_mangas[manga_id] = True
 
@@ -1092,7 +1265,7 @@ class MangaBot:
                 import shutil
                 import sys
 
-                # 安装必要的依赖（如果没有的话）
+                # 安装必要地依赖（如果没有的话）
                 try:
                     from PIL import Image
                 except ImportError:
@@ -1167,6 +1340,26 @@ class MangaBot:
             # 下载完成或失败后，移除正在下载的标记
             if manga_id in self.downloading_mangas:
                 del self.downloading_mangas[manga_id]
+
+    def download_manga(
+        self, user_id: str, manga_id: str, group_id: str, private: bool
+    ) -> None:
+        """
+        下载漫画的兼容方法
+        保持向后兼容，实际操作是将任务添加到下载队列，而不是直接执行下载
+        这样可以确保所有下载任务按顺序执行，避免资源冲突和混乱
+
+        参数:
+            user_id: 用户ID，用于回复下载状态
+            manga_id: 漫画ID，指定要下载的漫画
+            group_id: 群ID，用于在群聊中发送消息
+            private: 是否为私聊，决定消息发送的目标
+        """
+        # 记录任务到状态跟踪字典
+        self.queued_tasks[manga_id] = (user_id, group_id, private)
+        # 将下载任务添加到队列
+        self.download_queue.put((user_id, manga_id, group_id, private))
+        self.logger.info(f"漫画ID {manga_id} 的下载任务已添加到队列")
 
     def handle_manga_send(self, user_id, manga_id, group_id, private):
         """
@@ -1318,7 +1511,12 @@ class MangaBot:
                     self.logger.error(f"关闭WebSocket连接时出错: {ws_error}")
                     raise ws_error  # Fail Fast：重新抛出异常，让调用者知道关闭过程失败
 
-            # 2. 清理下载状态
+            # 2. 停止下载队列线程
+            self.logger.info("停止下载队列处理线程...")
+            self.queue_running = False
+            self.logger.info("下载队列线程已设置为停止状态")
+
+            # 3. 清理下载状态
             if self.downloading_mangas:
                 self.logger.info(
                     f"清理正在下载的漫画任务: {list(self.downloading_mangas.keys())}"
