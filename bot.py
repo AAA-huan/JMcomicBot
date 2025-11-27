@@ -3,6 +3,7 @@ import os
 import re
 import queue
 import platform
+import shutil
 import sys
 import threading
 import time
@@ -173,7 +174,7 @@ class CommandParser:
 
 class MangaBot:
     # 机器人版本号
-    VERSION = "2.3.10"
+    VERSION = "2.3.12"
 
     def _parse_id_list(self, id_string: str) -> List[str]:
         """
@@ -359,6 +360,55 @@ class MangaBot:
         self.command_parser = CommandParser()
         self.logger.info("命令解析器初始化完成")
 
+        # 清理下载失败的文件
+        self.cleanup_failed_downloads()
+
+    def cleanup_failed_downloads(self) -> None:
+        """
+        清理下载目录中下载失败的文件和文件夹
+        - 删除未转换为PDF的漫画文件夹
+        - 删除临时文件
+        """
+        download_path = str(self.config["MANGA_DOWNLOAD_PATH"])
+        self.logger.info(f"开始清理下载目录: {download_path}")
+
+        if not os.path.exists(download_path):
+            self.logger.info("下载目录不存在，跳过清理")
+            return
+
+        cleaned_count = 0
+
+        # 遍历下载目录
+        for item in os.listdir(download_path):
+            item_path = os.path.join(download_path, item)
+
+            # 检查是否为漫画文件夹（以数字ID开头）
+            if os.path.isdir(item_path):
+                # 检查文件夹名是否以数字开头（漫画ID）
+                if re.match(r"^\d+", item):
+                    # 检查是否有对应的PDF文件
+                    pdf_file = os.path.join(download_path, f"{item}.pdf")
+                    if not os.path.exists(pdf_file):
+                        # 没有对应的PDF文件，说明下载或转换失败
+                        self.logger.info(f"清理下载失败的漫画文件夹: {item}")
+                        shutil.rmtree(item_path)
+                        cleaned_count += 1
+
+            # 检查是否为文件
+            elif os.path.isfile(item_path):
+                # 检查是否为临时文件
+                if item.endswith(".tmp") or item.endswith(".temp"):
+                    self.logger.info(f"清理临时文件: {item}")
+                    os.remove(item_path)
+                    cleaned_count += 1
+                # 检查是否为以数字开头的非PDF文件（可能是下载失败的文件）
+                elif re.match(r"^\d+", item) and not item.endswith(".pdf"):
+                    self.logger.info(f"清理下载失败的文件: {item}")
+                    os.remove(item_path)
+                    cleaned_count += 1
+
+        self.logger.info(f"下载目录清理完成，共清理 {cleaned_count} 个项目")
+
     def _check_platform_compatibility(self) -> None:
         """检查操作系统兼容性，确保在Linux和Windows上都能正常运行"""
         current_platform: str = platform.system().lower()
@@ -442,30 +492,36 @@ class MangaBot:
             try:
                 # 创建东八区时区对象
                 cst_timezone = timezone(timedelta(hours=8))
-                
+
                 # 安全地获取时间戳，防止KeyError
                 timestamp = record.get("time", time.time())
-                
+
                 # 处理不同类型的时间戳
-                if hasattr(timestamp, 'timestamp'):
+                if hasattr(timestamp, "timestamp"):
                     # 如果是datetime对象
-                    cst_time = datetime.fromtimestamp(timestamp.timestamp(), cst_timezone)
+                    cst_time = datetime.fromtimestamp(
+                        timestamp.timestamp(), cst_timezone
+                    )
                 else:
                     # 如果是数值型时间戳
                     cst_time = datetime.fromtimestamp(timestamp, cst_timezone)
-                
+
                 # 格式化时间字符串
                 formatted_time = cst_time.strftime("%Y-%m-%d %H:%M:%S")
-                
+
                 # 安全获取其他必要字段
-                name = record.get('name', 'UNKNOWN')
-                level_name = record.get('level', type('obj', (object,), {'name': 'UNKNOWN'})).name
-                message = record.get('message', '')
-                
+                name = record.get("name", "UNKNOWN")
+                level_name = record.get(
+                    "level", type("obj", (object,), {"name": "UNKNOWN"})
+                ).name
+                message = record.get("message", "")
+
                 # 返回完全格式化的日志消息，确保所有特殊字符都正确处理
                 # 转义大括号以防止format错误
-                safe_message = str(message).replace('{', '{{').replace('}', '}}')
-                return f"{formatted_time} CST - {name} - {level_name} - {safe_message}\n"
+                safe_message = str(message).replace("{", "{{").replace("}", "}}")
+                return (
+                    f"{formatted_time} CST - {name} - {level_name} - {safe_message}\n"
+                )
             except Exception as e:
                 # 如果格式化失败，返回基本错误信息
                 fallback_time = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
@@ -704,8 +760,10 @@ class MangaBot:
             timestamp = data.get("time", time.time())
 
             # 安全获取事件类型字段，防止KeyError
-            post_type = data.get('post_type', 'UNKNOWN')
-            event_type = data.get('meta_event_type', data.get('message_type', 'UNKNOWN'))
+            post_type = data.get("post_type", "UNKNOWN")
+            event_type = data.get(
+                "meta_event_type", data.get("message_type", "UNKNOWN")
+            )
 
             # 详细日志，记录事件的唯一标识符和时间戳
             self.logger.info(
@@ -1121,9 +1179,7 @@ class MangaBot:
                 response += "✅ 下载队列为空\n"
 
             response += "\n"
-            response += (
-                f"📝 总任务数: {len(downloading_mangas) + len(queued_mangas)}\n"
-            )
+            response += f"📝 总任务数: {len(downloading_mangas) + len(queued_mangas)}\n"
             response += "\n💡 提示: 下载任务将按顺序执行，请耐心等待"
 
             # 发送响应消息
