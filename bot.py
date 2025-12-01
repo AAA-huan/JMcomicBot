@@ -832,6 +832,17 @@ class MangaBot:
 
             self.logger.info(f"收到群消息 - 群{group_id} 用户{user_id}: {message}")
 
+            # 记录原始消息中是否包含CQ:reply格式
+            has_reply_format = '[CQ:reply,' in message
+            
+            # 首先移除消息中所有CQ:reply格式的内容（如[CQ:reply,id=1321]）
+            # 使用正则表达式匹配所有CQ:reply格式
+            message = re.sub(r'\[CQ:reply,id=\d+\]', '', message)
+            
+            # 添加日志确认CQ:reply部分是否被移除
+            if has_reply_format:
+                self.logger.debug(f"CQ:reply格式已从消息中移除")
+
             # 检查是否被@
             at_self = False
 
