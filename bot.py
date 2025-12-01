@@ -841,6 +841,7 @@ class MangaBot:
                 if (
                     f"@{self.SELF_ID}" in message
                     or f"[CQ:at,qq={self.SELF_ID}]" in message
+                    or f"[CQ:reply,qq={self.SELF_ID}]" in message
                 ):
                     at_self = True
                 self.logger.debug(f"SELF_ID: {self.SELF_ID}, 被@状态: {at_self}")
