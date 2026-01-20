@@ -1,6 +1,7 @@
 from typing import Dict, List, Optional, Pattern, Tuple
 import re
 
+
 class CommandParser:
     """
     命令解析器类，负责解析和验证用户输入的命令和参数
@@ -32,15 +33,9 @@ class CommandParser:
     def parse(self, message: str) -> Tuple[str, str]:
         """
         解析用户输入的消息，提取命令和参数
-
-        Args:
-            message: 用户输入的原始消息
-
-        Returns:
-            Tuple[str, str]: (标准化的命令名, 参数部分)
-
-        Raises:
-            ValueError: 当消息为空或格式错误时
+        :param message: 用户输入的原始消息
+        :return: Tuple[str, str]: (标准化的命令名, 参数部分)
+        :Raises: ValueError: 当消息为空或格式错误时
         """
         if not message or not message.strip():
             raise ValueError("空消息或仅包含空白字符")
