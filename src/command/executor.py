@@ -6,7 +6,11 @@ from typing import Any, Callable, Dict, Optional
 
 from src.command.parser import CommandParser
 from src.logging.logger_config import logger
-from src.utils.helpers import find_manga_pdf, list_downloaded_mangas
+from src.utils.helpers import (
+    find_manga_pdf,
+    get_file_size_mb,
+    list_downloaded_mangas_with_size,
+)
 
 
 class CommandExecutor:
@@ -21,6 +25,7 @@ class CommandExecutor:
         download_manager: Any,
         config: Dict[str, Any],
         self_id_getter: Callable[[], Optional[str]],
+        permission_manager: Any,
     ) -> None:
         """
         初始化命令执行器
@@ -31,16 +36,25 @@ class CommandExecutor:
             download_manager: 下载管理器实例
             config: 配置字典
             self_id_getter: 获取自身ID的函数
+            permission_manager: 权限管理器实例
         """
         self.message_sender = message_sender
         self.file_sender = file_sender
         self.download_manager = download_manager
         self.config = config
         self.self_id_getter = self_id_getter
+        self.permission_manager = permission_manager
         self.command_parser = CommandParser()
         self.logger = logger
+        self.SELF_ID: Optional[str] = None
 
-    def execute_command(self, user_id: str, message: str, group_id: Optional[str] = None, private: bool = True) -> None:
+    def execute_command(
+        self,
+        user_id: str,
+        message: str,
+        group_id: Optional[str] = None,
+        private: bool = True,
+    ) -> None:
         """
         执行用户命令
 
@@ -54,10 +68,14 @@ class CommandExecutor:
             ValueError: 当消息为空或命令格式错误时
         """
         command_id = hash(str(time.time()) + message[:50])
-        self.logger.info(f"[命令ID:{command_id}] 开始处理命令 - 用户{user_id}, 私聊={private}")
+        self.logger.info(
+            f"[命令ID:{command_id}] 开始处理命令 - 用户{user_id}, 私聊={private}"
+        )
 
         if message is None:
-            error_msg = "(｡•﹃•｡)叽里咕噜说什么呢，听不懂。\n发送漫画帮助看看我怎么用吧！"
+            error_msg = (
+                "(｡•﹃•｡)叽里咕噜说什么呢，听不懂。\n发送漫画帮助看看我怎么用吧！"
+            )
             self.message_sender(user_id, error_msg, group_id, private)
             raise ValueError("收到空消息")
 
@@ -78,6 +96,13 @@ class CommandExecutor:
             self.logger.warning(f"[命令ID:{command_id}] 参数验证失败: {error_msg}")
             self.message_sender(user_id, error_msg, group_id, private)
             raise ValueError(f"参数验证失败: {error_msg}")
+
+        try:
+            self.permission_manager.check_user_permission(user_id, group_id, private)
+        except ValueError as e:
+            self.logger.warning(f"[命令ID:{command_id}] 权限检查失败: {e}")
+            self.message_sender(user_id, str(e), group_id, private)
+            raise
 
         self._dispatch_command(user_id, cmd, args, group_id, private)
 
@@ -110,6 +135,7 @@ class CommandExecutor:
             "test_id": self._test_id,
             "test_file": self._test_file,
             "welcome": self._send_welcome,
+            "delete": self._handle_manga_delete,
         }
 
         handler = command_handlers.get(cmd)
@@ -118,9 +144,11 @@ class CommandExecutor:
         else:
             self.logger.warning(f"未知命令: {cmd}")
 
-    def _send_help(self, user_id: str, args: str, group_id: Optional[str], private: bool) -> None:
+    def _send_help(
+        self, user_id: str, args: str, group_id: Optional[str], private: bool
+    ) -> None:
         """发送帮助信息"""
-        help_text = f"📚 本小姐的帮助 📚(版本{self.VERSION})\n\n"
+        help_text = f"📚 帮助 📚(版本{self.VERSION})\n\n"
 
         if not private:
             help_text += "⚠️ 在群聊中请先@我再发送命令！\n\n"
@@ -132,28 +160,34 @@ class CommandExecutor:
         help_text += "- 查询漫画 <漫画ID>：查询指定ID的漫画是否已下载\n"
         help_text += "- 漫画列表：查询已下载的所有漫画\n"
         help_text += "- 下载进度：查看当前漫画下载队列的状况\n"
-        help_text += "- 漫画版本：显示机器人当前版本信息\n\n"
+        help_text += "- 漫画版本：显示机器人当前版本信息\n"
+        help_text += "- 删除漫画 <漫画ID>：删除指定ID的已下载漫画（仅限特定用户）\n\n"
         help_text += "⚠️ 注意事项：\n"
         help_text += "- 命令与漫画ID之间记得加空格\n"
         help_text += "- 请确保输入正确的漫画ID\n"
         help_text += "- 下载过程可能需要一些时间，请耐心等待\n"
         help_text += "- 下载的漫画将保存在配置的目录中\n"
         help_text += "- 发送漫画前请确保该漫画已成功下载并转换为PDF格式\n"
-        help_text += f"- 当前版本只支持发送PDF格式的漫画文件\n\n"
+        help_text += f"- 当前版本只支持发送PDF格式的漫画文件\n"
+        help_text += "- 删除漫画功能仅限特定用户使用\n\n"
         help_text += f"🔖 当前版本: {self.VERSION}"
 
         self.message_sender(user_id, help_text, group_id, private)
 
-    def _handle_manga_download(self, user_id: str, manga_id: str, group_id: Optional[str], private: bool) -> None:
+    def _handle_manga_download(
+        self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
+    ) -> None:
         """处理漫画下载请求"""
         self.logger.info(f"处理漫画下载请求 - 用户{user_id}, 漫画ID: {manga_id}")
 
         pdf_path = find_manga_pdf(str(self.config["MANGA_DOWNLOAD_PATH"]), manga_id)
 
         if pdf_path:
-            response = f"✅૮₍ ˶•‸•˶₎ა 漫画ID {manga_id} 已经下载过了！\n\n"
-            response += f"找到文件：{os.path.basename(pdf_path)}\n\n"
-            response += f"你可以使用 '发送 {manga_id}' 命令获取该漫画哦~"
+            response = (
+                f"✅૮₍ ˶•‸•˶₎ა 漫画ID {manga_id} 已经下载过了！\n\n"
+                f"找到文件：{os.path.basename(pdf_path)}\n\n"
+                f"你可以使用 '发送 {manga_id}' 命令获取该漫画哦~"
+            )
             self.message_sender(user_id, response, group_id, private)
             return
 
@@ -161,20 +195,30 @@ class CommandExecutor:
         self.message_sender(user_id, response, group_id, private)
         self.download_manager.download_manga(user_id, manga_id, group_id, private)
 
-    def _handle_manga_send(self, user_id: str, manga_id: str, group_id: Optional[str], private: bool) -> None:
+    def _handle_manga_send(
+        self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
+    ) -> None:
         """处理漫画发送请求"""
         self.logger.info(f"处理漫画发送请求 - 用户{user_id}, 漫画ID: {manga_id}")
 
         response = f"ฅ( ̳• ·̫ • ̳ฅ)正在查找并准备发送漫画ID：{manga_id}，请稍候..."
         self.message_sender(user_id, response, group_id, private)
 
-        threading.Thread(target=self._send_manga_files, args=(user_id, manga_id, group_id, private)).start()
+        threading.Thread(
+            target=self._send_manga_files, args=(user_id, manga_id, group_id, private)
+        ).start()
 
-    def _send_manga_files(self, user_id: str, manga_id: str, group_id: Optional[str], private: bool) -> None:
+    def _send_manga_files(
+        self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
+    ) -> None:
         """发送漫画文件"""
         try:
             if manga_id in self.download_manager.downloading_mangas:
-                response = f"⏳ 漫画ID {manga_id} 正在下载中！请耐心等待下载完成后再尝试发送。\n\n你可以使用 '查询漫画 {manga_id}' 命令检查下载状态。"
+                response = (
+                    f"⏳ 漫画ID {manga_id} 正在下载中！"
+                    f"请耐心等待下载完成后再尝试发送。\n\n"
+                    f"你可以使用 '查询漫画 {manga_id}' 命令检查下载状态。"
+                )
                 self.message_sender(user_id, response, group_id, private)
                 return
 
@@ -182,12 +226,19 @@ class CommandExecutor:
 
             if pdf_path:
                 self.logger.info(f"找到PDF文件: {pdf_path}")
-                self.message_sender(user_id, f"找到漫画PDF文件，开始发送...", group_id, private)
+                self.message_sender(
+                    user_id, f"找到漫画PDF文件，开始发送...", group_id, private
+                )
                 self.file_sender(user_id, pdf_path, group_id, private)
-                self.message_sender(user_id, "✅ฅ( ̳• ·̫ • ̳ฅ) 漫画PDF发送完成！", group_id, private)
+                self.message_sender(
+                    user_id, "✅ฅ( ̳• ·̫ • ̳ฅ) 漫画PDF发送完成！", group_id, private
+                )
                 return
 
-            error_msg = f"❌( っ`-´c)ﾏ 未找到漫画ID {manga_id} 的PDF文件，请先下载该漫画并确保已转换为PDF格式"
+            error_msg = (
+                f"❌( っ`-´c)ﾏ 未找到漫画ID {manga_id} 的PDF文件，"
+                f"请先下载该漫画并确保已转换为PDF格式"
+            )
             self.message_sender(user_id, error_msg, group_id, private)
 
         except Exception as e:
@@ -195,23 +246,38 @@ class CommandExecutor:
             error_msg = f"❌ 发送失败：{str(e)}\n快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
             self.message_sender(user_id, error_msg, group_id, private)
 
-    def _query_downloaded_manga(self, user_id: str, args: str, group_id: Optional[str], private: bool) -> None:
+    def _query_downloaded_manga(
+        self, user_id: str, args: str, group_id: Optional[str], private: bool
+    ) -> None:
         """查询已下载的漫画"""
         self.logger.info(f"开始处理漫画列表查询 - 用户{user_id}")
 
         try:
-            pdf_files = list_downloaded_mangas(str(self.config["MANGA_DOWNLOAD_PATH"]))
+            pdf_files = list_downloaded_mangas_with_size(
+                str(self.config["MANGA_DOWNLOAD_PATH"])
+            )
 
             if not pdf_files:
-                response = "📚↖(^ω^)↗ 目前没有已下载的漫画PDF文件！\n把你们珍藏的车牌号都统统交给我吧~~~"
+                response = (
+                    "📚↖(^ω^)↗ 目前没有已下载的漫画PDF文件！\n"
+                    "把你们珍藏的车牌号都统统交给我吧~~~"
+                )
             else:
                 response = "📚 已下载的漫画列表：\n\n"
                 for i in range(0, len(pdf_files), 5):
                     group = pdf_files[i : i + 5]
-                    response += "\n".join([f"{j+1}. {name}" for j, name in enumerate(group, start=i)])
+                    response += "\n".join(
+                        [
+                            f"{j+1}. {name} ({size} MB)"
+                            for j, (name, size) in enumerate(group, start=i)
+                        ]
+                    )
                     response += "\n\n"
 
-                response += f"总计：{len(pdf_files)} 个漫画PDF文件"
+                total_size = sum(size for _, size in pdf_files)
+                response += (
+                    f"总计：{len(pdf_files)} 个漫画PDF文件\n" f"总大小：{total_size} MB"
+                )
 
             self.message_sender(user_id, response, group_id, private)
         except FileNotFoundError as e:
@@ -219,21 +285,30 @@ class CommandExecutor:
             error_msg = "❌ 下载目录不存在！\n快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
             self.message_sender(user_id, error_msg, group_id, private)
 
-    def _query_manga_existence(self, user_id: str, manga_id: str, group_id: Optional[str], private: bool) -> None:
+    def _query_manga_existence(
+        self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
+    ) -> None:
         """查询指定漫画ID是否已下载"""
         self.logger.info(f"查询漫画存在性 - 用户{user_id}, 漫画ID: {manga_id}")
 
         try:
             if manga_id in self.download_manager.downloading_mangas:
-                response = f"⏳ 漫画ID {manga_id} 正在下载中！请耐心等待下载完成后再尝试发送。"
+                response = (
+                    f"⏳ 漫画ID {manga_id} 正在下载中！"
+                    f"请耐心等待下载完成后再尝试发送。"
+                )
                 self.message_sender(user_id, response, group_id, private)
                 return
 
             pdf_path = find_manga_pdf(str(self.config["MANGA_DOWNLOAD_PATH"]), manga_id)
 
             if pdf_path:
-                response = f"✅ദ്ദി˶>ω<)✧ 漫画ID {manga_id} 已经下载好啦！\n\n"
-                response += f"找到文件：{os.path.basename(pdf_path)}"
+                file_size_mb = get_file_size_mb(pdf_path)
+                response = (
+                    f"✅ദ്ദി˶>ω<)✧ 漫画ID {manga_id} 已经下载好啦！\n\n"
+                    f"找到文件：{os.path.basename(pdf_path)}\n"
+                    f"文件大小：{file_size_mb} MB"
+                )
             else:
                 response = f"❌（｀Δ´）！ 漫画ID {manga_id} 还没有下载！"
 
@@ -243,7 +318,9 @@ class CommandExecutor:
             error_msg = "❌ 下载目录不存在！快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
             self.message_sender(user_id, error_msg, group_id, private)
 
-    def _send_version_info(self, user_id: str, args: str, group_id: Optional[str], private: bool) -> None:
+    def _send_version_info(
+        self, user_id: str, args: str, group_id: Optional[str], private: bool
+    ) -> None:
         """发送版本信息"""
         version_text = (
             f"🔖 JMComic QQ机器人\n"
@@ -254,7 +331,9 @@ class CommandExecutor:
         )
         self.message_sender(user_id, version_text, group_id, private)
 
-    def _show_download_progress(self, user_id: str, args: str, group_id: Optional[str], private: bool) -> None:
+    def _show_download_progress(
+        self, user_id: str, args: str, group_id: Optional[str], private: bool
+    ) -> None:
         """显示当前下载队列的进度信息"""
         self.logger.info(f"显示下载进度请求 - 用户{user_id}")
 
@@ -285,7 +364,9 @@ class CommandExecutor:
 
         self.message_sender(user_id, response, group_id, private)
 
-    def _test_id(self, user_id: str, args: str, group_id: Optional[str], private: bool) -> None:
+    def _test_id(
+        self, user_id: str, args: str, group_id: Optional[str], private: bool
+    ) -> None:
         """测试命令，显示当前SELF_ID状态"""
         self_id = self.self_id_getter()
         if self_id:
@@ -293,7 +374,9 @@ class CommandExecutor:
         else:
             self.message_sender(user_id, "❌ 机器人ID未获取", group_id, private)
 
-    def _test_file(self, user_id: str, args: str, group_id: Optional[str], private: bool) -> None:
+    def _test_file(
+        self, user_id: str, args: str, group_id: Optional[str], private: bool
+    ) -> None:
         """测试文件发送功能"""
         self.message_sender(user_id, "🔍 开始测试文件发送功能...", group_id, private)
 
@@ -304,7 +387,9 @@ class CommandExecutor:
                 f.write(f"测试时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n")
                 f.write(f"机器人ID: {self.self_id_getter() or '未获取'}\n")
 
-            self.message_sender(user_id, f"📄 已创建测试文件: {test_file_path}", group_id, private)
+            self.message_sender(
+                user_id, f"📄 已创建测试文件: {test_file_path}", group_id, private
+            )
             self.message_sender(user_id, "🚀 开始发送测试文件...", group_id, private)
 
             self.file_sender(user_id, test_file_path, group_id, private)
@@ -315,9 +400,47 @@ class CommandExecutor:
 
         except Exception as e:
             self.logger.error(f"创建测试文件失败: {e}")
-            self.message_sender(user_id, f"❌ 创建测试文件失败: {str(e)}", group_id, private)
+            self.message_sender(
+                user_id, f"❌ 创建测试文件失败: {str(e)}", group_id, private
+            )
 
-    def _send_welcome(self, user_id: str, args: str, group_id: Optional[str], private: bool) -> None:
+    def _send_welcome(
+        self, user_id: str, args: str, group_id: Optional[str], private: bool
+    ) -> None:
         """发送欢迎消息"""
-        response = "你好！我是高性能JM机器人૮₍♡>𖥦<₎ა，可以帮你下载JMComic的漫画哦~~~\n输入 '漫画帮助' 就可以查看我的使用方法啦~"
+        response = (
+            "你好！我是高性能JM机器人૮₍♡>𖥦<₎ა，"
+            "可以帮你下载JMComic的漫画哦~~~\n"
+            "输入 '漫画帮助' 就可以查看我的使用方法啦~"
+        )
         self.message_sender(user_id, response, group_id, private)
+
+    def _handle_manga_delete(
+        self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
+    ) -> None:
+        """处理漫画删除请求"""
+        self.logger.info(f"处理漫画删除请求 - 用户{user_id}, 漫画ID: {manga_id}")
+
+        try:
+            self.permission_manager.check_delete_permission(user_id)
+        except ValueError as e:
+            if "必须且只能有一个用户" in str(e):
+                response = (
+                    f"❌\u001b[31m删除功能不可用："
+                    f"删除权限用户名单必须且只能有一个用户\u001b[0m"
+                )
+                self.message_sender(user_id, response, group_id, private)
+                return
+            if "未配置删除权限用户" in str(e):
+                response = (
+                    f"❌\u001b[31m删除功能不可用：" f"未配置删除权限用户\u001b[0m"
+                )
+                self.message_sender(user_id, response, group_id, private)
+                return
+            error_msg = f"❌ 权限检查失败：{str(e)}"
+            self.message_sender(user_id, error_msg, group_id, private)
+            return
+
+        response = f"ฅ( ̳• ·̫ • ̳ฅ)正在删除漫画ID：{manga_id}，请稍候..."
+        self.message_sender(user_id, response, group_id, private)
+        self.download_manager.delete_manga(user_id, manga_id, group_id, private)

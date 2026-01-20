@@ -21,6 +21,7 @@ class CommandParser:
             "progress": ["下载进度", "漫画进度", "进度"],
             "test_id": ["测试id"],
             "test_file": ["测试文件"],
+            "delete": ["删除", "删除漫画", "漫画删除"],
         }
 
         # 参数验证规则
@@ -28,6 +29,7 @@ class CommandParser:
             "download": re.compile(r"^\d+$"),  # 下载命令需要纯数字ID
             "send": re.compile(r"^\d+$"),  # 发送命令需要纯数字ID
             "query": re.compile(r"^\d+$"),  # 查询命令需要纯数字ID
+            "delete": re.compile(r"^\d+$"),  # 删除命令需要纯数字ID
         }
 
     def parse(self, message: str) -> Tuple[str, str]:
@@ -139,6 +141,7 @@ class CommandParser:
             "download": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n例如：漫画下载 350234",
             "send": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n例如：发送 350234",
             "query": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n例如：查询漫画 350234",
+            "delete": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n例如：删除 350234",
             "help": "❌ 命令格式错误！'漫画帮助'命令不需要额外参数\n直接输入：漫画帮助",
             "list": "❌ 命令格式错误！'漫画列表'命令不需要额外参数\n直接输入：漫画列表",
             "version": "❌ 命令格式错误！'漫画版本'命令不需要额外参数\n直接输入：漫画版本",

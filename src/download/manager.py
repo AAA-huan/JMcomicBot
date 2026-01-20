@@ -61,7 +61,9 @@ class DownloadManager:
         queue_thread.start()
         self.logger.info("下载队列处理线程已启动")
 
-    def _process_download_task(self, user_id: str, manga_id: str, group_id: str, private: bool) -> None:
+    def _process_download_task(
+        self, user_id: str, manga_id: str, group_id: str, private: bool
+    ) -> None:
         """
         处理队列中的下载任务
         实际执行漫画下载的方法，确保下载任务按顺序执行，避免并发下载导致的资源竞争
@@ -118,7 +120,9 @@ class DownloadManager:
                     self.logger.info("正在安装PIL库...")
                     import subprocess
 
-                    subprocess.check_call([sys.executable, "-m", "pip", "install", "Pillow"])
+                    subprocess.check_call(
+                        [sys.executable, "-m", "pip", "install", "Pillow"]
+                    )
                     from PIL import Image
 
                 image_extensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"]
@@ -133,7 +137,11 @@ class DownloadManager:
 
                 if not image_files:
                     self.logger.warning(f"在漫画文件夹中未找到图片文件: {manga_dir}")
-                    response = f"✅（｀Δ´）！ 漫画ID {manga_id} 下载完成！\n未找到图片文件，无法转换为PDF\n\n⚠️ 注意：当前版本只支持发送PDF格式的漫画文件"
+                    response = (
+                        f"✅（｀Δ´）！ 漫画ID {manga_id} 下载完成！\n"
+                        f"未找到图片文件，无法转换为PDF\n\n"
+                        f"⚠️ 注意：当前版本只支持发送PDF格式的漫画文件"
+                    )
                     self.message_sender(user_id, response, group_id, private)
                     return
 
@@ -151,18 +159,34 @@ class DownloadManager:
                             img = img.convert("RGB")
                         other_images.append(img)
 
-                    first_image.save(pdf_path, save_all=True, append_images=other_images)
+                    first_image.save(
+                        pdf_path, save_all=True, append_images=other_images
+                    )
                     self.logger.info(f"成功将漫画 {manga_id} 转换为PDF: {pdf_path}")
 
                     self.logger.info(f"删除原漫画文件夹: {manga_dir}")
                     shutil.rmtree(manga_dir)
 
-                    response = f"✅ദ്ദി˶>ω<)✧ 漫画ID {manga_id} 下载并转换为PDF完成！\n\n友情提示：输入'发送 {manga_id}'可以将PDF发送给您"
+                    response = (
+                        f"✅ദ്ദി˶>ω<)✧ "
+                        f"漫画ID {manga_id} 下载并转换为PDF完成！\n\n"
+                        f"友情提示：输入'发送 {manga_id}'可以将PDF发送给您"
+                    )
                 except Exception as pdf_error:
                     self.logger.error(f"转换为PDF失败: {pdf_error}")
-                    response = f"✅（｀Δ´）！ 漫画ID {manga_id} 下载完成，但转换为PDF失败: {str(pdf_error)}\n\n⚠️ 注意：当前版本只支持发送PDF格式的漫画文件，请确保漫画成功转换为PDF后再尝试发送"
+                    response = (
+                        f"✅（｀Δ´）！ 漫画ID {manga_id} 下载完成，"
+                        f"但转换为PDF失败: {str(pdf_error)}\n\n"
+                        f"⚠️ 注意：当前版本只支持发送PDF格式的漫画文件，"
+                        f"请确保漫画成功转换为PDF后再尝试发送"
+                    )
             else:
-                response = f"✅（｀Δ´）！ 漫画ID {manga_id} 下载完成！\n未找到漫画文件夹，无法转换为PDF\n\n⚠️ 注意：当前版本只支持发送PDF格式的漫画文件，请确保漫画成功转换为PDF后再尝试发送"
+                response = (
+                    f"✅（｀Δ´）！ 漫画ID {manga_id} 下载完成！\n"
+                    f"未找到漫画文件夹，无法转换为PDF\n\n"
+                    f"⚠️ 注意：当前版本只支持发送PDF格式的漫画文件，"
+                    f"请确保漫画成功转换为PDF后再尝试发送"
+                )
 
             self.message_sender(user_id, response, group_id, private)
         except Exception as e:
@@ -173,7 +197,9 @@ class DownloadManager:
             if manga_id in self.downloading_mangas:
                 del self.downloading_mangas[manga_id]
 
-    def download_manga(self, user_id: str, manga_id: str, group_id: str, private: bool) -> None:
+    def download_manga(
+        self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
+    ) -> None:
         """
         下载漫画的兼容方法
         保持向后兼容，实际操作是将任务添加到下载队列，而不是直接执行下载
@@ -188,3 +214,47 @@ class DownloadManager:
         self.queued_tasks[manga_id] = (user_id, group_id, private)
         self.download_queue.put((user_id, manga_id, group_id, private))
         self.logger.info(f"漫画ID {manga_id} 的下载任务已添加到队列")
+
+    def delete_manga(
+        self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
+    ) -> None:
+        """
+        删除指定ID的漫画PDF文件
+
+        Args:
+            user_id: 用户ID，用于回复删除状态
+            manga_id: 漫画ID，指定要删除的漫画
+            group_id: 群ID，用于在群聊中发送消息
+            private: 是否为私聊，决定消息发送的目标
+
+        Raises:
+            FileNotFoundError: 当下载目录不存在时
+        """
+        download_path = str(self.config["MANGA_DOWNLOAD_PATH"])
+
+        if not os.path.exists(download_path):
+            error_msg = f"❌ 下载目录不存在！\n快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
+            self.message_sender(user_id, error_msg, group_id, private)
+            raise FileNotFoundError(f"下载目录不存在: {download_path}")
+
+        pdf_path = None
+        for file_name in os.listdir(download_path):
+            if file_name.startswith(f"{manga_id}-") and file_name.endswith(".pdf"):
+                pdf_path = os.path.join(download_path, file_name)
+                break
+
+        if not pdf_path:
+            response = f"❌（｀Δ´）！ 未找到漫画ID {manga_id} 的PDF文件"
+            self.message_sender(user_id, response, group_id, private)
+            return
+
+        try:
+            os.remove(pdf_path)
+            self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")
+            response = f"✅ദ്ദി˶>ω<)✧ 漫画ID {manga_id} 的PDF文件已成功删除！"
+            self.message_sender(user_id, response, group_id, private)
+        except Exception as e:
+            self.logger.error(f"删除漫画PDF文件失败: {e}")
+            error_msg = f"❌ 删除失败：{str(e)}\n快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
+            self.message_sender(user_id, error_msg, group_id, private)
+            raise

@@ -11,6 +11,7 @@ class PermissionManager:
         group_whitelist: List[str],
         private_whitelist: List[str],
         global_blacklist: List[str],
+        delete_permission_user: List[str],
     ) -> None:
         """
         初始化权限管理器
@@ -19,13 +20,17 @@ class PermissionManager:
             group_whitelist: 群组白名单
             private_whitelist: 私信白名单
             global_blacklist: 全局黑名单
+            delete_permission_user: 删除权限用户名单
         """
         self.group_whitelist = group_whitelist
         self.private_whitelist = private_whitelist
         self.global_blacklist = global_blacklist
+        self.delete_permission_user = delete_permission_user
         self.logger = logger
 
-    def check_user_permission(self, user_id: str, group_id: Optional[str] = None, private: bool = True) -> bool:
+    def check_user_permission(
+        self, user_id: str, group_id: Optional[str] = None, private: bool = True
+    ) -> bool:
         """
         检查用户是否有权限使用机器人
 
@@ -58,7 +63,11 @@ class PermissionManager:
                 self.logger.warning(error_msg)
                 raise ValueError(error_msg)
         else:
-            if group_id and self.group_whitelist and group_id not in self.group_whitelist:
+            if (
+                group_id
+                and self.group_whitelist
+                and group_id not in self.group_whitelist
+            ):
                 error_msg = f"群组 {group_id} 不在群组白名单中，拒绝访问"
                 self.logger.warning(error_msg)
                 raise ValueError(error_msg)
@@ -89,3 +98,38 @@ class PermissionManager:
         if global_blacklist is not None:
             self.global_blacklist = global_blacklist
             self.logger.info(f"全局黑名单已更新: {len(global_blacklist)}个")
+
+    def check_delete_permission(self, user_id: str) -> bool:
+        """
+        检查用户是否有删除漫画的权限
+
+        删除权限规则：
+        1. 删除权限用户名单必须且只能有一个用户
+        2. 用户必须在删除权限用户名单中
+
+        Args:
+            user_id: 用户ID
+
+        Returns:
+            bool: 用户是否有删除权限
+
+        Raises:
+            ValueError: 当删除权限用户名单为空或包含多个用户时
+        """
+        if len(self.delete_permission_user) == 0:
+            error_msg = "删除功能不可用：未配置删除权限用户"
+            self.logger.warning(error_msg)
+            raise ValueError(error_msg)
+
+        if len(self.delete_permission_user) != 1:
+            error_msg = "删除功能不可用：删除权限用户名单必须且只能有一个用户"
+            self.logger.warning(error_msg)
+            raise ValueError(error_msg)
+
+        if user_id not in self.delete_permission_user:
+            error_msg = f"用户 {user_id} 没有删除漫画的权限"
+            self.logger.warning(error_msg)
+            raise ValueError(error_msg)
+
+        self.logger.debug(f"用户 {user_id} 删除权限检查通过")
+        return True

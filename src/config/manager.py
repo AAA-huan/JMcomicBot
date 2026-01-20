@@ -12,6 +12,7 @@ class ConfigManager:
         self.group_whitelist: List[str] = []
         self.private_whitelist: List[str] = []
         self.global_blacklist: List[str] = []
+        self.delete_permission_user: List[str] = []
 
     def load_config(self):
         """加载.env文件到内存配置（覆盖默认配置中同名项）"""
@@ -47,12 +48,26 @@ class ConfigManager:
         }
 
         # 初始化黑白名单配置
-        self.group_whitelist: List[str] = self._parse_id_list(os.getenv("GROUP_WHITELIST", ""))
-        self.private_whitelist: List[str] = self._parse_id_list(os.getenv("PRIVATE_WHITELIST", ""))
-        self.global_blacklist: List[str] = self._parse_id_list(os.getenv("GLOBAL_BLACKLIST", ""))
+        self.group_whitelist: List[str] = self._parse_id_list(
+            os.getenv("GROUP_WHITELIST", "")
+        )
+        self.private_whitelist: List[str] = self._parse_id_list(
+            os.getenv("PRIVATE_WHITELIST", "")
+        )
+        self.global_blacklist: List[str] = self._parse_id_list(
+            os.getenv("GLOBAL_BLACKLIST", "")
+        )
+        # 初始化删除权限用户名单配置
+        self.delete_permission_user: List[str] = self._parse_id_list(
+            os.getenv("DELETE_PERMISSION_USER", "")
+        )
         # 记录黑白名单配置信息
         self.logger.info(
-            f"黑白名单配置加载完成 - 群组白名单: {len(self.group_whitelist)}个, 私信白名单: {len(self.private_whitelist)}个, 全局黑名单: {len(self.global_blacklist)}个"
+            f"黑白名单配置加载完成 - "
+            f"群组白名单: {len(self.group_whitelist)}个, "
+            f"私信白名单: {len(self.private_whitelist)}个, "
+            f"全局黑名单: {len(self.global_blacklist)}个, "
+            f"删除权限用户: {len(self.delete_permission_user)}个"
         )
 
     def _parse_id_list(self, id_string: str) -> List[str]:

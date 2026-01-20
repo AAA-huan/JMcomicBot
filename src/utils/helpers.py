@@ -1,7 +1,7 @@
 import os
 import re
 import shutil
-from typing import List
+from typing import List, Tuple
 
 from src.logging.logger_config import logger
 
@@ -115,4 +115,58 @@ def list_downloaded_mangas(download_path: str) -> List[str]:
             pdf_files.append(name_without_ext)
 
     pdf_files.sort()
+    return pdf_files
+
+
+def get_file_size_mb(file_path: str) -> float:
+    """
+    获取文件大小（以MB为单位）
+
+    Args:
+        file_path: 文件路径
+
+    Returns:
+        文件大小（MB），保留两位小数
+
+    Raises:
+        FileNotFoundError: 当文件不存在时
+    """
+    if not os.path.exists(file_path):
+        raise FileNotFoundError(f"文件不存在: {file_path}")
+
+    file_size_bytes = os.path.getsize(file_path)
+    file_size_mb = file_size_bytes / (1024 * 1024)
+    return round(file_size_mb, 2)
+
+
+def list_downloaded_mangas_with_size(download_path: str) -> List[Tuple[str, float]]:
+    """
+    列出已下载的漫画PDF文件及其大小
+
+    Args:
+        download_path: 下载目录路径
+
+    Returns:
+        漫画PDF文件名列表（不含扩展名）和文件大小（MB）的元组列表
+
+    Raises:
+        FileNotFoundError: 当下载目录不存在时
+    """
+    if not os.path.exists(download_path):
+        raise FileNotFoundError(f"下载目录不存在: {download_path}")
+
+    pdf_files = []
+    try:
+        file_names = os.listdir(download_path)
+    except OSError:
+        file_names = []
+
+    for file_name in file_names:
+        if file_name.endswith(".pdf"):
+            name_without_ext = os.path.splitext(file_name)[0]
+            file_path = os.path.join(download_path, file_name)
+            file_size_mb = get_file_size_mb(file_path)
+            pdf_files.append((name_without_ext, file_size_mb))
+
+    pdf_files.sort(key=lambda x: x[0])
     return pdf_files
