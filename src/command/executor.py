@@ -21,7 +21,7 @@ from src.utils.helpers import (
 class CommandExecutor:
     """命令执行器，负责执行各种命令"""
 
-    VERSION = "2.3.12"
+    VERSION = "3.0.0"
 
     def __init__(
         self,
@@ -673,13 +673,13 @@ class CommandExecutor:
         except ValueError as e:
             if "必须且只能有一个用户" in str(e):
                 response = (
-                    "❌\u001b[31m删除功能不可用："
-                    "删除权限用户名单必须且只能有一个用户\u001b[0m"
+                    "❌ 删除功能不可用："
+                    "删除权限用户名单必须且只能有一个用户"
                 )
                 self.message_sender(user_id, response, group_id, private)
                 return
             if "未配置删除权限用户" in str(e):
-                response = "❌\u001b[31m删除功能不可用：未配置删除权限用户\u001b[0m"
+                response = "❌ 删除功能不可用：未配置删除权限用户"
                 self.message_sender(user_id, response, group_id, private)
                 return
             error_msg = f"❌ 权限检查失败：{str(e)}"

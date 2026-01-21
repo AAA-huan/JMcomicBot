@@ -1,5 +1,7 @@
 """下载管理器模块，负责漫画下载功能并对下载队列进行管理"""
 
+import contextlib
+import io
 import os
 import queue
 import shutil
@@ -151,7 +153,8 @@ class DownloadManager:
             new_rule = "Bd / {Aid}-{Atitle}"
             option.dir_rule = DirRule(new_rule, base_dir=option.dir_rule.base_dir)
 
-            jmcomic.download_album(manga_id, option=option)
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+                jmcomic.download_album(manga_id, option=option)
 
             manga_dir = None
             download_path = str(self.config["MANGA_DOWNLOAD_PATH"])
@@ -230,10 +233,11 @@ class DownloadManager:
 
                     if self.low_memory_mode and self.file_sender:
                         # 低占用模式：自动发送PDF
+                        delete_delay = self.config.get("LOW_MEMORY_DELETE_DELAY", 3)
                         response = (
                             f"✅ദ്ദി˶>ω<)✧ "
                             f"漫画ID {manga_id} 下载完成！正在自动发送...\n\n"
-                            f"⚠️ 低占用模式：文件将在5分钟后自动删除"
+                            f"⚠️ 低占用模式：文件将在{delete_delay}分钟后自动删除"
                         )
                         self.message_sender(user_id, response, group_id, private)
 
@@ -245,13 +249,14 @@ class DownloadManager:
                             )
 
                             # 安排延迟删除
-                            self._schedule_file_deletion(pdf_path, 5)
+                            self._schedule_file_deletion(pdf_path, delete_delay)
                         except Exception as send_error:
                             self.logger.error(f"低占用模式自动发送失败: {send_error}")
                             error_response = f"❌ 自动发送失败：{str(send_error)}"
                             self.message_sender(
                                 user_id, error_response, group_id, private
                             )
+                        return
                     else:
                         # 普通模式
                         response = (

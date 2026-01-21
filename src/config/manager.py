@@ -51,11 +51,21 @@ class ConfigManager:
         low_memory_mode_str = os.getenv("LOW_MEMORY_MODE", "false").lower()
         low_memory_mode = low_memory_mode_str in ("true", "1", "yes", "on")
 
+        # 获取低内存模式下的文件删除延迟时间（分钟）
+        low_memory_delete_delay_str = os.getenv("LOW_MEMORY_DELETE_DELAY", "3")
+        try:
+            low_memory_delete_delay = int(low_memory_delete_delay_str)
+            if low_memory_delete_delay < 1:
+                low_memory_delete_delay = 3
+        except ValueError:
+            low_memory_delete_delay = 3
+
         self.config_dict: Dict[str, Union[str, int, bool]] = {
             "MANGA_DOWNLOAD_PATH": absolute_download_path,
             "NAPCAT_WS_URL": ws_url,  # 存储完整的WebSocket URL（可能包含token）
             "NAPCAT_TOKEN": token,  # 使用NAPCAT_TOKEN作为配置键
             "LOW_MEMORY_MODE": low_memory_mode,  # 内存低占用模式
+            "LOW_MEMORY_DELETE_DELAY": low_memory_delete_delay,  # 低内存模式文件删除延迟（分钟）
         }
 
         # 初始化黑白名单配置
