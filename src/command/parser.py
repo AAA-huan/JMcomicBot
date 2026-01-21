@@ -24,13 +24,8 @@ class CommandParser:
             "delete": ["删除", "删除漫画", "漫画删除"],
         }
 
-        # 参数验证规则
-        self.param_validators: Dict[str, Optional[Pattern]] = {
-            "download": re.compile(r"^\d+$"),  # 下载命令需要纯数字ID
-            "send": re.compile(r"^\d+$"),  # 发送命令需要纯数字ID
-            "query": re.compile(r"^\d+$"),  # 查询命令需要纯数字ID
-            "delete": re.compile(r"^\d+$"),  # 删除命令需要纯数字ID
-        }
+        # 支持批量操作的命令
+        self.batch_commands = {"download", "send", "query", "delete"}
 
     def parse(self, message: str) -> Tuple[str, str]:
         """
@@ -119,11 +114,24 @@ class CommandParser:
         if command not in no_param_commands and not params:
             return False
 
-        # 使用正则表达式验证需要参数的命令
-        if command in self.param_validators:
-            validator = self.param_validators[command]
-            if validator and not validator.match(params):
-                return False
+        # 批量操作命令的参数验证
+        if command in self.batch_commands:
+            # 支持 --all 参数
+            if params == "--all":
+                return True
+
+            # 支持逗号分隔的ID列表
+            if "," in params:
+                ids = [id.strip() for id in params.split(",") if id.strip()]
+                if not ids:
+                    return False
+                return all(id.isdigit() for id in ids)
+
+            # 支持单个数字ID
+            if params.isdigit():
+                return True
+
+            return False
 
         return True
 
@@ -138,10 +146,25 @@ class CommandParser:
             str: 错误提示消息
         """
         error_messages = {
-            "download": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n例如：漫画下载 350234",
-            "send": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n例如：发送 350234",
-            "query": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n例如：查询漫画 350234",
-            "delete": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n例如：删除 350234",
+            "download": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n"
+            "支持格式：\n"
+            "  - 单个ID：漫画下载 350234\n"
+            "  - 多个ID（逗号分隔）：漫画下载 350234,350235,350236",
+            "send": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n"
+            "支持格式：\n"
+            "  - 单个ID：发送 350234\n"
+            "  - 多个ID（逗号分隔）：发送 350234,350235,350236\n"
+            "  - 所有已下载漫画：发送 --all",
+            "query": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n"
+            "支持格式：\n"
+            "  - 单个ID：查询漫画 350234\n"
+            "  - 多个ID（逗号分隔）：查询漫画 350234,350235,350236\n"
+            "  - 所有已下载漫画：查询漫画 --all",
+            "delete": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n"
+            "支持格式：\n"
+            "  - 单个ID：删除 350234\n"
+            "  - 多个ID（逗号分隔）：删除 350234,350235,350236\n"
+            "  - 所有已下载漫画：删除 --all",
             "help": "❌ 命令格式错误！'漫画帮助'命令不需要额外参数\n直接输入：漫画帮助",
             "list": "❌ 命令格式错误！'漫画列表'命令不需要额外参数\n直接输入：漫画列表",
             "version": "❌ 命令格式错误！'漫画版本'命令不需要额外参数\n直接输入：漫画版本",

@@ -38,22 +38,23 @@ class MangaBot:
             delete_permission_user=self.config_manager.delete_permission_user,
         )
 
-        self.ws_client = WebSocketClient(self.config_manager.config)
+        self.ws_client = WebSocketClient(self.config_manager.config_dict)
         self.message_manager = MessageManager(
-            config=self.config_manager.config, ws_client=self.ws_client.ws
+            config=self.config_manager.config_dict, ws_client=self.ws_client
         )
 
         self.download_manager = DownloadManager(
-            logger=logger,
-            config=self.config_manager.config,
+            logger_instance=logger,
+            config=self.config_manager.config_dict,
             message_sender=self.message_manager.send_message,
+            file_sender=self.message_manager.send_file,
         )
 
         self.command_executor = CommandExecutor(
             message_sender=self.message_manager.send_message,
             file_sender=self.message_manager.send_file,
             download_manager=self.download_manager,
-            config=self.config_manager.config,
+            config=self.config_manager.config_dict,
             self_id_getter=lambda: self.SELF_ID,
             permission_manager=self.permission_manager,
         )
@@ -86,11 +87,11 @@ class MangaBot:
             self.event_handler.handle_event(data)
 
         self.ws_client.set_message_handler(handle_event)
-        self.message_manager.set_websocket_client(self.ws_client.ws)
+        self.message_manager.set_websocket_client(self.ws_client)
 
         logger.info("命令解析器初始化完成")
 
-        cleanup_failed_downloads(str(self.config_manager.config["MANGA_DOWNLOAD_PATH"]))
+        cleanup_failed_downloads(str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]))
 
     def _check_platform_compatibility(self) -> None:
         """检查操作系统兼容性"""

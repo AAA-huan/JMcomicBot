@@ -3,8 +3,6 @@ import os
 import time
 from typing import Any, Dict, Optional
 
-import websocket
-
 from src.logging.logger_config import logger
 
 
@@ -12,7 +10,7 @@ class MessageManager:
     """消息管理器，负责发送文本消息和文件"""
 
     def __init__(
-        self, config: Dict[str, Any], ws_client: Optional[websocket.WebSocketApp] = None
+        self, config: Dict[str, Any], ws_client: Optional[Any] = None
     ) -> None:
         """
         初始化消息管理器
@@ -22,17 +20,17 @@ class MessageManager:
             ws_client: WebSocket客户端实例
         """
         self.config = config
-        self.ws = ws_client
+        self.ws_client = ws_client
         self.logger = logger
 
-    def set_websocket_client(self, ws_client: Optional[websocket.WebSocketApp]) -> None:
+    def set_websocket_client(self, ws_client: Optional[Any]) -> None:
         """
         设置WebSocket客户端
 
         Args:
             ws_client: WebSocket客户端实例
         """
-        self.ws = ws_client
+        self.ws_client = ws_client
 
     def send_message(
         self,
@@ -73,7 +71,7 @@ class MessageManager:
             self.logger.info(
                 f"准备发送 - 用户:{user_id}, 类型:{'私聊' if private else '群聊'}"
             )
-            self.ws.send(message_json)
+            self.ws_client.ws.send(message_json)
             self.logger.info(f"发送成功: {message[:20]}...")
         else:
             error_msg = "WebSocket连接未建立，消息发送失败"
@@ -144,7 +142,7 @@ class MessageManager:
         if self._is_websocket_connected():
             message_json = json.dumps(payload)
             self.logger.debug(f"发送消息段数组文件: {message_json}")
-            self.ws.send(message_json)
+            self.ws_client.ws.send(message_json)
             self.logger.info(f"文件发送请求已发送: {file_name}")
             time.sleep(1)
         else:
@@ -160,5 +158,8 @@ class MessageManager:
             bool: WebSocket是否已连接
         """
         return (
-            self.ws is not None and self.ws.sock is not None and self.ws.sock.connected
+            self.ws_client is not None
+            and self.ws_client.ws is not None
+            and self.ws_client.ws.sock is not None
+            and self.ws_client.ws.sock.connected
         )
