@@ -28,7 +28,9 @@ def parse_batch_params(params: str) -> Tuple[List[str], bool]:
             raise ValueError("❌ 参数错误！'--all' 参数不能与其他参数混用")
         return [], True
 
-    if "," in params:
+    if "," in params or "，" in params:
+        # 将中文逗号替换为英文逗号，然后分割
+        params = params.replace("，", ",")
         ids = [id.strip() for id in params.split(",") if id.strip()]
         if not ids:
             raise ValueError("❌ 参数错误！未提供有效的漫画ID")
