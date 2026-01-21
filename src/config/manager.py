@@ -1,17 +1,24 @@
+"""配置管理器模块，负责加载和管理应用程序配置"""
+
 import os
-from dotenv import load_dotenv
 from typing import Dict, Union, List
+
+from dotenv import load_dotenv
 
 from src.logging.logger_config import logger
 
 
 class ConfigManager:
+    """配置管理器类，负责加载和管理应用程序配置"""
+
     def __init__(self):
+        """初始化配置管理器"""
         self.logger = logger
-        self.config: Dict[str, Union[str, int]] = {}
+        self.config_dict: Dict[str, Union[str, int, bool]] = {}
         self.group_whitelist: List[str] = []
         self.private_whitelist: List[str] = []
         self.global_blacklist: List[str] = []
+        self.delete_permission_user: List[str] = []
 
     def load_config(self):
         """加载.env文件到内存配置（覆盖默认配置中同名项）"""
@@ -40,19 +47,48 @@ class ConfigManager:
         # 将相对路径转换为绝对路径，确保父级目录引用能正确解析
         absolute_download_path = os.path.abspath(download_path)
 
-        self.config: Dict[str, Union[str, int]] = {
+        # 获取内存低占用模式配置
+        low_memory_mode_str = os.getenv("LOW_MEMORY_MODE", "false").lower()
+        low_memory_mode = low_memory_mode_str in ("true", "1", "yes", "on")
+
+        # 获取低内存模式下的文件删除延迟时间（分钟）
+        low_memory_delete_delay_str = os.getenv("LOW_MEMORY_DELETE_DELAY", "3")
+        try:
+            low_memory_delete_delay = int(low_memory_delete_delay_str)
+            if low_memory_delete_delay < 1:
+                low_memory_delete_delay = 3
+        except ValueError:
+            low_memory_delete_delay = 3
+
+        self.config_dict: Dict[str, Union[str, int, bool]] = {
             "MANGA_DOWNLOAD_PATH": absolute_download_path,
             "NAPCAT_WS_URL": ws_url,  # 存储完整的WebSocket URL（可能包含token）
             "NAPCAT_TOKEN": token,  # 使用NAPCAT_TOKEN作为配置键
+            "LOW_MEMORY_MODE": low_memory_mode,  # 内存低占用模式
+            "LOW_MEMORY_DELETE_DELAY": low_memory_delete_delay,  # 低内存模式文件删除延迟（分钟）
         }
 
         # 初始化黑白名单配置
-        self.group_whitelist: List[str] = self._parse_id_list(os.getenv("GROUP_WHITELIST", ""))
-        self.private_whitelist: List[str] = self._parse_id_list(os.getenv("PRIVATE_WHITELIST", ""))
-        self.global_blacklist: List[str] = self._parse_id_list(os.getenv("GLOBAL_BLACKLIST", ""))
+        self.group_whitelist: List[str] = self._parse_id_list(
+            os.getenv("GROUP_WHITELIST", "")
+        )
+        self.private_whitelist: List[str] = self._parse_id_list(
+            os.getenv("PRIVATE_WHITELIST", "")
+        )
+        self.global_blacklist: List[str] = self._parse_id_list(
+            os.getenv("GLOBAL_BLACKLIST", "")
+        )
+        # 初始化删除权限用户名单配置
+        self.delete_permission_user: List[str] = self._parse_id_list(
+            os.getenv("DELETE_PERMISSION_USER", "")
+        )
         # 记录黑白名单配置信息
         self.logger.info(
-            f"黑白名单配置加载完成 - 群组白名单: {len(self.group_whitelist)}个, 私信白名单: {len(self.private_whitelist)}个, 全局黑名单: {len(self.global_blacklist)}个"
+            f"黑白名单配置加载完成 - "
+            f"群组白名单: {len(self.group_whitelist)}个, "
+            f"私信白名单: {len(self.private_whitelist)}个, "
+            f"全局黑名单: {len(self.global_blacklist)}个, "
+            f"删除权限用户: {len(self.delete_permission_user)}个"
         )
 
     def _parse_id_list(self, id_string: str) -> List[str]:
@@ -72,15 +108,18 @@ class ConfigManager:
         ids = [id.strip() for id in id_string.split(",") if id.strip()]
         return ids
 
-    def make_download_dir(self):
-        # 创建下载目录
-        os.makedirs(self.config["MANGA_DOWNLOAD_PATH"], exist_ok=True)
-        self.logger.info(f"下载路径设置为: {self.config['MANGA_DOWNLOAD_PATH']}")
+    def make_download_dir(self) -> None:
+        """创建下载目录"""
+        download_path = str(self.config_dict["MANGA_DOWNLOAD_PATH"])
+        os.makedirs(download_path, exist_ok=True)
+        self.logger.info(f"下载路径设置为: {download_path}")
 
-    def get(self, key: str, default: Union[str, int] = "") -> Union[str, int]:
+    def get(
+        self, key: str, default: Union[str, int, bool] = ""
+    ) -> Union[str, int, bool]:
         """获取配置值"""
-        return self.config.get(key, default)
+        return self.config_dict.get(key, default)
 
-    def set(self, key: str, value: Union[str, int]) -> None:
+    def set(self, key: str, value: Union[str, int, bool]) -> None:
         """设置配置值"""
-        self.config[key] = value
+        self.config_dict[key] = value

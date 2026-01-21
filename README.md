@@ -32,14 +32,17 @@
 ### 🔧 命令大全
 
 - `漫画帮助` - 查看帮助信息
-- `漫画下载 350234` - 下载指定ID的漫画
-- `发送漫画 350234` - 发送已下载的指定ID的漫画文件
-- `漫画列表` - 查看已下载漫画列表
+- `漫画下载 350234` - 下载指定ID的漫画,批量操作用逗号隔开
+- `发送漫画 350234` - 发送已下载的指定ID的漫画文件,批量操作用逗号隔开,--all可发送全部
+- `漫画列表` - 查看已下载漫画列表,批量操作用逗号隔开
 - `查询漫画 350234` - 查询指定ID的漫画是否已下载
 - `漫画版本` - 查看当前机器人的版本信息
 - `下载进度` - 查看当前漫画下载队列的状况
 - `测试id` - 查看当前机器人的id(QQ号)
 - `测试文件` - 发送一个txt文件测试当前是否能发送文件
+- `删除漫画` - 删除指定ID的漫画文件(这个权限只有唯一一位可以使用)
+
+- `注` - 建议别下韩漫那种章节太多的漫画
 ---
 
 ## 感谢以下两个项目的贡献
@@ -164,6 +167,14 @@ PRIVATE_WHITELIST=""
 # 全局黑名单：任何情况下都禁止使用机器人的用户ID列表，多个ID用逗号分隔
 # 黑名单优先级高于白名单
 GLOBAL_BLACKLIST=""
+
+# 删除权限名单：允许使用删除功能的用户ID，允许为空，最多只能有一个用户ID
+DELETE_PERMISSION_USER=""
+
+# 内存低占用模式
+# true: 开启低占用模式，下载后立刻发送，发送后3分钟删除，启动时清空下载文件夹
+# false: 默认模式，保留下载的漫画（默认值）
+LOW_MEMORY_MODE=false
 ```
 
 #### 第四步：配置 NapCat
@@ -188,7 +199,7 @@ GLOBAL_BLACKLIST=""
    # 进入项目目录
    # 右键点击项目文件夹，选择在powershell中打开
    # 启动机器人
-   python bot.py
+   python main.py
 
    # 停止机器人
    Ctrl+C
@@ -209,7 +220,7 @@ GLOBAL_BLACKLIST=""
    venv\Scripts\Activate
 
    # 启动机器人
-   python bot.py
+   python main.py
    ```
 
 ##### 3. 验证运行状态
@@ -337,6 +348,14 @@ GLOBAL_BLACKLIST=""
    # 全局黑名单：任何情况下都禁止使用机器人的用户ID列表，多个ID用逗号分隔
    # 黑名单优先级高于白名单
    GLOBAL_BLACKLIST=""
+   
+   # 删除权限名单：允许使用删除功能的用户ID，允许为空，最多只能有一个用户ID
+   DELETE_PERMISSION_USER=""
+
+   # 内存低占用模式
+   # true: 开启低占用模式，下载后立刻发送，发送后3分钟删除，启动时清空下载文件夹
+   # false: 默认模式，保留下载的漫画（默认值）
+   LOW_MEMORY_MODE=false
    ```
    完成修改后保存并退出
 
@@ -383,7 +402,7 @@ GLOBAL_BLACKLIST=""
    User=JMBot
    WorkingDirectory=/opt/JMBot
    Environment=PATH=/opt/JMBot/venv/bin
-   ExecStart=/opt/JMBot/venv/bin/python bot.py
+   ExecStart=/opt/JMBot/venv/bin/python main.py
    Restart=always
    RestartSec=10
    
@@ -450,7 +469,7 @@ cd ~/JMBot
 source venv/bin/activate
 
 # 启动机器人
-python bot.py
+python main.py
 
 # 停止机器人
 Ctrl+C
@@ -613,6 +632,13 @@ Ctrl+C
    # 全局黑名单：任何情况下都禁止使用机器人的用户ID列表，多个ID用逗号分隔
    # 黑名单优先级高于白名单
    GLOBAL_BLACKLIST=""
+   # 删除权限名单：允许使用删除功能的用户ID，允许为空，最多只能有一个用户ID
+   DELETE_PERMISSION_USER=""
+
+   # 内存低占用模式
+   # true: 开启低占用模式，下载后立刻发送，发送后3分钟删除，启动时清空下载文件夹
+   # false: 默认模式，保留下载的漫画（默认值）
+   LOW_MEMORY_MODE=false
    ```
 5. **创建数据目录**
    ```bash
@@ -648,7 +674,7 @@ Ctrl+C
    cd ~/JMBot
 
    # 启动机器人
-   python3 bot.py
+   python3 main.py
 
    # 停止机器人
    Ctrl+C
@@ -680,7 +706,7 @@ cd ~/JMBot
 source venv/bin/activate
 
 # 启动机器人
-python3 bot.py
+python3 main.py
 
 # 停止机器人
 Ctrl+C
@@ -692,7 +718,7 @@ Ctrl+C
 ps aux | grep python
 
 # 停止机器人
-pkill -f "python3 bot.py"
+pkill -f "python3 main.py"
 
 # 退出Ubuntu环境
 exit

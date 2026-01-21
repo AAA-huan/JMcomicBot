@@ -55,6 +55,6 @@ option.yml
 jmbot待办.txt
 test_low_memory_mode.py
 test_file_helpers.py
-test_download.py
-test_batch.py
 test_delete_permission.py
+test_batch.py
+test_download.py
