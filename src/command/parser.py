@@ -120,9 +120,11 @@ class CommandParser:
             if params == "--all":
                 return True
 
-            # 支持逗号分隔的ID列表
-            if "," in params:
-                ids = [id.strip() for id in params.split(",") if id.strip()]
+            # 支持逗号句号分隔的ID列表，模糊匹配中英文符号
+            # 允许空格，例如 "350234, 350235, 350236"
+            # 先把逗号句号替换为空格，再按空格分割
+            if "," in params or "." in params or "，" in params or "。" in params:
+                ids = [id.strip() for id in params.replace(",", " ").replace(".", " ").replace("，", " ").replace("。", " ").split() if id.strip()]
                 if not ids:
                     return False
                 return all(id.isdigit() for id in ids)
