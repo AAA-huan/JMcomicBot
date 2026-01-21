@@ -41,6 +41,8 @@
 - `测试id` - 查看当前机器人的id(QQ号)
 - `测试文件` - 发送一个txt文件测试当前是否能发送文件
 - `删除漫画` - 删除指定ID的漫画文件(这个权限只有唯一一位可以使用)
+
+- `注` - 建议别下韩漫那种章节太多的漫画
 ---
 
 ## 感谢以下两个项目的贡献
@@ -170,7 +172,7 @@ GLOBAL_BLACKLIST=""
 DELETE_PERMISSION_USER=""
 
 # 内存低占用模式
-# true: 开启低占用模式，下载后立刻发送，发送后5分钟删除，启动时清空下载文件夹
+# true: 开启低占用模式，下载后立刻发送，发送后3分钟删除，启动时清空下载文件夹
 # false: 默认模式，保留下载的漫画（默认值）
 LOW_MEMORY_MODE=false
 ```
@@ -197,7 +199,7 @@ LOW_MEMORY_MODE=false
    # 进入项目目录
    # 右键点击项目文件夹，选择在powershell中打开
    # 启动机器人
-   python bot.py
+   python main.py
 
    # 停止机器人
    Ctrl+C
@@ -218,7 +220,7 @@ LOW_MEMORY_MODE=false
    venv\Scripts\Activate
 
    # 启动机器人
-   python bot.py
+   python main.py
    ```
 
 ##### 3. 验证运行状态
@@ -351,7 +353,7 @@ LOW_MEMORY_MODE=false
    DELETE_PERMISSION_USER=""
 
    # 内存低占用模式
-   # true: 开启低占用模式，下载后立刻发送，发送后5分钟删除，启动时清空下载文件夹
+   # true: 开启低占用模式，下载后立刻发送，发送后3分钟删除，启动时清空下载文件夹
    # false: 默认模式，保留下载的漫画（默认值）
    LOW_MEMORY_MODE=false
    ```
@@ -400,7 +402,7 @@ LOW_MEMORY_MODE=false
    User=JMBot
    WorkingDirectory=/opt/JMBot
    Environment=PATH=/opt/JMBot/venv/bin
-   ExecStart=/opt/JMBot/venv/bin/python bot.py
+   ExecStart=/opt/JMBot/venv/bin/python main.py
    Restart=always
    RestartSec=10
    
@@ -467,7 +469,7 @@ cd ~/JMBot
 source venv/bin/activate
 
 # 启动机器人
-python bot.py
+python main.py
 
 # 停止机器人
 Ctrl+C
@@ -634,7 +636,7 @@ Ctrl+C
    DELETE_PERMISSION_USER=""
 
    # 内存低占用模式
-   # true: 开启低占用模式，下载后立刻发送，发送后5分钟删除，启动时清空下载文件夹
+   # true: 开启低占用模式，下载后立刻发送，发送后3分钟删除，启动时清空下载文件夹
    # false: 默认模式，保留下载的漫画（默认值）
    LOW_MEMORY_MODE=false
    ```
@@ -672,7 +674,7 @@ Ctrl+C
    cd ~/JMBot
 
    # 启动机器人
-   python3 bot.py
+   python3 main.py
 
    # 停止机器人
    Ctrl+C
@@ -704,7 +706,7 @@ cd ~/JMBot
 source venv/bin/activate
 
 # 启动机器人
-python3 bot.py
+python3 main.py
 
 # 停止机器人
 Ctrl+C
@@ -716,7 +718,7 @@ Ctrl+C
 ps aux | grep python
 
 # 停止机器人
-pkill -f "python3 bot.py"
+pkill -f "python3 main.py"
 
 # 退出Ubuntu环境
 exit
