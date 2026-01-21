@@ -2,10 +2,15 @@ import os
 import platform
 import time
 import threading
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.command.parser import CommandParser
 from src.logging.logger_config import logger
+from src.utils.batch import (
+    format_batch_response,
+    parse_batch_params,
+    validate_manga_ids,
+)
 from src.utils.helpers import (
     find_manga_pdf,
     get_file_size_mb,
@@ -155,29 +160,80 @@ class CommandExecutor:
 
         help_text += "💡 可用命令：\n"
         help_text += "- 漫画帮助：显示此帮助信息\n"
-        help_text += "- 漫画下载 <漫画ID>：下载指定ID的漫画\n"
-        help_text += "- 发送漫画 <漫画ID>：发送指定ID的已下载漫画（只支持PDF格式）\n"
-        help_text += "- 查询漫画 <漫画ID>：查询指定ID的漫画是否已下载\n"
+        help_text += (
+            "- 漫画下载 <漫画ID>：下载指定ID的漫画\n"
+            "  支持批量下载：漫画下载 123,456,789\n"
+        )
+        help_text += (
+            "- 发送漫画 <漫画ID>：发送指定ID的已下载漫画（只支持PDF格式）\n"
+            "  支持批量发送：发送 123,456,789\n"
+            "  支持发送全部：发送 --all\n"
+        )
+        help_text += (
+            "- 查询漫画 <漫画ID>：查询指定ID的漫画是否已下载\n"
+            "  支持批量查询：查询漫画 123,456,789\n"
+            "  支持查询全部：查询漫画 --all\n"
+        )
         help_text += "- 漫画列表：查询已下载的所有漫画\n"
         help_text += "- 下载进度：查看当前漫画下载队列的状况\n"
         help_text += "- 漫画版本：显示机器人当前版本信息\n"
-        help_text += "- 删除漫画 <漫画ID>：删除指定ID的已下载漫画（仅限特定用户）\n\n"
-        help_text += "⚠️ 注意事项：\n"
+        help_text += (
+            "- 删除漫画 <漫画ID>：删除指定ID的已下载漫画（仅限特定用户）\n"
+            "  支持批量删除：删除 123,456,789\n"
+            "  支持删除全部：删除 --all\n"
+        )
+        help_text += "\n⚠️ 注意事项：\n"
         help_text += "- 命令与漫画ID之间记得加空格\n"
+        help_text += "- 批量操作使用逗号分隔多个ID\n"
         help_text += "- 请确保输入正确的漫画ID\n"
         help_text += "- 下载过程可能需要一些时间，请耐心等待\n"
         help_text += "- 下载的漫画将保存在配置的目录中\n"
         help_text += "- 发送漫画前请确保该漫画已成功下载并转换为PDF格式\n"
-        help_text += f"- 当前版本只支持发送PDF格式的漫画文件\n"
+        help_text += "- 当前版本只支持发送PDF格式的漫画文件\n"
         help_text += "- 删除漫画功能仅限特定用户使用\n\n"
         help_text += f"🔖 当前版本: {self.VERSION}"
 
         self.message_sender(user_id, help_text, group_id, private)
 
     def _handle_manga_download(
+        self, user_id: str, params: str, group_id: Optional[str], private: bool
+    ) -> None:
+        """处理漫画下载请求，支持批量下载"""
+        try:
+            manga_ids, use_all = parse_batch_params(params)
+
+            if use_all:
+                self.message_sender(
+                    user_id,
+                    "❌ 下载命令不支持 --all 参数\n请提供具体的漫画ID",
+                    group_id,
+                    private,
+                )
+                return
+
+            if not manga_ids:
+                self.message_sender(
+                    user_id,
+                    "❌ 参数错误！请提供有效的漫画ID",
+                    group_id,
+                    private,
+                )
+                return
+
+            manga_ids = validate_manga_ids(manga_ids)
+
+            if len(manga_ids) == 1:
+                self._download_single_manga(user_id, manga_ids[0], group_id, private)
+            else:
+                self._download_batch_mangas(user_id, manga_ids, group_id, private)
+        except ValueError as e:
+            self.logger.warning(f"批量下载参数解析失败: {e}")
+            self.message_sender(user_id, str(e), group_id, private)
+
+    def _download_single_manga(
         self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
     ) -> None:
-        """处理漫画下载请求"""
+        """下载单个漫画"""
         self.logger.info(f"处理漫画下载请求 - 用户{user_id}, 漫画ID: {manga_id}")
 
         pdf_path = find_manga_pdf(str(self.config["MANGA_DOWNLOAD_PATH"]), manga_id)
@@ -195,10 +251,81 @@ class CommandExecutor:
         self.message_sender(user_id, response, group_id, private)
         self.download_manager.download_manga(user_id, manga_id, group_id, private)
 
+    def _download_batch_mangas(
+        self, user_id: str, manga_ids: List[str], group_id: Optional[str], private: bool
+    ) -> None:
+        """批量下载漫画"""
+        self.logger.info(
+            f"处理批量漫画下载请求 - 用户{user_id}, 漫画ID数量: {len(manga_ids)}"
+        )
+
+        response = f"开始批量下载 {len(manga_ids)} 个漫画，请稍候...\n\n"
+        response += "已添加到下载队列：\n"
+        for i, manga_id in enumerate(manga_ids[:10], 1):
+            response += f"  {i}. {manga_id}\n"
+        if len(manga_ids) > 10:
+            response += f"  ... 还有 {len(manga_ids) - 10} 个\n"
+
+        self.message_sender(user_id, response, group_id, private)
+
+        for manga_id in manga_ids:
+            pdf_path = find_manga_pdf(str(self.config["MANGA_DOWNLOAD_PATH"]), manga_id)
+            if not pdf_path:
+                self.download_manager.download_manga(
+                    user_id, manga_id, group_id, private
+                )
+
     def _handle_manga_send(
+        self, user_id: str, params: str, group_id: Optional[str], private: bool
+    ) -> None:
+        """处理漫画发送请求，支持批量发送"""
+        try:
+            manga_ids, use_all = parse_batch_params(params)
+
+            if use_all:
+                manga_ids = self._get_all_downloaded_manga_ids()
+                if not manga_ids:
+                    self.message_sender(
+                        user_id,
+                        "❌ 当前没有已下载的漫画",
+                        group_id,
+                        private,
+                    )
+                    return
+
+            if not manga_ids:
+                self.message_sender(
+                    user_id,
+                    "❌ 参数错误！请提供有效的漫画ID",
+                    group_id,
+                    private,
+                )
+                return
+
+            manga_ids = validate_manga_ids(manga_ids)
+
+            if len(manga_ids) == 1:
+                self._send_single_manga(user_id, manga_ids[0], group_id, private)
+            else:
+                self._send_batch_mangas(user_id, manga_ids, group_id, private)
+        except ValueError as e:
+            self.logger.warning(f"批量发送参数解析失败: {e}")
+            self.message_sender(user_id, str(e), group_id, private)
+
+    def _get_all_downloaded_manga_ids(self) -> List[str]:
+        """获取所有已下载的漫画ID列表"""
+        try:
+            pdf_files = list_downloaded_mangas_with_size(
+                str(self.config["MANGA_DOWNLOAD_PATH"])
+            )
+            return [name.split("-")[0] for name, _ in pdf_files]
+        except FileNotFoundError:
+            return []
+
+    def _send_single_manga(
         self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
     ) -> None:
-        """处理漫画发送请求"""
+        """发送单个漫画"""
         self.logger.info(f"处理漫画发送请求 - 用户{user_id}, 漫画ID: {manga_id}")
 
         response = f"ฅ( ̳• ·̫ • ̳ฅ)正在查找并准备发送漫画ID：{manga_id}，请稍候..."
@@ -207,6 +334,54 @@ class CommandExecutor:
         threading.Thread(
             target=self._send_manga_files, args=(user_id, manga_id, group_id, private)
         ).start()
+
+    def _send_batch_mangas(
+        self, user_id: str, manga_ids: List[str], group_id: Optional[str], private: bool
+    ) -> None:
+        """批量发送漫画"""
+        self.logger.info(
+            f"处理批量漫画发送请求 - 用户{user_id}, 漫画ID数量: {len(manga_ids)}"
+        )
+
+        response = f"开始批量发送 {len(manga_ids)} 个漫画，请稍候...\n\n"
+        response += "发送队列：\n"
+        for i, manga_id in enumerate(manga_ids[:10], 1):
+            response += f"  {i}. {manga_id}\n"
+        if len(manga_ids) > 10:
+            response += f"  ... 还有 {len(manga_ids) - 10} 个\n"
+
+        self.message_sender(user_id, response, group_id, private)
+
+        results: List[Tuple[str, bool, str]] = []
+
+        for manga_id in manga_ids:
+            try:
+                if manga_id in self.download_manager.downloading_mangas:
+                    results.append(
+                        (
+                            manga_id,
+                            False,
+                            "正在下载中，请等待下载完成",
+                        )
+                    )
+                    continue
+
+                pdf_path = find_manga_pdf(
+                    str(self.config["MANGA_DOWNLOAD_PATH"]), manga_id
+                )
+
+                if pdf_path:
+                    self.logger.info(f"找到PDF文件: {pdf_path}")
+                    self.file_sender(user_id, pdf_path, group_id, private)
+                    results.append((manga_id, True, "发送成功"))
+                else:
+                    results.append((manga_id, False, "未找到PDF文件"))
+            except Exception as e:
+                self.logger.error(f"发送漫画 {manga_id} 出错: {e}")
+                results.append((manga_id, False, str(e)))
+
+        batch_response = format_batch_response("发送", results)
+        self.message_sender(user_id, batch_response, group_id, private)
 
     def _send_manga_files(
         self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
@@ -227,7 +402,7 @@ class CommandExecutor:
             if pdf_path:
                 self.logger.info(f"找到PDF文件: {pdf_path}")
                 self.message_sender(
-                    user_id, f"找到漫画PDF文件，开始发送...", group_id, private
+                    user_id, "找到漫画PDF文件，开始发送...", group_id, private
                 )
                 self.file_sender(user_id, pdf_path, group_id, private)
                 self.message_sender(
@@ -286,9 +461,46 @@ class CommandExecutor:
             self.message_sender(user_id, error_msg, group_id, private)
 
     def _query_manga_existence(
+        self, user_id: str, params: str, group_id: Optional[str], private: bool
+    ) -> None:
+        """查询指定漫画ID是否已下载，支持批量查询"""
+        try:
+            manga_ids, use_all = parse_batch_params(params)
+
+            if use_all:
+                manga_ids = self._get_all_downloaded_manga_ids()
+                if not manga_ids:
+                    self.message_sender(
+                        user_id,
+                        "❌ 当前没有已下载的漫画",
+                        group_id,
+                        private,
+                    )
+                    return
+
+            if not manga_ids:
+                self.message_sender(
+                    user_id,
+                    "❌ 参数错误！请提供有效的漫画ID",
+                    group_id,
+                    private,
+                )
+                return
+
+            manga_ids = validate_manga_ids(manga_ids)
+
+            if len(manga_ids) == 1:
+                self._query_single_manga(user_id, manga_ids[0], group_id, private)
+            else:
+                self._query_batch_mangas(user_id, manga_ids, group_id, private)
+        except ValueError as e:
+            self.logger.warning(f"批量查询参数解析失败: {e}")
+            self.message_sender(user_id, str(e), group_id, private)
+
+    def _query_single_manga(
         self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
     ) -> None:
-        """查询指定漫画ID是否已下载"""
+        """查询单个漫画"""
         self.logger.info(f"查询漫画存在性 - 用户{user_id}, 漫画ID: {manga_id}")
 
         try:
@@ -317,6 +529,41 @@ class CommandExecutor:
             self.logger.error(f"查询漫画存在性出错: {e}")
             error_msg = "❌ 下载目录不存在！快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
             self.message_sender(user_id, error_msg, group_id, private)
+
+    def _query_batch_mangas(
+        self, user_id: str, manga_ids: List[str], group_id: Optional[str], private: bool
+    ) -> None:
+        """批量查询漫画"""
+        self.logger.info(
+            f"处理批量漫画查询请求 - 用户{user_id}, 漫画ID数量: {len(manga_ids)}"
+        )
+
+        results: List[Tuple[str, bool, str]] = []
+
+        for manga_id in manga_ids:
+            try:
+                if manga_id in self.download_manager.downloading_mangas:
+                    results.append((manga_id, False, "正在下载中"))
+                    continue
+
+                pdf_path = find_manga_pdf(
+                    str(self.config["MANGA_DOWNLOAD_PATH"]), manga_id
+                )
+
+                if pdf_path:
+                    file_size_mb = get_file_size_mb(pdf_path)
+                    results.append((manga_id, True, f"已下载 ({file_size_mb} MB)"))
+                else:
+                    results.append((manga_id, False, "未下载"))
+            except FileNotFoundError as e:
+                self.logger.error(f"查询漫画 {manga_id} 出错: {e}")
+                results.append((manga_id, False, "查询失败"))
+            except Exception as e:
+                self.logger.error(f"查询漫画 {manga_id} 出错: {e}")
+                results.append((manga_id, False, str(e)))
+
+        batch_response = format_batch_response("查询", results)
+        self.message_sender(user_id, batch_response, group_id, private)
 
     def _send_version_info(
         self, user_id: str, args: str, group_id: Optional[str], private: bool
@@ -416,31 +663,117 @@ class CommandExecutor:
         self.message_sender(user_id, response, group_id, private)
 
     def _handle_manga_delete(
-        self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
+        self, user_id: str, params: str, group_id: Optional[str], private: bool
     ) -> None:
-        """处理漫画删除请求"""
-        self.logger.info(f"处理漫画删除请求 - 用户{user_id}, 漫画ID: {manga_id}")
+        """处理漫画删除请求，支持批量删除"""
+        self.logger.info(f"处理漫画删除请求 - 用户{user_id}")
 
         try:
             self.permission_manager.check_delete_permission(user_id)
         except ValueError as e:
             if "必须且只能有一个用户" in str(e):
                 response = (
-                    f"❌\u001b[31m删除功能不可用："
-                    f"删除权限用户名单必须且只能有一个用户\u001b[0m"
+                    "❌\u001b[31m删除功能不可用："
+                    "删除权限用户名单必须且只能有一个用户\u001b[0m"
                 )
                 self.message_sender(user_id, response, group_id, private)
                 return
             if "未配置删除权限用户" in str(e):
-                response = (
-                    f"❌\u001b[31m删除功能不可用：" f"未配置删除权限用户\u001b[0m"
-                )
+                response = "❌\u001b[31m删除功能不可用：未配置删除权限用户\u001b[0m"
                 self.message_sender(user_id, response, group_id, private)
                 return
             error_msg = f"❌ 权限检查失败：{str(e)}"
             self.message_sender(user_id, error_msg, group_id, private)
             return
 
+        try:
+            manga_ids, use_all = parse_batch_params(params)
+
+            if use_all:
+                manga_ids = self._get_all_downloaded_manga_ids()
+                if not manga_ids:
+                    self.message_sender(
+                        user_id,
+                        "❌ 当前没有已下载的漫画",
+                        group_id,
+                        private,
+                    )
+                    return
+
+            if not manga_ids:
+                self.message_sender(
+                    user_id,
+                    "❌ 参数错误！请提供有效的漫画ID",
+                    group_id,
+                    private,
+                )
+                return
+
+            manga_ids = validate_manga_ids(manga_ids)
+
+            if len(manga_ids) == 1:
+                self._delete_single_manga(user_id, manga_ids[0], group_id, private)
+            else:
+                self._delete_batch_mangas(user_id, manga_ids, group_id, private)
+        except ValueError as e:
+            self.logger.warning(f"批量删除参数解析失败: {e}")
+            self.message_sender(user_id, str(e), group_id, private)
+
+    def _delete_single_manga(
+        self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
+    ) -> None:
+        """删除单个漫画"""
+        self.logger.info(f"处理漫画删除请求 - 用户{user_id}, 漫画ID: {manga_id}")
+
         response = f"ฅ( ̳• ·̫ • ̳ฅ)正在删除漫画ID：{manga_id}，请稍候..."
         self.message_sender(user_id, response, group_id, private)
         self.download_manager.delete_manga(user_id, manga_id, group_id, private)
+
+    def _delete_batch_mangas(
+        self, user_id: str, manga_ids: List[str], group_id: Optional[str], private: bool
+    ) -> None:
+        """批量删除漫画"""
+        self.logger.info(
+            f"处理批量漫画删除请求 - 用户{user_id}, 漫画ID数量: {len(manga_ids)}"
+        )
+
+        response = f"开始批量删除 {len(manga_ids)} 个漫画，请稍候...\n\n"
+        response += "删除队列：\n"
+        for i, manga_id in enumerate(manga_ids[:10], 1):
+            response += f"  {i}. {manga_id}\n"
+        if len(manga_ids) > 10:
+            response += f"  ... 还有 {len(manga_ids) - 10} 个\n"
+
+        self.message_sender(user_id, response, group_id, private)
+
+        results: List[Tuple[str, bool, str]] = []
+
+        for manga_id in manga_ids:
+            try:
+                download_path = str(self.config["MANGA_DOWNLOAD_PATH"])
+
+                if not os.path.exists(download_path):
+                    results.append((manga_id, False, "下载目录不存在"))
+                    continue
+
+                pdf_path = None
+                for file_name in os.listdir(download_path):
+                    if file_name.startswith(f"{manga_id}-") and file_name.endswith(
+                        ".pdf"
+                    ):
+                        pdf_path = os.path.join(download_path, file_name)
+                        break
+
+                if not pdf_path:
+                    results.append((manga_id, False, "未找到PDF文件"))
+                    continue
+
+                os.remove(pdf_path)
+                self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")
+                results.append((manga_id, True, "删除成功"))
+            except Exception as e:
+                self.logger.error(f"删除漫画 {manga_id} 出错: {e}")
+                results.append((manga_id, False, str(e)))
+
+        batch_response = format_batch_response("删除", results)
+        self.message_sender(user_id, batch_response, group_id, private)
