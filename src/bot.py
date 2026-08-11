@@ -149,7 +149,7 @@ class MangaBot:
         """询问用户是否确认关闭机器人"""
         print("是否确认关闭JMComic下载机器人？(y/n)")
         ch = self._get_one_char()
-        return ch.lower() == "y"
+        return ch is not None and ch.lower() == "y"
 
     def _safe_sigint_handler(self, signum, frame) -> None:
         """安全处理SIGINT信号"""
