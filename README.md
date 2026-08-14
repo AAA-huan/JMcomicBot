@@ -11,10 +11,10 @@
 
 **平台状态说明：**
 - ✅ **Windows系统**：已稳定可用    [部署教程](#windows-部署)
-- 🧪 **Linux系统**：安卓模仿的是Linux，理论可行但我没有Linux无法测试，有愿意帮助的人请按照教程部署之后把问题反馈到issue里感谢    [部署教程](#linux-部署)
-- ✅ **Android系统**：已稳定可用     [部署教程](#android-部署)
+- ✅ **Linux系统**：  已稳定可用    [部署教程](#linux-部署)
+- ✅ **Android系统**：已稳定可用    [部署教程](#android-部署)
 
-> **注意**：Linux平台的部署文档目前为测试版本，可能存在兼容性问题，请等待稳定版本发布后再进行部署。作者推荐使用安卓部署，同为Linux系统不会像Windows一样容易被ban掉而且手机在身边也方便。
+> **推荐**：作者推荐使用安卓部署，同为Linux系统不会像Windows一样容易被ban掉而且手机在身边也方便。
 
 > ✨ **智能漫画下载助手** - 基于 NapCat 的高性能 QQ 机器人，专为漫画爱好者设计
 
@@ -264,9 +264,8 @@ LOW_MEMORY_MODE=false
 2. **创建项目目录**
    ```bash
    # 创建项目文件夹
-   sudo mkdir -p /opt/JMBot
-   sudo chown $USER:$USER /opt/JMBot
-   cd /opt/JMBot
+   mkdir -p ~/JMBot
+   cd ~/JMBot
    ```
 
 3. **使用 Git 克隆项目**
@@ -362,8 +361,7 @@ LOW_MEMORY_MODE=false
 3. **创建数据目录**
    ```bash
    # 创建下载目录
-   sudo mkdir -p /var/lib/JMBot/downloads
-   sudo chown $USER:$USER /var/lib/JMBot/downloads
+   mkdir -p ~/JMBot/downloads
    ```
 
 #### 第四步：系统服务配置（可选）
@@ -433,6 +431,23 @@ LOW_MEMORY_MODE=false
 1. **安装 NapCat**
    - 参考 NapCatQQ 文档安装 NapCat https://github.com/NapNeko/NapCatQQ
    - 配置 WebSocket 服务端与机器人配置匹配
+
+> **注意** - 若使用docker部署napcat，则需要注意以下几点
+1. napcat的websocket服务端的host该改为0.0.0.0
+2. 部署时需要把downloads目录挂载到容器内
+```bash
+docker run -d \
+-e NAPCAT_GID=$(id -g) \
+-e NAPCAT_UID=$(id -u) \
+-p 3000:3000 \
+-p 3001:3001 \
+-p 6099:6099 \
+--name napcat \
+--restart=always \
+-v /home/$USER/JMBot/downloads:/home/$USER/JMBot/downloads \ # 加这行
+mlikiowa/napcat-docker:latest
+
+```
 
 #### 第六步：使用方法
 
