@@ -42,6 +42,7 @@ env/
 .coverage/
 test_bot_linux.py
 test_whitelist.py
+tests/
 
 # Temporary files
 *.tmp
@@ -59,3 +60,5 @@ test_delete_permission.py
 test_batch.py
 test_download.py
 test_parser.py
+conftest.py
+AGENTS.md

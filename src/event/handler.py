@@ -57,7 +57,7 @@ class EventHandler:
         except Exception as e:
             error_msg = f"处理事件时出错: {str(e)}"
             self.logger.error(error_msg)
-            raise ValueError(error_msg)
+            raise ValueError(error_msg) from e
 
         if data.get("post_type") == "meta_event":
             return
@@ -94,14 +94,14 @@ class EventHandler:
             return
 
         try:
-            self.permission_checker(user_id, private=True)
+            self.permission_checker(user_id, None, True)
         except ValueError as e:
             self.logger.warning(f"拒绝处理私信 - 用户 {user_id} 权限不足: {e}")
             return
 
         self.logger.info(f"收到私聊消息 - 用户{user_id}: {message}")
         try:
-            self.command_handler(user_id, message, private=True)
+            self.command_handler(user_id, message, None, True)
             self.logger.debug(f"私聊消息处理完成 - 用户{user_id}")
         except Exception as e:
             self.logger.error(f"处理私聊消息时出错: {e}")
@@ -123,7 +123,7 @@ class EventHandler:
             return
 
         try:
-            self.permission_checker(user_id, group_id=group_id, private=False)
+            self.permission_checker(user_id, group_id, False)
         except ValueError as e:
             self.logger.warning(f"拒绝处理群消息 - 群组 {group_id} 用户 {user_id} 权限不足: {e}")
             return
@@ -143,7 +143,7 @@ class EventHandler:
         message = self._remove_at_mention(message)
         self.logger.info(f"收到群消息并被@ - 群{group_id} 用户{user_id}: {message}")
         try:
-            self.command_handler(user_id, message, group_id=group_id, private=False)
+            self.command_handler(user_id, message, group_id, False)
         except Exception as e:
             self.logger.error(f"处理群消息时出错: {e}")
             raise
