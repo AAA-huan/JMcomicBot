@@ -4,5 +4,8 @@
 download:
   image:
     suffix: .jpg  # 下载图片的格式，可选 .jpg, .png 等
+  threading:
+    image: 8  # 图片下载并发数，默认30，调低以降低内存占用
+    photo: 2  # 章节下载并发数，默认CPU线程数，调低以降低内存占用
   dir:
     base: ./downloads  # 基础下载目录, 不用改
