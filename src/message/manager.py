@@ -66,7 +66,7 @@ class MessageManager:
         if self.config.get("NAPCAT_TOKEN"):
             payload["params"]["access_token"] = self.config["NAPCAT_TOKEN"]
 
-        if self._is_websocket_connected():
+        if self._is_websocket_connected() and self.ws_client is not None:
             message_json: str = json.dumps(payload)
             self.logger.info(
                 f"准备发送 - 用户:{user_id}, 类型:{'私聊' if private else '群聊'}"
@@ -139,7 +139,7 @@ class MessageManager:
         if self.config.get("NAPCAT_TOKEN"):
             payload["params"]["access_token"] = self.config["NAPCAT_TOKEN"]
 
-        if self._is_websocket_connected():
+        if self._is_websocket_connected() and self.ws_client is not None:
             message_json = json.dumps(payload)
             self.logger.debug(f"发送消息段数组文件: {message_json}")
             self.ws_client.ws.send(message_json)
