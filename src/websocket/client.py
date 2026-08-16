@@ -158,7 +158,8 @@ class WebSocketClient:
     def _on_message(self, _ws: websocket.WebSocketApp, message: str) -> None:
         """WebSocket消息处理"""
         try:
-            self.logger.info(f"收到WebSocket消息: {message[:100]}...")
+            # 原始消息内容较长，属于高频噪音，降级到 DEBUG 仅在文件日志中保留
+            self.logger.debug(f"收到WebSocket消息: {message[:100]}...")
             data = json.loads(message)
 
             # 如果有设置消息处理器，则调用它

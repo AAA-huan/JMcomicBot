@@ -315,7 +315,6 @@ class DownloadManager:
                         f"成功生成 {success_count} 个PDF文件\n"
                         f"⚠️ 低占用模式：文件将在{delete_delay}分钟后自动删除"
                     )
-                    self.message_sender(user_id, response, group_id, private)
 
                     # 自动发送所有PDF文件
                     for pdf_path in pdf_files:

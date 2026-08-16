@@ -19,7 +19,7 @@ from src.websocket.client import WebSocketClient
 class MangaBot:
     """JMComic QQ机器人主类，整合所有功能模块"""
 
-    VERSION = "3.0.0"
+    VERSION = "3.2.5"
 
     def __init__(self) -> None:
         """初始化MangaBot机器人"""
