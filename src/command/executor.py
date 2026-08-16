@@ -1,3 +1,5 @@
+"""命令执行器，负责执行命令"""
+
 import os
 import platform
 import time
@@ -21,7 +23,7 @@ from src.utils.helpers import (
 class CommandExecutor:
     """命令执行器，负责执行各种命令"""
 
-    VERSION = "3.0.0"
+    VERSION = "3.2.5"
 
     def __init__(
         self,
@@ -640,7 +642,7 @@ class CommandExecutor:
         response = (
             "你好！我是高性能JM机器人૮₍♡>𖥦<₎ა，"
             "可以帮你下载JMComic的漫画哦~~~\n"
-            "输入 '漫画帮助' 就可以查看我的使用方法啦~"
+            "输入 '漫画帮助' 就可以查看我的使用方法~"
         )
         self.message_sender(user_id, response, group_id, private)
 

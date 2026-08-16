@@ -1,3 +1,5 @@
+"""消息管理器，负责发送文本消息和文件"""
+
 import json
 import os
 import time
@@ -9,9 +11,7 @@ from src.logging.logger_config import logger
 class MessageManager:
     """消息管理器，负责发送文本消息和文件"""
 
-    def __init__(
-        self, config: Dict[str, Any], ws_client: Optional[Any] = None
-    ) -> None:
+    def __init__(self, config: Dict[str, Any], ws_client: Optional[Any] = None) -> None:
         """
         初始化消息管理器
 
@@ -72,7 +72,7 @@ class MessageManager:
                 f"准备发送 - 用户:{user_id}, 类型:{'私聊' if private else '群聊'}"
             )
             self.ws_client.ws.send(message_json)
-            self.logger.info(f"发送成功: {message[:20]}...")
+            self.logger.info(f"发送成功: {message[:50]}...")
         else:
             error_msg = "WebSocket连接未建立，消息发送失败"
             self.logger.warning(error_msg)

@@ -148,6 +148,7 @@ env/
 .venv/
 
 # 测试产物（本地单测文件按需忽略）
+tests/*
 test_bot_linux.py
 test_whitelist.py
 test_low_memory_mode.py
@@ -169,3 +170,4 @@ option.yml
 
 # 本地 PR 说明文档（不入库）
 pr.md
+AGENTS.md
