@@ -80,7 +80,7 @@ def format_batch_response(command: str, results: List[Tuple[str, bool, str]]) ->
     success_count = sum(1 for _, success, _ in results if success)
     total_count = len(results)
 
-    response = f"📊 批量{command}操作完成\n\n"
+    response = f"📊 {command}操作完成\n\n"
     response += f"总计：{total_count} 个漫画\n"
     response += f"成功：{success_count} 个\n"
     response += f"失败：{total_count - success_count} 个\n\n"

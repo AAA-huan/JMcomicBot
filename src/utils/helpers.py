@@ -71,7 +71,7 @@ def cleanup_failed_downloads(download_path: str) -> int:
     return cleaned_count
 
 
-def find_manga_pdf(download_path: str, manga_id: str) -> str | None:
+def find_manga_pdf(download_path: str, manga_id: str) -> list[str] | None:
     """
     在下载目录中查找指定漫画ID的PDF文件
 
@@ -85,11 +85,13 @@ def find_manga_pdf(download_path: str, manga_id: str) -> str | None:
     if not os.path.exists(download_path):
         return None
 
+    pdf_files = []
     for file_name in os.listdir(download_path):
         if file_name.startswith(f"{manga_id}-") and file_name.endswith(".pdf"):
-            return os.path.join(download_path, file_name)
+            pdf_files.append(os.path.join(download_path, file_name))
 
-    return None
+    pdf_files.sort()
+    return pdf_files
 
 
 def list_downloaded_mangas(download_path: str) -> List[str]:

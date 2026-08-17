@@ -171,3 +171,4 @@ option.yml
 # 本地 PR 说明文档（不入库）
 pr.md
 AGENTS.md
+conftest.py
