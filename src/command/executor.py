@@ -205,7 +205,7 @@ class CommandExecutor:
             # 统一启动异步线程处理所有下载
             threading.Thread(
                 target=self._download_manga_files,
-                args=(user_id, manga_ids, group_id, private)
+                args=(user_id, manga_ids, group_id, private),
             ).start()
 
         except ValueError as e:
@@ -231,15 +231,21 @@ class CommandExecutor:
         for manga_id in manga_ids:
             try:
                 # 检查漫画是否已经下载
-                pdf_path = find_manga_pdf(str(self.config["MANGA_DOWNLOAD_PATH"]), manga_id)
+                pdf_path = find_manga_pdf(
+                    str(self.config["MANGA_DOWNLOAD_PATH"]), manga_id
+                )
                 if pdf_path:
                     chapter_count = len(pdf_path)
-                    chapter_info = f"（共 {chapter_count} 个章节）" if chapter_count > 1 else ""
+                    chapter_info = (
+                        f"（共 {chapter_count} 个章节）" if chapter_count > 1 else ""
+                    )
                     results.append((manga_id, True, f"已下载过{chapter_info}"))
                     continue
 
                 # 加入下载队列
-                self.download_manager.download_manga(user_id, manga_id, group_id, private)
+                self.download_manager.download_manga(
+                    user_id, manga_id, group_id, private
+                )
                 results.append((manga_id, True, "已加入下载队列"))
             except Exception as e:
                 self.logger.error(f"下载漫画 {manga_id} 出错: {e}")
@@ -280,7 +286,7 @@ class CommandExecutor:
             # 统一启动异步线程处理所有发送
             threading.Thread(
                 target=self._send_manga_files,
-                args=(user_id, manga_ids, group_id, private)
+                args=(user_id, manga_ids, group_id, private),
             ).start()
 
         except ValueError as e:
@@ -301,12 +307,20 @@ class CommandExecutor:
             response += f"  ... 还有 {len(manga_ids) - 10} 个\n"
         self.message_sender(user_id, response, group_id, private)
 
+        batch_size = int(self.config.get("FILE_SEND_BATCH_SIZE", 10))
         results: List[Tuple[str, bool, str]] = []
+        file_count = 0
 
         for manga_id in manga_ids:
             try:
                 if manga_id in self.download_manager.downloading_mangas:
-                    results.append((manga_id, False, "正在下载中，请等待下载完成",))
+                    results.append(
+                        (
+                            manga_id,
+                            False,
+                            "正在下载中，请等待下载完成",
+                        )
+                    )
                     continue
 
                 pdf_paths = find_manga_pdf(
@@ -321,14 +335,23 @@ class CommandExecutor:
                     try:
                         self.file_sender(user_id, pdf_path, group_id, private)
                         success_count += 1
+                        file_count += 1
                     except Exception as e:
                         self.logger.error(f"发送章节文件失败: {pdf_path}, {e}")
 
-                results.append((
-                    manga_id,
-                    success_count > 0,
-                    f"发送成功 {success_count}/{len(pdf_paths)} 个章节"
-                ))
+                    if file_count % batch_size == 0:
+                        progress = (
+                            f"⏳ 发送进度：已发送 {file_count} 个文件，继续发送中..."
+                        )
+                        self.message_sender(user_id, progress, group_id, private)
+
+                results.append(
+                    (
+                        manga_id,
+                        success_count > 0,
+                        f"发送成功 {success_count}/{len(pdf_paths)} 个章节",
+                    )
+                )
 
             except Exception as e:
                 self.logger.error(f"发送漫画 {manga_id} 出错: {e}")
@@ -424,7 +447,7 @@ class CommandExecutor:
             # 统一启动异步线程处理所有查询
             threading.Thread(
                 target=self._query_manga_files,
-                args=(user_id, manga_ids, group_id, private)
+                args=(user_id, manga_ids, group_id, private),
             ).start()
 
         except ValueError as e:
@@ -449,8 +472,12 @@ class CommandExecutor:
                 )
                 if pdf_paths:
                     total_size_mb = sum(get_file_size_mb(p) for p in pdf_paths)
-                    chapter_info = f"，{len(pdf_paths)} 章" if len(pdf_paths) > 1 else ""
-                    results.append((manga_id, True, f"已下载 ({total_size_mb} MB{chapter_info})"))
+                    chapter_info = (
+                        f"，{len(pdf_paths)} 章" if len(pdf_paths) > 1 else ""
+                    )
+                    results.append(
+                        (manga_id, True, f"已下载 ({total_size_mb} MB{chapter_info})")
+                    )
                 else:
                     results.append((manga_id, False, "未下载"))
 
@@ -569,10 +596,7 @@ class CommandExecutor:
             self.permission_manager.check_delete_permission(user_id)
         except ValueError as e:
             if "必须且只能有一个用户" in str(e):
-                response = (
-                    "❌ 删除功能不可用："
-                    "删除权限用户名单必须且只能有一个用户"
-                )
+                response = "❌ 删除功能不可用：" "删除权限用户名单必须且只能有一个用户"
                 self.message_sender(user_id, response, group_id, private)
                 return
             if "未配置删除权限用户" in str(e):

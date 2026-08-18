@@ -144,7 +144,9 @@ class MessageManager:
             self.logger.debug(f"发送消息段数组文件: {message_json}")
             self.ws_client.ws.send(message_json)
             self.logger.info(f"文件发送请求已发送: {file_name}")
-            time.sleep(1)
+
+            send_interval = int(self.config.get("FILE_SEND_INTERVAL", 3))
+            time.sleep(send_interval)
         else:
             error_msg = "WebSocket连接未建立，文件发送失败"
             self.logger.warning(error_msg)
