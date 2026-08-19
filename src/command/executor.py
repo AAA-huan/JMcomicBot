@@ -232,11 +232,11 @@ class CommandExecutor:
         for manga_id in manga_ids:
             try:
                 if manga_id in self.download_manager.downloading_mangas:
-                    manga_blocks.append(f"• ID {manga_id} — ⏳ 正在下载中，请等待")
+                    manga_blocks.append(f"• {manga_id} — 正在下载中，请等待")
                     continue
 
                 if manga_id in self.download_manager.queued_tasks:
-                    manga_blocks.append(f"• ID {manga_id} — ⏳ 已在下载队列中等待")
+                    manga_blocks.append(f"• {manga_id} — 已在下载队列中等待")
                     continue
 
                 # 检查漫画是否已经下载
@@ -247,23 +247,25 @@ class CommandExecutor:
                     chapter_info = (
                         f"（共 {len(pdf_paths)} 个章节）" if len(pdf_paths) > 1 else ""
                     )
-                    manga_blocks.append(f"• ID {manga_id} — ✅ 已下载过{chapter_info}")
+                    manga_blocks.append(f"• {manga_id} — ✅ 已下载过{chapter_info}")
                     continue
 
                 # 加入下载队列
                 self.download_manager.download_manga(
                     user_id, manga_id, group_id, private
                 )
-                manga_blocks.append(f"• ID {manga_id} — 📥 已加入下载队列")
+
             except Exception as e:
                 self.logger.error(f"下载漫画 {manga_id} 出错: {e}")
                 manga_blocks.append(f"• ID {manga_id} — ❌ {str(e)}")
 
-        pages = paginate_blocks(manga_blocks, "📊 下载结果")
-        for i, page in enumerate(pages):
-            self.message_sender(user_id, page, group_id, private)
-            if i < len(pages) - 1:
-                time.sleep(0.325)
+        # 若全是未下载的漫画则不发送消息
+        if manga_blocks:
+            pages = paginate_blocks(manga_blocks, "📊 下载结果")
+            for i, page in enumerate(pages):
+                self.message_sender(user_id, page, group_id, private)
+                if i < len(pages) - 1:
+                    time.sleep(0.325)
 
     def _handle_manga_send(
         self, user_id: str, params: str, group_id: Optional[str], private: bool
@@ -468,7 +470,7 @@ class CommandExecutor:
         for manga_id in manga_ids:
             try:
                 if manga_id in self.download_manager.downloading_mangas:
-                    manga_blocks.append(f"• ID {manga_id} — ⏳ 正在下载中")
+                    manga_blocks.append(f"• {manga_id} — ⏳ 正在下载中")
                     continue
 
                 pdf_paths = find_manga_pdf(
@@ -485,13 +487,13 @@ class CommandExecutor:
                         block += f"\n  - {os.path.basename(pdf_path)}（{file_size} MB）"
                     manga_blocks.append(block)
                 else:
-                    manga_blocks.append(f"• ID {manga_id} — ❌ 未下载")
+                    manga_blocks.append(f"• {manga_id} — ❌ 未下载")
 
             except FileNotFoundError:
-                manga_blocks.append(f"• ID {manga_id} — ❌ 查询失败")
+                manga_blocks.append(f"• {manga_id} — ❌ 查询失败")
             except Exception as e:
                 self.logger.error(f"查询漫画 {manga_id} 出错: {e}")
-                manga_blocks.append(f"• ID {manga_id} — ❌ {str(e)}")
+                manga_blocks.append(f"• {manga_id} — ❌ {str(e)}")
 
         pages = paginate_blocks(manga_blocks, "📊 查询结果")
         for i, page in enumerate(pages):
