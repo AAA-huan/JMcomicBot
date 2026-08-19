@@ -11,8 +11,8 @@ from src.logging.logger_config import logger
 
 # 心跳参数（秒）
 # ping_timeout 必须小于 ping_interval，否则库会直接抛出异常
-PING_INTERVAL: float = 45.0
-PING_TIMEOUT: float = 20.0
+PING_INTERVAL: float = 90.0
+PING_TIMEOUT: float = 45.0
 
 # 库内置重连间隔（秒）：断线后等待该时长再尝试重建连接
 RECONNECT_INTERVAL: int = 5

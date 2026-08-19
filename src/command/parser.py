@@ -20,9 +20,11 @@ class CommandParser:
             "query": ["查询漫画", "漫画查询", "查询"],
             "version": ["漫画版本", "版本", "version"],
             "progress": ["下载进度", "漫画进度", "进度"],
+            "send_progress": ["发送进度"],
             "test_id": ["测试id"],
             "test_file": ["测试文件"],
             "delete": ["删除", "删除漫画", "漫画删除"],
+            "resend": ["重发重发"],
         }
 
         # 支持批量操作的命令
@@ -98,8 +100,10 @@ class CommandParser:
             "list",
             "version",
             "progress",
+            "send_progress",
             "test_id",
             "test_file",
+            "resend",
             "unknown",
         ]
 
@@ -180,8 +184,10 @@ class CommandParser:
             "list": "❌ 命令格式错误！'漫画列表'命令不需要额外参数\n直接输入：漫画列表",
             "version": "❌ 命令格式错误！'漫画版本'命令不需要额外参数\n直接输入：漫画版本",
             "progress": "❌ 命令格式错误！'下载进度'命令不需要额外参数\n直接输入：下载进度",
+            "send_progress": "❌ 命令格式错误！'发送进度'命令不需要额外参数\n直接输入：发送进度",
             "test_id": "❌ 命令格式错误！'测试id'命令不需要额外参数\n直接输入：测试id",
             "test_file": "❌ 命令格式错误！'测试文件'命令不需要额外参数\n直接输入：测试文件",
+            "resend": "❌ 命令格式错误！'重发重发'命令不需要额外参数\n直接输入：重发重发",
             "unknown": "❓ 未知命令，请输入'漫画帮助'查看所有可用命令",
         }
 
