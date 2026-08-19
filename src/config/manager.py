@@ -14,7 +14,7 @@ class ConfigManager:
     def __init__(self):
         """初始化配置管理器"""
         self.logger = logger
-        self.config_dict: Dict[str, Union[str, int, bool]] = {}
+        self.config_dict: Dict[str, Union[str, int, float, bool]] = {}
         self.group_whitelist: List[str] = []
         self.private_whitelist: List[str] = []
         self.global_blacklist: List[str] = []
@@ -61,13 +61,13 @@ class ConfigManager:
             low_memory_delete_delay = 3
 
         # 获取文件发送间隔（秒）
-        file_send_interval_str = os.getenv("FILE_SEND_INTERVAL", "3")
+        file_send_interval_str = os.getenv("FILE_SEND_INTERVAL", "1.8")
         try:
-            file_send_interval = int(file_send_interval_str)
+            file_send_interval = float(file_send_interval_str)
             if file_send_interval < 1:
-                file_send_interval = 3
+                file_send_interval = 1.8
         except ValueError:
-            file_send_interval = 3
+            file_send_interval = 1.8
 
         # 获取文件发送每批数量
         file_send_batch_size_str = os.getenv("FILE_SEND_BATCH_SIZE", "10")
@@ -78,7 +78,34 @@ class ConfigManager:
         except ValueError:
             file_send_batch_size = 10
 
-        self.config_dict: Dict[str, Union[str, int, bool]] = {
+        # 获取每批文件发送的间隔（秒）
+        file_send_batch_interval_str = os.getenv("FILE_SEND_BATCH_INTERVAL", "7")
+        try:
+            file_send_batch_interval = float(file_send_batch_interval_str)
+            if file_send_batch_interval < 1:
+                file_send_batch_interval = 7
+        except ValueError:
+            file_send_batch_interval = 7
+
+        # 获取文件发送重连等待超时（秒）
+        send_retry_timeout_str = os.getenv("SEND_RETRY_TIMEOUT", "30")
+        try:
+            send_retry_timeout = int(send_retry_timeout_str)
+            if send_retry_timeout < 1:
+                send_retry_timeout = 30
+        except ValueError:
+            send_retry_timeout = 30
+
+        # 获取断线文件确认重发的等待超时（秒）
+        resend_confirm_timeout_str = os.getenv("RESEND_CONFIRM_TIMEOUT", "300")
+        try:
+            resend_confirm_timeout = int(resend_confirm_timeout_str)
+            if resend_confirm_timeout < 1:
+                resend_confirm_timeout = 300
+        except ValueError:
+            resend_confirm_timeout = 300
+
+        self.config_dict: Dict[str, Union[str, int, float, bool]] = {
             "MANGA_DOWNLOAD_PATH": absolute_download_path,
             "NAPCAT_WS_URL": ws_url,
             "NAPCAT_TOKEN": token,
@@ -86,6 +113,9 @@ class ConfigManager:
             "LOW_MEMORY_DELETE_DELAY": low_memory_delete_delay,
             "FILE_SEND_INTERVAL": file_send_interval,
             "FILE_SEND_BATCH_SIZE": file_send_batch_size,
+            "FILE_SEND_BATCH_INTERVAL": file_send_batch_interval,
+            "SEND_RETRY_TIMEOUT": send_retry_timeout,
+            "RESEND_CONFIRM_TIMEOUT": resend_confirm_timeout,
         }
 
         # 初始化黑白名单配置
@@ -135,11 +165,11 @@ class ConfigManager:
         self.logger.info(f"下载路径设置为: {download_path}")
 
     def get(
-        self, key: str, default: Union[str, int, bool] = ""
-    ) -> Union[str, int, bool]:
+        self, key: str, default: Union[str, int, float, bool] = ""
+    ) -> Union[str, int, float, bool]:
         """获取配置值"""
         return self.config_dict.get(key, default)
 
-    def set(self, key: str, value: Union[str, int, bool]) -> None:
+    def set(self, key: str, value: Union[str, int, float, bool]) -> None:
         """设置配置值"""
         self.config_dict[key] = value
