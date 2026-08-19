@@ -34,6 +34,7 @@ class CommandExecutor:
         self_id_getter: Callable[[], Optional[str]],
         permission_manager: Any,
         resend_handler: Optional[Callable[[str, Optional[str], bool], int]] = None,
+        send_status_provider: Optional[Callable[[], Dict[str, Any]]] = None,
     ) -> None:
         """
         初始化命令执行器
@@ -46,6 +47,7 @@ class CommandExecutor:
             self_id_getter: 获取自身ID的函数
             permission_manager: 权限管理器实例
             resend_handler: 重发断线留存文件的处理函数，入参(user_id, group_id, private)，返回重发数量
+            send_status_provider: 获取文件发送队列状态的函数，返回包含running等字段的字典
         """
         self.message_sender = message_sender
         self.file_sender = file_sender
@@ -54,6 +56,7 @@ class CommandExecutor:
         self.self_id_getter = self_id_getter
         self.permission_manager = permission_manager
         self.resend_handler = resend_handler
+        self.send_status_provider = send_status_provider
         self.command_parser = CommandParser()
         self.logger = logger
         self.SELF_ID: Optional[str] = None
@@ -142,6 +145,7 @@ class CommandExecutor:
             "query": self._handle_manga_query,
             "version": self._send_version_info,
             "progress": self._show_download_progress,
+            "send_progress": self._show_send_progress,
             "test_id": self._test_id,
             "test_file": self._test_file,
             "welcome": self._send_welcome,
@@ -361,6 +365,10 @@ class CommandExecutor:
                             f"⏳ 发送进度：已发送 {file_count} 个文件，继续发送中..."
                         )
                         self.message_sender(user_id, progress, group_id, private)
+                        batch_interval = float(
+                            self.config.get("FILE_SEND_BATCH_INTERVAL", 7)
+                        )
+                        time.sleep(batch_interval)
 
                 results.append(
                     (
@@ -547,6 +555,48 @@ class CommandExecutor:
         response += "\n"
         response += f"📝 总任务数: {len(downloading_mangas) + len(queued_mangas)}\n"
         response += "\n💡 提示: 下载任务将按顺序执行，请耐心等待"
+
+        self.message_sender(user_id, response, group_id, private)
+
+    def _show_send_progress(
+        self, user_id: str, args: str, group_id: Optional[str], private: bool
+    ) -> None:
+        """显示当前文件发送队列的进度信息"""
+        self.logger.info(f"显示发送进度请求 - 用户{user_id}")
+
+        if self.send_status_provider is None:
+            self.message_sender(
+                user_id,
+                "❌ 发送进度不可用：未配置发送队列状态提供器",
+                group_id,
+                private,
+            )
+            return
+
+        status = self.send_status_provider()
+        running = bool(status.get("running", False))
+        queue_size = int(status.get("queue_size", 0))
+        current_file = status.get("current_file")
+
+        response = "📊 当前发送队列状态 📊\n\n"
+
+        if current_file:
+            response += f"⏳ 正在发送: {current_file}\n"
+        else:
+            response += "✅ 当前没有正在发送的文件\n"
+
+        response += "\n"
+
+        if queue_size > 0:
+            response += f"📋 队列等待: {queue_size} 个文件\n"
+        else:
+            response += "✅ 当前没有待发送的文件\n"
+
+        response += "\n"
+        total = queue_size + (1 if current_file else 0)
+        response += f"📝 总任务数: {total}\n"
+        response += f"📌 队列状态: {'运行中' if running else '已停止'}\n"
+        response += "\n💡 提示: 发送任务将按顺序执行，请耐心等待"
 
         self.message_sender(user_id, response, group_id, private)
 

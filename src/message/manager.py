@@ -47,7 +47,21 @@ class MessageManager:
         # 连接中断期间未能送达的内容，待连接恢复后补发提醒
         self._pending_errors: List[Dict[str, Any]] = []
         self._pending_errors_lock: threading.Lock = threading.Lock()
+        # 当前正在发送的文件名（供发送进度查询）
+        self._current_sending_file: Optional[str] = None
         self._start_file_queue_worker()
+
+    def get_send_queue_status(self) -> Dict[str, Any]:
+        """获取当前文件发送队列状态
+
+        Returns:
+            Dict[str, Any]: 包含running、queue_size、current_file字段的状态字典
+        """
+        return {
+            "running": self._queue_running,
+            "queue_size": self._file_queue.qsize(),
+            "current_file": self._current_sending_file,
+        }
 
     def set_websocket_client(self, ws_client: Optional[Any]) -> None:
         """
@@ -88,6 +102,7 @@ class MessageManager:
 
     def _process_send_task(self, task: SendTask) -> None:
         """处理单个文件发送任务，发送结果通过条件变量通知等待线程"""
+        self._current_sending_file = os.path.basename(task.file_path)
         try:
             self._send_file_with_retry(task)
             task.status = "done"
@@ -103,6 +118,7 @@ class MessageManager:
                 private=task.private,
             )
         finally:
+            self._current_sending_file = None
             with self._result_cond:
                 self._result_cond.notify_all()
 
@@ -121,7 +137,7 @@ class MessageManager:
             try:
                 with self._ws_lock:
                     self.ws_client.ws.send(json.dumps(payload))
-                send_interval = int(self.config.get("FILE_SEND_INTERVAL", 3))
+                send_interval = float(self.config.get("FILE_SEND_INTERVAL", 1.8))
                 time.sleep(send_interval)
                 return
             except Exception as e:
