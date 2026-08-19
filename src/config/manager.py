@@ -78,6 +78,15 @@ class ConfigManager:
         except ValueError:
             file_send_batch_size = 10
 
+        # 获取文件发送重连等待超时（秒）
+        send_retry_timeout_str = os.getenv("SEND_RETRY_TIMEOUT", "30")
+        try:
+            send_retry_timeout = int(send_retry_timeout_str)
+            if send_retry_timeout < 1:
+                send_retry_timeout = 30
+        except ValueError:
+            send_retry_timeout = 30
+
         self.config_dict: Dict[str, Union[str, int, bool]] = {
             "MANGA_DOWNLOAD_PATH": absolute_download_path,
             "NAPCAT_WS_URL": ws_url,
@@ -86,6 +95,7 @@ class ConfigManager:
             "LOW_MEMORY_DELETE_DELAY": low_memory_delete_delay,
             "FILE_SEND_INTERVAL": file_send_interval,
             "FILE_SEND_BATCH_SIZE": file_send_batch_size,
+            "SEND_RETRY_TIMEOUT": send_retry_timeout,
         }
 
         # 初始化黑白名单配置

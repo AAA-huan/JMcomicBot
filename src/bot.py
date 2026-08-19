@@ -194,6 +194,10 @@ class MangaBot:
         self.download_manager.queue_running = False
         logger.info("下载队列线程已设置为停止状态")
 
+        logger.info("停止文件发送队列进程...")
+        self.message_manager.stop()
+        logger.info("文件发送队列进程已停止")
+
         if self.download_manager.downloading_mangas:
             logger.info(
                 f"清理正在下载的漫画任务: {list(self.download_manager.downloading_mangas.keys())}"
