@@ -76,6 +76,7 @@ class MessageManager:
                     task = self._file_queue.get(timeout=1)
                 except queue.Empty:
                     self._flush_pending_errors()
+                    self._cleanup_expired_resends()
                     continue
 
                 self._process_send_task(task)
@@ -292,12 +293,14 @@ class MessageManager:
             "content_type": content_type,
             "content": content,
             "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "ts": time.time(),
+            "awaiting_resend": False,
         }
         with self._pending_errors_lock:
             self._pending_errors.append(entry)
 
     def _flush_pending_errors(self) -> None:
-        """连接恢复后，将中断期间留存的内容以提醒消息补发给用户"""
+        """连接恢复后，将留存的文本补发给用户，并提醒文件可确认重发"""
         if self.ws_client is None or not self._is_websocket_connected():
             return
 
@@ -312,12 +315,31 @@ class MessageManager:
             grouped.setdefault(key, []).append(entry)
 
         for (user_id, group_id, private), entries in grouped.items():
+            text_entries = [e for e in entries if e["content_type"] == "message"]
+            new_file_entries = [
+                e
+                for e in entries
+                if e["content_type"] == "file" and not e.get("awaiting_resend")
+            ]
+
+            if not text_entries and not new_file_entries:
+                continue
+
             notify = "⚠️ 上次 WebSocket 连接中断，以下内容未能及时送达：\n\n"
-            for entry in entries:
-                if entry["content_type"] == "file":
-                    notify += f"[{entry['timestamp']}] 文件：{os.path.basename(entry['content'])}\n"
-                else:
-                    notify += f"[{entry['timestamp']}] 消息：{entry['content'][:100]}\n"
+            if new_file_entries:
+                by_manga: Dict[str, int] = {}
+                for entry in new_file_entries:
+                    manga_id = os.path.basename(entry["content"]).split("-", 1)[0]
+                    by_manga[manga_id] = by_manga.get(manga_id, 0) + 1
+                for manga_id, count in by_manga.items():
+                    notify += f" • 漫画ID {manga_id}（{count} 个文件）\n"
+                resend_timeout = int(self.config.get("RESEND_CONFIRM_TIMEOUT", 300))
+                notify += (
+                    f"\n📬 回复「重发重发」确认重新发送，"
+                    f"{int(resend_timeout / 60)} 分钟内未确认将自动放弃"
+                )
+            for entry in text_entries:
+                notify += f"[{entry['timestamp']}] 消息：{entry['content'][:100]}\n"
 
             try:
                 payload = self._build_message_payload(
@@ -326,13 +348,104 @@ class MessageManager:
                 with self._ws_lock:
                     self.ws_client.ws.send(json.dumps(payload))
                 time.sleep(0.3)
+                now = time.time()
+                text_ids = {id(e) for e in text_entries}
+                new_file_ids = {id(e) for e in new_file_entries}
                 with self._pending_errors_lock:
-                    for entry in entries:
-                        if entry in self._pending_errors:
-                            self._pending_errors.remove(entry)
-                self.logger.info(f"已补发连接中断期间留存的 {len(entries)} 条内容")
+                    self._pending_errors = [
+                        e for e in self._pending_errors if id(e) not in text_ids
+                    ]
+                    for entry in self._pending_errors:
+                        if id(entry) in new_file_ids:
+                            entry["awaiting_resend"] = True
+                            entry["ts"] = now
+                            entry["timestamp"] = time.strftime(
+                                "%Y-%m-%d %H:%M:%S", time.localtime(now)
+                            )
+                self.logger.info(
+                    f"已补发连接中断期间留存的 {len(text_entries)} 条文本，"
+                    f"并提醒 {len(new_file_entries)} 个文件待重发"
+                )
             except Exception as e:
                 self.logger.error(f"补发留存消息失败: {e}")
+
+    def resend_pending_files(
+        self,
+        user_id: str,
+        group_id: Optional[str] = None,
+        private: bool = True,
+    ) -> int:
+        """将指定用户连接中断期间留存的文件重新加入发送队列
+
+        Args:
+            user_id: 用户ID
+            group_id: 群组ID（群聊时提供）
+            private: 是否为私聊
+
+        Returns:
+            int: 实际重新加入发送队列的文件数量
+        """
+        if not self._queue_running:
+            self.logger.warning("文件发送队列已停止，无法重发")
+            return 0
+
+        resend_entries: List[Dict[str, Any]] = []
+        with self._pending_errors_lock:
+            remaining: List[Dict[str, Any]] = []
+            for entry in self._pending_errors:
+                match = (
+                    entry.get("content_type") == "file"
+                    and entry.get("awaiting_resend")
+                    and entry.get("user_id") == user_id
+                    and entry.get("group_id") == group_id
+                    and entry.get("private") == private
+                )
+                if match:
+                    if os.path.exists(entry["content"]):
+                        resend_entries.append(entry)
+                    else:
+                        self.logger.warning(
+                            f"待重发文件不存在，已丢弃: {entry['content']}"
+                        )
+                else:
+                    remaining.append(entry)
+            self._pending_errors = remaining
+
+        count = 0
+        for entry in resend_entries:
+            self.logger.info(f"重发文件: {entry['content']}")
+            self._file_queue.put(
+                SendTask(
+                    user_id=entry["user_id"],
+                    file_path=entry["content"],
+                    group_id=entry["group_id"],
+                    private=entry["private"],
+                )
+            )
+            count += 1
+        return count
+
+    def _cleanup_expired_resends(self) -> None:
+        """清理等待用户确认重发但已超时的文件，防止残留"""
+        timeout = int(self.config.get("RESEND_CONFIRM_TIMEOUT", 300))
+        now = time.time()
+        expired: List[Dict[str, Any]] = []
+        with self._pending_errors_lock:
+            remaining: List[Dict[str, Any]] = []
+            for entry in self._pending_errors:
+                if (
+                    entry.get("content_type") == "file"
+                    and entry.get("awaiting_resend")
+                    and now - entry.get("ts", 0) > timeout
+                ):
+                    expired.append(entry)
+                else:
+                    remaining.append(entry)
+            self._pending_errors = remaining
+        for entry in expired:
+            self.logger.info(
+                f"等待重发的文件已超时放弃: {os.path.basename(entry['content'])}"
+            )
 
     def _is_websocket_connected(self) -> bool:
         """

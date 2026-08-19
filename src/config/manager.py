@@ -87,6 +87,15 @@ class ConfigManager:
         except ValueError:
             send_retry_timeout = 30
 
+        # 获取断线文件确认重发的等待超时（秒）
+        resend_confirm_timeout_str = os.getenv("RESEND_CONFIRM_TIMEOUT", "300")
+        try:
+            resend_confirm_timeout = int(resend_confirm_timeout_str)
+            if resend_confirm_timeout < 1:
+                resend_confirm_timeout = 300
+        except ValueError:
+            resend_confirm_timeout = 300
+
         self.config_dict: Dict[str, Union[str, int, bool]] = {
             "MANGA_DOWNLOAD_PATH": absolute_download_path,
             "NAPCAT_WS_URL": ws_url,
@@ -96,6 +105,7 @@ class ConfigManager:
             "FILE_SEND_INTERVAL": file_send_interval,
             "FILE_SEND_BATCH_SIZE": file_send_batch_size,
             "SEND_RETRY_TIMEOUT": send_retry_timeout,
+            "RESEND_CONFIRM_TIMEOUT": resend_confirm_timeout,
         }
 
         # 初始化黑白名单配置

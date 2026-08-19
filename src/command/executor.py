@@ -33,6 +33,7 @@ class CommandExecutor:
         config: Dict[str, Any],
         self_id_getter: Callable[[], Optional[str]],
         permission_manager: Any,
+        resend_handler: Optional[Callable[[str, Optional[str], bool], int]] = None,
     ) -> None:
         """
         初始化命令执行器
@@ -44,6 +45,7 @@ class CommandExecutor:
             config: 配置字典
             self_id_getter: 获取自身ID的函数
             permission_manager: 权限管理器实例
+            resend_handler: 重发断线留存文件的处理函数，入参(user_id, group_id, private)，返回重发数量
         """
         self.message_sender = message_sender
         self.file_sender = file_sender
@@ -51,6 +53,7 @@ class CommandExecutor:
         self.config = config
         self.self_id_getter = self_id_getter
         self.permission_manager = permission_manager
+        self.resend_handler = resend_handler
         self.command_parser = CommandParser()
         self.logger = logger
         self.SELF_ID: Optional[str] = None
@@ -143,6 +146,7 @@ class CommandExecutor:
             "test_file": self._test_file,
             "welcome": self._send_welcome,
             "delete": self._handle_manga_delete,
+            "resend": self._handle_manga_resend,
         }
 
         handler = command_handlers.get(cmd)
@@ -596,6 +600,34 @@ class CommandExecutor:
             "输入 '漫画帮助' 就可以查看我的使用方法~"
         )
         self.message_sender(user_id, response, group_id, private)
+
+    def _handle_manga_resend(
+        self, user_id: str, args: str, group_id: Optional[str], private: bool
+    ) -> None:
+        """处理断线留存文件的确认重发请求"""
+        self.logger.info(f"处理重发请求 - 用户{user_id}")
+
+        if self.resend_handler is None:
+            self.message_sender(
+                user_id,
+                "❌ 重发功能不可用：未配置重发处理器",
+                group_id,
+                private,
+            )
+            return
+
+        resend_count = self.resend_handler(user_id, group_id, private)
+
+        if resend_count <= 0:
+            self.message_sender(user_id, "📭 当前没有待重发的文件", group_id, private)
+            return
+
+        self.message_sender(
+            user_id,
+            f"📬 已将 {resend_count} 个文件重新加入发送队列",
+            group_id,
+            private,
+        )
 
     def _handle_manga_delete(
         self, user_id: str, params: str, group_id: Optional[str], private: bool
