@@ -9,6 +9,7 @@ from src.command.parser import CommandParser
 from src.logging.logger_config import logger
 from src.utils.batch import (
     format_batch_response,
+    paginate_blocks,
     parse_batch_params,
     validate_manga_ids,
 )
@@ -227,32 +228,42 @@ class CommandExecutor:
 
         self.message_sender(user_id, response, group_id, private)
 
-        results: List[Tuple[str, bool, str]] = []
+        manga_blocks: List[str] = []
         for manga_id in manga_ids:
             try:
+                if manga_id in self.download_manager.downloading_mangas:
+                    manga_blocks.append(f"• ID {manga_id} — ⏳ 正在下载中，请等待")
+                    continue
+
+                if manga_id in self.download_manager.queued_tasks:
+                    manga_blocks.append(f"• ID {manga_id} — ⏳ 已在下载队列中等待")
+                    continue
+
                 # 检查漫画是否已经下载
-                pdf_path = find_manga_pdf(
+                pdf_paths = find_manga_pdf(
                     str(self.config["MANGA_DOWNLOAD_PATH"]), manga_id
                 )
-                if pdf_path:
-                    chapter_count = len(pdf_path)
+                if pdf_paths:
                     chapter_info = (
-                        f"（共 {chapter_count} 个章节）" if chapter_count > 1 else ""
+                        f"（共 {len(pdf_paths)} 个章节）" if len(pdf_paths) > 1 else ""
                     )
-                    results.append((manga_id, True, f"已下载过{chapter_info}"))
+                    manga_blocks.append(f"• ID {manga_id} — ✅ 已下载过{chapter_info}")
                     continue
 
                 # 加入下载队列
                 self.download_manager.download_manga(
                     user_id, manga_id, group_id, private
                 )
-                results.append((manga_id, True, "已加入下载队列"))
+                manga_blocks.append(f"• ID {manga_id} — 📥 已加入下载队列")
             except Exception as e:
                 self.logger.error(f"下载漫画 {manga_id} 出错: {e}")
-                results.append((manga_id, False, str(e)))
+                manga_blocks.append(f"• ID {manga_id} — ❌ {str(e)}")
 
-        response = format_batch_response("下载", results)
-        self.message_sender(user_id, response, group_id, private)
+        pages = paginate_blocks(manga_blocks, "📊 下载结果")
+        for i, page in enumerate(pages):
+            self.message_sender(user_id, page, group_id, private)
+            if i < len(pages) - 1:
+                time.sleep(0.325)
 
     def _handle_manga_send(
         self, user_id: str, params: str, group_id: Optional[str], private: bool
@@ -379,25 +390,18 @@ class CommandExecutor:
                 self.message_sender(user_id, response, group_id, private)
                 return
 
-            page_size = 50
-            total_pages = (len(pdf_files) + page_size - 1) // page_size
             total_size = sum(size for _, size in pdf_files)
-
-            for page in range(total_pages):
-                start = page * page_size
-                end = start + page_size
-                page_data = pdf_files[start:end]
-
-                # 构建分页消息
-                response = f"📚 已下载的漫画列表（第{page + 1}/{total_pages}页）\n\n"
-                for i, (name, size) in enumerate(page_data, start + 1):
-                    response += f"  {i}. {name} ({size} MB)\n"
-
-                # 最后一页附加总计
-                if page == total_pages - 1:
-                    response += f"\n总计：{len(pdf_files)} 个漫画PDF文件，总大小：{total_size} MB"
-
-                self.message_sender(user_id, response, group_id, private)
+            manga_blocks = [
+                f"  {i + 1}. {name} ({size} MB)"
+                for i, (name, size) in enumerate(pdf_files)
+            ]
+            pages = paginate_blocks(manga_blocks, "📚 已下载的漫画列表")
+            for i, page in enumerate(pages):
+                if i == len(pages) - 1:
+                    page += f"\n\n总计：{len(pdf_files)} 个漫画PDF文件，总大小：{total_size} MB"
+                self.message_sender(user_id, page, group_id, private)
+                if i < len(pages) - 1:
+                    time.sleep(0.325)
 
         except FileNotFoundError as e:
             self.logger.error(f"查询已下载漫画出错: {e}")
@@ -460,11 +464,11 @@ class CommandExecutor:
             f"处理漫画查询请求 - 用户{user_id}, 漫画ID数量: {len(manga_ids)}"
         )
 
-        results: List[Tuple[str, bool, str]] = []
+        manga_blocks: List[str] = []
         for manga_id in manga_ids:
             try:
                 if manga_id in self.download_manager.downloading_mangas:
-                    results.append((manga_id, False, "正在下载中"))
+                    manga_blocks.append(f"• ID {manga_id} — ⏳ 正在下载中")
                     continue
 
                 pdf_paths = find_manga_pdf(
@@ -472,23 +476,28 @@ class CommandExecutor:
                 )
                 if pdf_paths:
                     total_size_mb = sum(get_file_size_mb(p) for p in pdf_paths)
-                    chapter_info = (
-                        f"，{len(pdf_paths)} 章" if len(pdf_paths) > 1 else ""
+                    block = (
+                        f"• ID {manga_id} — ✅ 已下载"
+                        f"（{len(pdf_paths)} 个章节，共 {total_size_mb} MB）"
                     )
-                    results.append(
-                        (manga_id, True, f"已下载 ({total_size_mb} MB{chapter_info})")
-                    )
+                    for pdf_path in pdf_paths:
+                        file_size = get_file_size_mb(pdf_path)
+                        block += f"\n  - {os.path.basename(pdf_path)}（{file_size} MB）"
+                    manga_blocks.append(block)
                 else:
-                    results.append((manga_id, False, "未下载"))
+                    manga_blocks.append(f"• ID {manga_id} — ❌ 未下载")
 
             except FileNotFoundError:
-                results.append((manga_id, False, "查询失败"))
+                manga_blocks.append(f"• ID {manga_id} — ❌ 查询失败")
             except Exception as e:
                 self.logger.error(f"查询漫画 {manga_id} 出错: {e}")
-                results.append((manga_id, False, str(e)))
+                manga_blocks.append(f"• ID {manga_id} — ❌ {str(e)}")
 
-        response = format_batch_response("查询", results)
-        self.message_sender(user_id, response, group_id, private)
+        pages = paginate_blocks(manga_blocks, "📊 查询结果")
+        for i, page in enumerate(pages):
+            self.message_sender(user_id, page, group_id, private)
+            if i < len(pages) - 1:
+                time.sleep(0.325)
 
     def _send_version_info(
         self, user_id: str, args: str, group_id: Optional[str], private: bool

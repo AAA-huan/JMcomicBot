@@ -63,6 +63,29 @@ def validate_manga_ids(ids: List[str]) -> List[str]:
     return valid_ids
 
 
+def paginate_blocks(blocks: List[str], title: str, page_size: int = 50) -> List[str]:
+    """
+    将块列表按页分割，返回带标题和页码的分页消息列表
+
+    Args:
+        blocks: 内容块列表，每块为一行文本
+        title: 消息标题（不含页码部分）
+        page_size: 每页块数，默认50
+
+    Returns:
+        分页消息字符串列表，每条消息包含标题、页码和对应块内容
+    """
+    total_pages = (len(blocks) + page_size - 1) // page_size
+    pages = []
+    for page in range(total_pages):
+        start = page * page_size
+        end = start + page_size
+        response = f"{title}（第{page + 1}/{total_pages}页）\n\n"
+        response += "\n".join(blocks[start:end])
+        pages.append(response)
+    return pages
+
+
 def format_batch_response(command: str, results: List[Tuple[str, bool, str]]) -> str:
     """
     格式化批量操作的响应消息
