@@ -5,7 +5,6 @@ import io
 import os
 import queue
 import shutil
-import sys
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -171,7 +170,9 @@ class DownloadManager:
         image_files.sort()
         return image_files
 
-    def _convert_chapter_to_pdf(self, chapter_folder: str, download_path: str) -> Optional[str]:
+    def _convert_chapter_to_pdf(
+        self, chapter_folder: str, download_path: str
+    ) -> Optional[str]:
         """
         将单个章节文件夹转换为PDF文件
 
@@ -182,16 +183,6 @@ class DownloadManager:
         Returns:
             PDF文件路径，转换失败返回None
         """
-        try:
-            from PIL import Image
-        except ImportError:
-            self.logger.info("正在安装PIL库...")
-            import subprocess
-            subprocess.check_call(
-                [sys.executable, "-m", "pip", "install", "Pillow"]
-            )
-            from PIL import Image
-
         image_files = self._collect_images_from_chapter(chapter_folder)
 
         if not image_files:
@@ -199,24 +190,20 @@ class DownloadManager:
             return None
 
         chapter_name = os.path.basename(chapter_folder)
-        temp_pdf_path = os.path.join(os.path.dirname(chapter_folder), f"{chapter_name}.pdf")
+        temp_pdf_path = os.path.join(
+            os.path.dirname(chapter_folder), f"{chapter_name}.pdf"
+        )
         final_pdf_path = os.path.join(download_path, f"{chapter_name}.pdf")
 
         try:
-            first_image = Image.open(image_files[0])
-            if first_image.mode == "RGBA":
-                first_image = first_image.convert("RGB")
+            import img2pdf
 
-            other_images = []
-            for img_path in image_files[1:]:
-                img = Image.open(img_path)
-                if img.mode == "RGBA":
-                    img = img.convert("RGB")
-                other_images.append(img)
-
-            first_image.save(
-                temp_pdf_path, save_all=True, append_images=other_images
-            )
+            with open(temp_pdf_path, "wb") as pdf_file:
+                img2pdf.convert(
+                    image_files,
+                    outputstream=pdf_file,
+                    rotation=img2pdf.Rotation.ifvalid,
+                )
             self.logger.info(f"成功将章节 {chapter_name} 转换为PDF: {temp_pdf_path}")
 
             # 移动PDF到downloads目录
@@ -245,7 +232,9 @@ class DownloadManager:
                     shutil.rmtree(item_path)
             self.logger.info(f"已清理临时下载目录中的章节文件夹: {temp_download_dir}")
         except Exception as e:
-            self.logger.error(f"清理临时下载目录 {temp_download_dir} 中的章节文件夹时出错: {e}")
+            self.logger.error(
+                f"清理临时下载目录 {temp_download_dir} 中的章节文件夹时出错: {e}"
+            )
 
     def _process_download_task(
         self, user_id: str, manga_id: str, group_id: str, private: bool
@@ -267,7 +256,7 @@ class DownloadManager:
 
             self.logger.info(f"开始下载漫画ID: {manga_id}")
             option = jmcomic.create_option_by_file("option.yml")
-            
+
             # 使用临时文件夹存放下载内容，避免与其他下载冲突
             download_path = str(self.config["MANGA_DOWNLOAD_PATH"])
             temp_download_dir = os.path.join(download_path, "temp")
@@ -276,7 +265,9 @@ class DownloadManager:
             new_rule = "Bd / {Aid}-{Ptitle}"
             option.dir_rule = DirRule(new_rule, base_dir=option.dir_rule.base_dir)
 
-            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(io.StringIO()):
+            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
+                io.StringIO()
+            ):
                 jmcomic.download_album(manga_id, option=option)
 
             # 查找临时文件夹中的所有章节文件夹
@@ -312,7 +303,9 @@ class DownloadManager:
 
             # 生成响应消息
             if success_count > 0:
-                chapter_info = f"（{success_count} 个章节）" if success_count > 1 else ""
+                chapter_info = (
+                    f"（{success_count} 个章节）" if success_count > 1 else ""
+                )
                 if self.low_memory_mode and self.file_sender:
                     # 低占用模式：自动发送所有PDF
                     delete_delay = self.config.get("LOW_MEMORY_DELETE_DELAY", 3)
@@ -322,7 +315,6 @@ class DownloadManager:
                         f"成功生成 {success_count} 个PDF文件\n"
                         f"⚠️ 低占用模式：文件将在{delete_delay}分钟后自动删除"
                     )
-                    self.message_sender(user_id, response, group_id, private)
 
                     # 自动发送所有PDF文件
                     for pdf_path in pdf_files:

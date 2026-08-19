@@ -1,25 +1,135 @@
-# Python
+# ============================================================
+# GitHub 官方 Python 模板
+# 来源: https://github.com/github/gitignore/blob/main/Python.gitignore
+# ============================================================
+
+# Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
-*.class
-*.so
-.Python
+*$py.class
 
-# Environment
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# PyInstaller
+*.manifest
+*.spec
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Unit test / coverage reports
+htmlcov/
+.tox/
+.nox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.hypothesis/
+.pytest_cache/
+.ruff_cache/
+
+# Translations
+*.mo
+*.pot
+
+# Django stuff:
+*.log
+local_settings.py
+db.sqlite3
+db.sqlite3-journal
+
+# Flask stuff:
+instance/
+.webassets-cache
+
+# Scrapy stuff:
+.scrapy/
+
+# Sphinx documentation
+docs/_build/
+doc/_build/
+
+# PyBuilder
+target/
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# IPython
+profile_default/
+ipython_config.py
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# poetry
+poetry.toml
+
+# virtualenv
+.venv
+
+# pdm
+.pdm.toml
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# ============================================================
+# 本项目特定配置（在原项目 .gitignore 基础上保留）
+# ============================================================
+
+# 环境变量（含真实凭据，绝不提交）
 .env
 .env.local
 .env.development.local
 .env.test.local
 .env.production.local
 
-# Logs
+# 运行日志
 logs/
 *.log
 
-# Downloaded content
+# 下载的漫画内容
 downloads/
 
-# IDE
+# 本地测试配置（不入库）
+pytest.ini
+
+# IDE / 编辑器
 .idea/
 .vscode/
 *.swp
@@ -32,33 +142,34 @@ JMBot.code-workspace
 .DS_Store
 Thumbs.db
 
-# Virtual environments
+# 虚拟环境（含上层虚拟环境目录）
 venv/
 env/
 .venv/
 
-# Testing
-*.pytest_cache/
-.coverage/
+# 测试产物（本地单测文件按需忽略）
+tests/*
 test_bot_linux.py
 test_whitelist.py
-tests/
-
-# Temporary files
-*.tmp
-*.temp
-jmbot待办.txt
-
-# Configuration files
-rule.txt
-option.yml
-
-jmbot待办.txt
 test_low_memory_mode.py
 test_file_helpers.py
 test_delete_permission.py
 test_batch.py
 test_download.py
 test_parser.py
-conftest.py
+tests/test_download_manager.py
+
+# 临时文件
+*.tmp
+*.temp
+jmbot待办.txt
+
+# 配置文件（含本地敏感/个人配置）
+rule.txt
+option.yml
+
+# 本地 PR 说明文档（不入库）
+pr.md
 AGENTS.md
+conftest.py
+TODO.md

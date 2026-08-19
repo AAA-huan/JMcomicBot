@@ -1,3 +1,5 @@
+"""权限管理模块，负责用户与群组的权限检查"""
+
 from typing import List, Optional
 
 from src.logging.logger_config import logger
@@ -28,8 +30,14 @@ class PermissionManager:
         self.delete_permission_user = delete_permission_user
         self.logger = logger
 
-    def check_user_permission(
-        self, user_id: str, group_id: Optional[str] = None, private: bool = True
+    def check_user_permission(  # pylint: disable=too-many-arguments
+        self,
+        user_id: str,
+        group_id: Optional[str] = None,
+        private: bool = True,
+        *,
+        user_display: Optional[str] = None,
+        group_display: Optional[str] = None,
     ) -> bool:
         """
         检查用户是否有权限使用机器人
@@ -45,6 +53,8 @@ class PermissionManager:
             user_id: 用户ID
             group_id: 群组ID（群聊时提供）
             private: 是否为私聊
+            user_display: 用户显示名（用于日志，缺省回退到 user_id）
+            group_display: 群组显示名（用于日志，缺省回退到 group_id）
 
         Returns:
             bool: 用户是否有权限使用机器人
@@ -52,14 +62,18 @@ class PermissionManager:
         Raises:
             ValueError: 当用户在黑名单中或权限不足时
         """
+        # 日志显示优先使用名称，未提供时回退到原始ID
+        user_label = user_display if user_display else user_id
+        group_label = group_display if group_display else group_id
+
         if user_id in self.global_blacklist:
-            error_msg = f"用户 {user_id} 在全局黑名单中，拒绝访问"
+            error_msg = f"用户 {user_label} 在全局黑名单中，拒绝访问"
             self.logger.warning(error_msg)
             raise ValueError(error_msg)
 
         if private:
             if self.private_whitelist and user_id not in self.private_whitelist:
-                error_msg = f"用户 {user_id} 不在私信白名单中，拒绝访问"
+                error_msg = f"用户 {user_label} 不在私信白名单中，拒绝访问"
                 self.logger.warning(error_msg)
                 raise ValueError(error_msg)
         else:
@@ -68,11 +82,11 @@ class PermissionManager:
                 and self.group_whitelist
                 and group_id not in self.group_whitelist
             ):
-                error_msg = f"群组 {group_id} 不在群组白名单中，拒绝访问"
+                error_msg = f"群组 {group_label} 不在群组白名单中，拒绝访问"
                 self.logger.warning(error_msg)
                 raise ValueError(error_msg)
 
-        self.logger.debug(f"用户 {user_id} 权限检查通过")
+        self.logger.debug(f"用户 {user_label} 权限检查通过")
         return True
 
     def update_whitelist(

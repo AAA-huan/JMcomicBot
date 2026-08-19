@@ -264,9 +264,8 @@ LOW_MEMORY_MODE=false
 2. **创建项目目录**
    ```bash
    # 创建项目文件夹
-   sudo mkdir -p /opt/JMBot
-   sudo chown $USER:$USER /opt/JMBot
-   cd /opt/JMBot
+   mkdir -p ~/JMBot
+   cd ~/JMBot
    ```
 
 3. **使用 Git 克隆项目**
@@ -362,8 +361,7 @@ LOW_MEMORY_MODE=false
 3. **创建数据目录**
    ```bash
    # 创建下载目录
-   sudo mkdir -p /var/lib/JMBot/downloads
-   sudo chown $USER:$USER /var/lib/JMBot/downloads
+   mkdir -p ~/JMBot/downloads
    ```
 
 #### 第四步：系统服务配置（可选）
@@ -433,6 +431,23 @@ LOW_MEMORY_MODE=false
 1. **安装 NapCat**
    - 参考 NapCatQQ 文档安装 NapCat https://github.com/NapNeko/NapCatQQ
    - 配置 WebSocket 服务端与机器人配置匹配
+
+> **注意** - 若使用docker部署napcat，则需要注意以下几点
+1. napcat的websocket服务端的host该改为0.0.0.0
+2. 部署时需要把downloads目录挂载到容器内
+```bash
+docker run -d \
+-e NAPCAT_GID=$(id -g) \
+-e NAPCAT_UID=$(id -u) \
+-p 3000:3000 \
+-p 3001:3001 \
+-p 6099:6099 \
+--name napcat \
+--restart=always \
+-v /home/$USER/JMBot/downloads:/home/$USER/JMBot/downloads \ # 加这行
+mlikiowa/napcat-docker:latest
+
+```
 
 #### 第六步：使用方法
 
@@ -722,6 +737,14 @@ pkill -f "python3 main.py"
 
 # 退出Ubuntu环境
 exit
+```
+
+**推荐设置**
+- 1. 推荐把termux的省电策略更改为：无限制
+- 2. 推荐在进入termux还未登录proot时为termux打开唤醒锁(看到手机上方通知栏显示termux持有唤醒锁即成功)
+```bash
+   termux-wake-lock    # 打开唤醒锁
+   termux-wake-unlock  # 关闭唤醒锁
 ```
 
 ---

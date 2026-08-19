@@ -1,5 +1,6 @@
+"""命令解析器，负责解析和验证用户的输入"""
+
 from typing import Dict, List, Optional, Pattern, Tuple
-import re
 
 
 class CommandParser:
@@ -12,11 +13,11 @@ class CommandParser:
         """初始化命令解析器，定义命令别名映射和参数验证规则"""
         # 定义命令别名映射，便于统一处理同义命令
         self.command_aliases: Dict[str, List[str]] = {
-            "help": ["漫画帮助", "帮助漫画"],
+            "help": ["漫画帮助", "帮助漫画", "帮助"],
             "download": ["漫画下载", "下载漫画", "下载"],
             "send": ["发送", "发送漫画", "漫画发送"],
-            "list": ["漫画列表", "列表漫画"],
-            "query": ["查询漫画", "漫画查询"],
+            "list": ["漫画列表", "列表漫画", "列表"],
+            "query": ["查询漫画", "漫画查询", "查询"],
             "version": ["漫画版本", "版本", "version"],
             "progress": ["下载进度", "漫画进度", "进度"],
             "test_id": ["测试id"],
@@ -124,7 +125,15 @@ class CommandParser:
             # 允许空格，例如 "350234, 350235, 350236"
             # 先把逗号句号替换为空格，再按空格分割
             if "," in params or "." in params or "，" in params or "。" in params:
-                ids = [id.strip() for id in params.replace(",", " ").replace(".", " ").replace("，", " ").replace("。", " ").split() if id.strip()]
+                ids = [
+                    id.strip()
+                    for id in params.replace(",", " ")
+                    .replace(".", " ")
+                    .replace("，", " ")
+                    .replace("。", " ")
+                    .split()
+                    if id.strip()
+                ]
                 if not ids:
                     return False
                 return all(id.isdigit() for id in ids)
@@ -151,21 +160,21 @@ class CommandParser:
             "download": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n"
             "支持格式：\n"
             "  - 单个ID：漫画下载 350234\n"
-            "  - 多个ID（逗号分隔）：漫画下载 350234,350235,350236",
+            "  - 多个ID（逗句号分隔）：漫画下载 350234,350235,350236",
             "send": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n"
             "支持格式：\n"
             "  - 单个ID：发送 350234\n"
-            "  - 多个ID（逗号分隔）：发送 350234,350235,350236\n"
+            "  - 多个ID（逗句号分隔）：发送 350234,350235,350236\n"
             "  - 所有已下载漫画：发送 --all",
             "query": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n"
             "支持格式：\n"
             "  - 单个ID：查询漫画 350234\n"
-            "  - 多个ID（逗号分隔）：查询漫画 350234,350235,350236\n"
+            "  - 多个ID（逗句号分隔）：查询漫画 350234,350235,350236\n"
             "  - 所有已下载漫画：查询漫画 --all",
             "delete": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n"
             "支持格式：\n"
             "  - 单个ID：删除 350234\n"
-            "  - 多个ID（逗号分隔）：删除 350234,350235,350236\n"
+            "  - 多个ID（逗句号分隔）：删除 350234,350235,350236\n"
             "  - 所有已下载漫画：删除 --all",
             "help": "❌ 命令格式错误！'漫画帮助'命令不需要额外参数\n直接输入：漫画帮助",
             "list": "❌ 命令格式错误！'漫画列表'命令不需要额外参数\n直接输入：漫画列表",

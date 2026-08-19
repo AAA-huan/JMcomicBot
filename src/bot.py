@@ -19,7 +19,7 @@ from src.websocket.client import WebSocketClient
 class MangaBot:
     """JMComic QQ机器人主类，整合所有功能模块"""
 
-    VERSION = "3.0.0"
+    VERSION = "3.2.5"
 
     def __init__(self) -> None:
         """初始化MangaBot机器人"""
@@ -91,7 +91,9 @@ class MangaBot:
 
         logger.info("命令解析器初始化完成")
 
-        cleanup_failed_downloads(str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]))
+        cleanup_failed_downloads(
+            str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"])
+        )
 
     def _check_platform_compatibility(self) -> None:
         """检查操作系统兼容性"""
