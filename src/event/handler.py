@@ -179,7 +179,9 @@ class EventHandler:
             )
             return
 
-        self.logger.info(f"收到群消息 - 群{group_display} 用户{user_display}: {message}")
+        self.logger.info(
+            f"收到群消息 - 群{group_display} 用户{user_display}: {message}"
+        )
 
         has_reply_format = "[CQ:reply," in message
         message = re.sub(r"\[CQ:reply,id=\d+\]", "", message)

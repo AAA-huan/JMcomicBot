@@ -91,7 +91,9 @@ class MangaBot:
 
         logger.info("命令解析器初始化完成")
 
-        cleanup_failed_downloads(str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]))
+        cleanup_failed_downloads(
+            str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"])
+        )
 
     def _check_platform_compatibility(self) -> None:
         """检查操作系统兼容性"""

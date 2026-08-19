@@ -739,6 +739,14 @@ pkill -f "python3 main.py"
 exit
 ```
 
+**推荐设置**
+- 1. 推荐把termux的省电策略更改为：无限制
+- 2. 推荐在进入termux还未登录proot时为termux打开唤醒锁(看到手机上方通知栏显示termux持有唤醒锁即成功)
+```bash
+   termux-wake-lock    # 打开唤醒锁
+   termux-wake-unlock  # 关闭唤醒锁
+```
+
 ---
 ## 📄 许可证
 

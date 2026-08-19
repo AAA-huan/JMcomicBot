@@ -60,12 +60,32 @@ class ConfigManager:
         except ValueError:
             low_memory_delete_delay = 3
 
+        # 获取文件发送间隔（秒）
+        file_send_interval_str = os.getenv("FILE_SEND_INTERVAL", "3")
+        try:
+            file_send_interval = int(file_send_interval_str)
+            if file_send_interval < 1:
+                file_send_interval = 3
+        except ValueError:
+            file_send_interval = 3
+
+        # 获取文件发送每批数量
+        file_send_batch_size_str = os.getenv("FILE_SEND_BATCH_SIZE", "10")
+        try:
+            file_send_batch_size = int(file_send_batch_size_str)
+            if file_send_batch_size < 1:
+                file_send_batch_size = 10
+        except ValueError:
+            file_send_batch_size = 10
+
         self.config_dict: Dict[str, Union[str, int, bool]] = {
             "MANGA_DOWNLOAD_PATH": absolute_download_path,
-            "NAPCAT_WS_URL": ws_url,  # 存储完整的WebSocket URL（可能包含token）
-            "NAPCAT_TOKEN": token,  # 使用NAPCAT_TOKEN作为配置键
-            "LOW_MEMORY_MODE": low_memory_mode,  # 内存低占用模式
-            "LOW_MEMORY_DELETE_DELAY": low_memory_delete_delay,  # 低内存模式文件删除延迟（分钟）
+            "NAPCAT_WS_URL": ws_url,
+            "NAPCAT_TOKEN": token,
+            "LOW_MEMORY_MODE": low_memory_mode,
+            "LOW_MEMORY_DELETE_DELAY": low_memory_delete_delay,
+            "FILE_SEND_INTERVAL": file_send_interval,
+            "FILE_SEND_BATCH_SIZE": file_send_batch_size,
         }
 
         # 初始化黑白名单配置
