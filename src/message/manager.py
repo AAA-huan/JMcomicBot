@@ -49,7 +49,22 @@ class MessageManager:
         self._pending_errors_lock: threading.Lock = threading.Lock()
         # 当前正在发送的文件名（供发送进度查询）
         self._current_sending_file: Optional[str] = None
+        # 未完成的任务总数（队列中等待 + 正在处理的），替代 qsize()
+        self._queue_count: int = 0
+        self._queue_count_lock: threading.Lock = threading.Lock()
+        # 尚未入队的批次余量（由 add_send_pending_count  +/- 管理）
+        self._batch_pending: int = 0
+        self._batch_pending_lock: threading.Lock = threading.Lock()
         self._start_file_queue_worker()
+
+    def add_send_pending_count(self, delta: int) -> None:
+        """增加/减少尚未入队的批次余量计数
+
+        Args:
+            delta: 增量（正数增加，负数减少）
+        """
+        with self._batch_pending_lock:
+            self._batch_pending = max(0, self._batch_pending + delta)
 
     def get_send_queue_status(self) -> Dict[str, Any]:
         """获取当前文件发送队列状态
@@ -57,9 +72,13 @@ class MessageManager:
         Returns:
             Dict[str, Any]: 包含running、queue_size、current_file字段的状态字典
         """
+        with self._queue_count_lock:
+            qc = self._queue_count
+        with self._batch_pending_lock:
+            bp = self._batch_pending
         return {
             "running": self._queue_running,
-            "queue_size": self._file_queue.qsize(),
+            "queue_size": qc + bp,
             "current_file": self._current_sending_file,
         }
 
@@ -119,6 +138,10 @@ class MessageManager:
             )
         finally:
             self._current_sending_file = None
+            with self._queue_count_lock:
+                self._queue_count -= 1
+            with self._batch_pending_lock:
+                self._batch_pending = max(0, self._batch_pending - 1)
             with self._result_cond:
                 self._result_cond.notify_all()
 
@@ -137,6 +160,11 @@ class MessageManager:
             try:
                 with self._ws_lock:
                     self.ws_client.ws.send(json.dumps(payload))
+                self.logger.info(
+                    f"文件已通过WS发送: {os.path.basename(task.file_path)}, "
+                    f"目标: {'私聊' if task.private else '群聊'}, "
+                    f"用户: {task.user_id}"
+                )
                 send_interval = float(self.config.get("FILE_SEND_INTERVAL", 1.8))
                 time.sleep(send_interval)
                 return
@@ -229,6 +257,8 @@ class MessageManager:
             group_id=group_id,
             private=private,
         )
+        with self._queue_count_lock:
+            self._queue_count += 1
         self._file_queue.put(task)
 
         with self._result_cond:
@@ -308,7 +338,7 @@ class MessageManager:
             "private": private,
             "content_type": content_type,
             "content": content,
-            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+            "timestamp": time.strftime("%H:%M:%S"),
             "ts": time.time(),
             "awaiting_resend": False,
         }

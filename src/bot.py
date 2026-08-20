@@ -59,6 +59,7 @@ class MangaBot:
             permission_manager=self.permission_manager,
             resend_handler=self.message_manager.resend_pending_files,
             send_status_provider=self.message_manager.get_send_queue_status,
+            add_send_pending_count=self.message_manager.add_send_pending_count,
         )
 
         self.SELF_ID: Optional[str] = None
