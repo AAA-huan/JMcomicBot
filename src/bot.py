@@ -57,6 +57,9 @@ class MangaBot:
             config=self.config_manager.config_dict,
             self_id_getter=lambda: self.SELF_ID,
             permission_manager=self.permission_manager,
+            resend_handler=self.message_manager.resend_pending_files,
+            send_status_provider=self.message_manager.get_send_queue_status,
+            add_send_pending_count=self.message_manager.add_send_pending_count,
         )
 
         self.SELF_ID: Optional[str] = None
@@ -193,6 +196,10 @@ class MangaBot:
         logger.info("停止下载队列处理线程...")
         self.download_manager.queue_running = False
         logger.info("下载队列线程已设置为停止状态")
+
+        logger.info("停止文件发送队列进程...")
+        self.message_manager.stop()
+        logger.info("文件发送队列进程已停止")
 
         if self.download_manager.downloading_mangas:
             logger.info(
