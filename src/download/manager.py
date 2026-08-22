@@ -172,7 +172,11 @@ class DownloadManager:
         return image_files
 
     def _merge_chapters_to_single_pdf(
-        self, chapter_folders: List[str], download_path: str, manga_id: str
+        self,
+        chapter_folders: List[str],
+        download_path: str,
+        manga_id: str,
+        album_name: str = "",
     ) -> Optional[str]:
         """将所有章节的图片合并为单个PDF文件
 
@@ -180,6 +184,7 @@ class DownloadManager:
             chapter_folders: 章节文件夹路径列表
             download_path: 最终PDF存放目录
             manga_id: 漫画ID
+            album_name: 漫画标题，用于PDF文件名
 
         Returns:
             PDF文件路径，合并失败返回None
@@ -197,7 +202,12 @@ class DownloadManager:
             self.logger.warning("所有章节均未找到图片，无法生成PDF")
             return None
 
-        pdf_path = os.path.join(download_path, f"{manga_id}.pdf")
+        chapter_count = len(chapter_folders)
+        album_name = album_name or manga_id
+        pdf_path = os.path.join(
+            download_path,
+            f"{manga_id}-{album_name}({chapter_count}章).pdf",
+        )
         try:
             import img2pdf
 
@@ -293,7 +303,10 @@ class DownloadManager:
                 len(self._collect_images_from_chapter(f)) for f in chapter_folders
             )
             pdf_path = self._merge_chapters_to_single_pdf(
-                chapter_folders, download_path, manga_id
+                chapter_folders,
+                download_path,
+                manga_id,
+                album_name=tracker._album_name,  # pylint: disable=protected-access
             )
 
             # 清理临时文件夹

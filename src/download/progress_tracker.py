@@ -3,15 +3,16 @@
 import re
 import sys
 import threading
-import time
 from typing import Any, Callable, Optional
+
+from tqdm import tqdm
 
 
 class ProgressTracker:
     """下载进度追踪器
 
     通过替换 jmcomic 的 JmModuleConfig.EXECUTOR_LOG 拦截所有日志回调，
-    将低频有用信息记入项目日志，用高频的 image.after 事件驱动控制台进度条。
+    将低频有用信息记入项目日志，用高频的 image.after 事件驱动 tqdm 进度条。
     """
 
     def __init__(self, logger: Any, manga_id: str) -> None:
@@ -25,11 +26,10 @@ class ProgressTracker:
         self._chapter_name: str = ""
         self._total_images: int = 0
         self._album_has_page_count: bool = False
-        self._downloaded_images: int = 0
         self._failed_images: int = 0
-        self._start_time: float = 0.0
-        self._active: bool = False
-        self._progress_bar_drawn: bool = False
+        self._bar: Optional[tqdm] = None
+        self._refresh_stop: threading.Event = threading.Event()
+        self._suppress_refresh: bool = False
 
         self._album_pattern = re.compile(
             r"章节数: \[(\d+)\], 总页数: \[(\d+)\], 标题: \[(.+?)\]"
@@ -60,6 +60,34 @@ class ProgressTracker:
         elif topic == "image.failed":
             self._on_image_failed(msg)
 
+    def _log_separator(self) -> None:
+        if self._bar is not None:
+            self._suppress_refresh = True
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+
+    def _init_bar(self) -> None:
+        self._bar = tqdm(
+            total=self._total_images,
+            desc=self._manga_id,
+            unit="img",
+            file=sys.stdout,
+            bar_format=(
+                "{desc} [{bar}] {percentage:.1f}% " "章节 {postfix} [{elapsed}]"
+            ),
+        )
+        self._bar.clear()
+        self._refresh_stop.clear()
+
+        def refresh_loop() -> None:
+            while not self._refresh_stop.wait(1):
+                with self._lock:
+                    if self._bar is not None and not self._suppress_refresh:
+                        self._bar.refresh()
+
+        thread = threading.Thread(target=refresh_loop, daemon=True)
+        thread.start()
+
     def _on_album_before(self, msg: str) -> None:
         match = self._album_pattern.search(msg)
         if not match:
@@ -70,9 +98,6 @@ class ProgressTracker:
             self._album_has_page_count = page_count > 0
             self._total_images = page_count if page_count > 0 else 0
             self._album_name = match.group(3)
-            self._start_time = time.time()
-            self._active = True
-            self._clear_progress_bar()
         self._logger.info(
             f"本子获取成功: {self._manga_id}, "
             f"标题: [{self._album_name}], "
@@ -89,7 +114,11 @@ class ProgressTracker:
             chapter_images = int(match.group(5))
             if not self._album_has_page_count:
                 self._total_images += chapter_images
-            self._clear_progress_bar()
+            if self._bar is None and self._total_images > 0:
+                self._init_bar()
+            elif self._bar is not None:
+                self._bar.total = self._total_images
+        self._log_separator()
         self._logger.info(
             f"开始下载章节: {self._current_chapter}/{self._total_chapters} "
             f"[{self._chapter_name}] {chapter_images}张图"
@@ -99,64 +128,48 @@ class ProgressTracker:
         match = self._photo_after_pattern.search(msg)
         if not match:
             return
-        with self._lock:
-            self._clear_progress_bar()
+        self._log_separator()
         self._logger.info(f"章节下载完成: {match.group(2)}/{match.group(3)}")
 
     def _on_image_after(self) -> None:
         with self._lock:
-            self._downloaded_images += 1
-            self._draw_progress_bar()
+            if self._bar is None:
+                return
+            self._suppress_refresh = False
+            self._bar.update(1)
+            self._update_bar_postfix()
 
     def _on_image_failed(self, msg: str) -> None:
         match = self._image_failed_pattern.search(msg)
         image_id = match.group(1) if match else "unknown"
         with self._lock:
             self._failed_images += 1
-            self._clear_progress_bar()
-        self._logger.warning(
-            f"图片下载失败: {image_id} " f"(累计{self._failed_images}张)"
-        )
+            self._update_bar_postfix()
+        self._log_separator()
+        self._logger.warning(f"图片下载失败: {image_id} (累计{self._failed_images}张)")
 
-    def _clear_progress_bar(self) -> None:
-        if not self._active or not self._progress_bar_drawn:
+    def _update_bar_postfix(self) -> None:
+        if self._bar is None:
             return
-        sys.stdout.write("\r\033[K")
-        sys.stdout.flush()
-        self._progress_bar_drawn = False
-
-    def _draw_progress_bar(self) -> None:
-        if not self._active or self._total_images == 0:
-            return
-
-        pct = self._downloaded_images / self._total_images * 100
-        bar_len = 16
-        filled = int(bar_len * pct / 100)
-        bar_chars = "█" * filled + "░" * (bar_len - filled)
-
-        elapsed = int(time.time() - self._start_time)
-        elapsed_str = f"{elapsed // 60}:{elapsed % 60:02d}"
-
-        text = (
-            f"{self._manga_id} [{bar_chars}] {pct:.1f}% "
-            f"章节 {self._current_chapter}/{self._total_chapters} "
-            f"图片 {self._downloaded_images}/{self._total_images} "
-            f"{elapsed_str}"
+        postfix = (
+            f"{self._current_chapter}/{self._total_chapters} "
+            f"图片 {self._bar.n}/{self._total_images}"
         )
         if self._failed_images > 0:
-            text += f" \u26a0 {self._failed_images}张失败"
-
-        sys.stdout.write("\r\033[K" + text)
-        sys.stdout.flush()
-        self._progress_bar_drawn = True
+            postfix += f" \u26a0 {self._failed_images}张失败"
+        self._bar.set_postfix_str(postfix)
 
     def finish(self) -> None:
         """下载完成后清理进度条并记录完成日志"""
+        self._refresh_stop.set()
         with self._lock:
-            self._active = False
-            self._clear_progress_bar()
+            if self._bar is not None:
+                self._bar.disable = True
+                self._bar.close()
+                self._bar = None
         self._logger.info(
             f"下载完成: {self._manga_id}, "
-            f"共{self._total_chapters}章{self._downloaded_images}页"
+            f"共{self._total_chapters}章"
+            + (f"{self._total_images}页" if self._total_images > 0 else "")
             + (f", {self._failed_images}张失败" if self._failed_images > 0 else "")
         )
