@@ -809,22 +809,22 @@ class CommandExecutor:
                     results.append((manga_id, False, "下载目录不存在"))
                     continue
 
-                pdf_path = None
+                pdf_paths = []
                 for file_name in os.listdir(download_path):
                     if file_name.endswith(".pdf") and (
                         file_name.startswith(f"{manga_id}-")
                         or file_name == f"{manga_id}.pdf"
                     ):
-                        pdf_path = os.path.join(download_path, file_name)
-                        break
+                        pdf_paths.append(os.path.join(download_path, file_name))
 
-                if not pdf_path:
+                if not pdf_paths:
                     results.append((manga_id, False, "未找到PDF文件"))
                     continue
 
-                os.remove(pdf_path)
-                self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")
-                results.append((manga_id, True, "删除成功"))
+                for pdf_path in pdf_paths:
+                    os.remove(pdf_path)
+                    self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")
+                results.append((manga_id, True, f"删除成功（{len(pdf_paths)}个文件）"))
             except Exception as e:
                 self.logger.error(f"删除漫画 {manga_id} 出错: {e}")
                 results.append((manga_id, False, str(e)))

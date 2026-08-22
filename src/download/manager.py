@@ -386,23 +386,27 @@ class DownloadManager:
             self.message_sender(user_id, error_msg, group_id, private)
             raise FileNotFoundError(f"下载目录不存在: {download_path}")
 
-        pdf_path = None
+        pdf_paths: List[str] = []
         for file_name in os.listdir(download_path):
             if file_name.endswith(".pdf") and (
                 file_name.startswith(f"{manga_id}-") or file_name == f"{manga_id}.pdf"
             ):
-                pdf_path = os.path.join(download_path, file_name)
-                break
+                pdf_paths.append(os.path.join(download_path, file_name))
 
-        if not pdf_path:
+        if not pdf_paths:
             response = f"❌（｀Δ´）！ 未找到漫画ID {manga_id} 的PDF文件"
             self.message_sender(user_id, response, group_id, private)
             return
 
         try:
-            os.remove(pdf_path)
-            self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")
-            response = f"✅ദ്ദി˶>ω<)✧ 漫画ID {manga_id} 的PDF文件已成功删除！"
+            deleted_count = 0
+            for pdf_path in pdf_paths:
+                os.remove(pdf_path)
+                self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")
+                deleted_count += 1
+            response = (
+                f"✅ദ്ദി˶>ω<)✧ 漫画ID {manga_id} 的{deleted_count}个PDF文件已成功删除！"
+            )
             self.message_sender(user_id, response, group_id, private)
         except Exception as e:
             self.logger.error(f"删除漫画PDF文件失败: {e}")
