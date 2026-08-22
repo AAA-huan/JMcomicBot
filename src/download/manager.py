@@ -1,7 +1,5 @@
 """下载管理器模块，负责漫画下载功能并对下载队列进行管理"""
 
-import contextlib
-import io
 import os
 import queue
 import shutil
@@ -10,7 +8,10 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import jmcomic
+from jmcomic.jm_config import JmModuleConfig
 from jmcomic.jm_option import DirRule
+
+from src.download.progress_tracker import ProgressTracker
 
 
 class DownloadManager:
@@ -265,10 +266,17 @@ class DownloadManager:
             new_rule = "Bd / {Aid}-{Ptitle}"
             option.dir_rule = DirRule(new_rule, base_dir=option.dir_rule.base_dir)
 
-            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
-                io.StringIO()
-            ):
+            # 安装进度追踪器，替换 jmcomic 日志为控制台进度条
+            tracker = ProgressTracker(self.logger, manga_id)
+            original_executor = JmModuleConfig.EXECUTOR_LOG  # type: ignore
+            JmModuleConfig.EXECUTOR_LOG = tracker.make_log_handler()  # type: ignore
+            JmModuleConfig.FLAG_ENABLE_JM_LOG = True
+
+            try:
                 jmcomic.download_album(manga_id, option=option)
+            finally:
+                JmModuleConfig.EXECUTOR_LOG = original_executor  # type: ignore
+                tracker.finish()
 
             # 查找临时文件夹中的所有章节文件夹
             chapter_folders = self._find_chapter_folders(temp_download_dir, manga_id)
