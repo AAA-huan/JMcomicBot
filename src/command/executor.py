@@ -173,7 +173,7 @@ class CommandExecutor:
         help_text += "- 漫画下载 <漫画ID>：下载指定ID的漫画\n"
         help_text += "- 发送漫画 <漫画ID>：发送指定ID的已下载漫画\n"
         help_text += "- 查询漫画 <漫画ID>：查询指定ID的漫画是否已下载\n"
-        help_text += "- 漫画列表：查询已下载的所有漫画\n"
+        help_text += "- 漫画列表：查询已下载的漫画（支持 -a 查看详情，-n 查看第n页）\n"
         help_text += "- 下载进度：查看当前漫画下载队列的状况\n"
         help_text += "- 删除漫画 <漫画ID>：删除指定ID的已下载漫画（仅限特定用户）\n"
         help_text += "\n⚠️ 注意事项：\n"
@@ -386,7 +386,7 @@ class CommandExecutor:
         self.message_sender(user_id, response, group_id, private)
 
     def _query_downloaded_manga(
-        self, user_id: str, args: str, group_id: Optional[str], private: bool
+        self, user_id: str, params: str, group_id: Optional[str], private: bool
     ) -> None:
         """查询已下载的漫画"""
         self.logger.info(f"开始处理漫画列表查询 - 用户{user_id}")
@@ -405,17 +405,60 @@ class CommandExecutor:
                 return
 
             total_size = sum(size for _, size in pdf_files)
+            pdf_count = len(pdf_files)
+            manga_count = len({name.split("-", 1)[0] for name, _ in pdf_files})
+            params = params.strip()
+
+            # 模式 1：无参数 → 简略信息
+            if not params:
+                response = (
+                    f"📊 总计：{manga_count}个漫画，{pdf_count}个PDF文件，"
+                    f"总大小{total_size} MB"
+                )
+                self.message_sender(user_id, response, group_id, private)
+                return
+
+            # 模式 2：-a / --all → 发送全部页面
             manga_blocks = [
                 f"  {i + 1}. {name} ({size} MB)"
                 for i, (name, size) in enumerate(pdf_files)
             ]
-            pages = paginate_blocks(manga_blocks, "📚 已下载的漫画列表")
-            for i, page in enumerate(pages):
-                if i == len(pages) - 1:
-                    page += f"\n\n总计：{len(pdf_files)} 个漫画PDF文件，总大小：{total_size} MB"
-                self.message_sender(user_id, page, group_id, private)
-                if i < len(pages) - 1:
-                    time.sleep(0.325)
+
+            if params in ("-a", "--all"):
+                pages = paginate_blocks(manga_blocks, "📚 已下载的漫画列表")
+                for i, page in enumerate(pages):
+                    if i == len(pages) - 1:
+                        page += (
+                            f"\n\n总计：{manga_count}个漫画，"
+                            f"{pdf_count}个PDF文件，总大小{total_size} MB"
+                        )
+                    self.message_sender(user_id, page, group_id, private)
+                    if i < len(pages) - 1:
+                        time.sleep(0.325)
+                return
+
+            # 模式 3：-n → 发送第 n 页
+            page_num = int(params[1:])
+            page_size = 50
+            total_pages = (pdf_count + page_size - 1) // page_size
+
+            if page_num < 1 or page_num > total_pages:
+                response = (
+                    f"❌ 页码无效！共有 {total_pages} 页，"
+                    f"当前页码应在 1~{total_pages} 之间"
+                )
+                self.message_sender(user_id, response, group_id, private)
+                return
+
+            start = (page_num - 1) * page_size
+            end = min(start + page_size, pdf_count)
+            page_content = "\n".join(manga_blocks[start:end])
+            response = (
+                f"📚 已下载的漫画列表（第{page_num}/{total_pages}页）\n\n"
+                f"{page_content}\n\n"
+                f"总计：{manga_count}个漫画，{pdf_count}个PDF文件，总大小{total_size} MB"
+            )
+            self.message_sender(user_id, response, group_id, private)
 
         except FileNotFoundError as e:
             self.logger.error(f"查询已下载漫画出错: {e}")
@@ -688,10 +731,6 @@ class CommandExecutor:
         try:
             self.permission_manager.check_delete_permission(user_id)
         except ValueError as e:
-            if "必须且只能有一个用户" in str(e):
-                response = "❌ 删除功能不可用：" "删除权限用户名单必须且只能有一个用户"
-                self.message_sender(user_id, response, group_id, private)
-                return
             if "未配置删除权限用户" in str(e):
                 response = "❌ 删除功能不可用：未配置删除权限用户"
                 self.message_sender(user_id, response, group_id, private)
@@ -772,8 +811,9 @@ class CommandExecutor:
 
                 pdf_path = None
                 for file_name in os.listdir(download_path):
-                    if file_name.startswith(f"{manga_id}-") and file_name.endswith(
-                        ".pdf"
+                    if file_name.endswith(".pdf") and (
+                        file_name.startswith(f"{manga_id}-")
+                        or file_name == f"{manga_id}.pdf"
                     ):
                         pdf_path = os.path.join(download_path, file_name)
                         break

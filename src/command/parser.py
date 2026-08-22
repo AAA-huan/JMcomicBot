@@ -97,7 +97,6 @@ class CommandParser:
         # 定义不需要参数的命令列表
         no_param_commands = [
             "help",
-            "list",
             "version",
             "progress",
             "send_progress",
@@ -114,6 +113,16 @@ class CommandParser:
         # 如果命令不需要参数且没有提供参数，返回True
         if command in no_param_commands:
             return True
+
+        # list 命令参数校验：无参数(简略) / -a(全部) / -n(第n页)
+        if command == "list":
+            if not params:
+                return True
+            if params in ("-a", "--all"):
+                return True
+            if params.startswith("-") and params[1:].isdigit():
+                return True
+            return False
 
         # 如果命令需要参数但没有提供参数，返回False
         if command not in no_param_commands and not params:
@@ -181,7 +190,11 @@ class CommandParser:
             "  - 多个ID（逗句号分隔）：删除 350234,350235,350236\n"
             "  - 所有已下载漫画：删除 --all",
             "help": "❌ 命令格式错误！'漫画帮助'命令不需要额外参数\n直接输入：漫画帮助",
-            "list": "❌ 命令格式错误！'漫画列表'命令不需要额外参数\n直接输入：漫画列表",
+            "list": "❌ 参数错误！'漫画列表'命令参数格式错误\n"
+            "支持格式：\n"
+            "  - 无参数：漫画列表（查看简略信息）\n"
+            "  - 查看详情：漫画列表 -a\n"
+            "  - 查看第n页：漫画列表 -n（n为页码）",
             "version": "❌ 命令格式错误！'漫画版本'命令不需要额外参数\n直接输入：漫画版本",
             "progress": "❌ 命令格式错误！'下载进度'命令不需要额外参数\n直接输入：下载进度",
             "send_progress": "❌ 命令格式错误！'发送进度'命令不需要额外参数\n直接输入：发送进度",
