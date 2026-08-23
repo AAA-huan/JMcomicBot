@@ -39,6 +39,7 @@ class DownloadManager:
         self.file_sender = file_sender
         self.download_queue: queue.Queue = queue.Queue()
         self.queue_running: bool = True
+        self._queue_thread: Optional[threading.Thread] = None
         self.queued_tasks: Dict[str, Tuple[str, Optional[str], bool]] = {}
         self.downloading_mangas: Dict[str, bool] = {}
         self._start_download_queue_processor()
@@ -73,9 +74,18 @@ class DownloadManager:
                     except Exception:
                         pass
 
-        queue_thread = threading.Thread(target=process_queue, daemon=True)
-        queue_thread.start()
+        self._queue_thread = threading.Thread(
+            target=process_queue, daemon=True, name="download-queue"
+        )
+        self._queue_thread.start()
         self.logger.info("下载队列处理线程已启动")
+
+    def stop(self) -> None:
+        """停止下载队列处理线程，等待其退出（最多2秒）"""
+        self.queue_running = False
+        if self._queue_thread is not None and self._queue_thread.is_alive():
+            self._queue_thread.join(timeout=2)
+            self.logger.info("下载队列处理线程已停止")
 
     def _clear_download_folder(self) -> None:
         """
