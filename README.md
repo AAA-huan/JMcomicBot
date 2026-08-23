@@ -31,19 +31,21 @@
 
 ### 🔧 命令大全
 
-- `漫画帮助` - 查看帮助信息
-- `漫画下载 350234` - 下载指定ID的漫画,批量操作用逗号隔开
-- `发送漫画 350234` - 发送已下载的指定ID的漫画文件,批量操作用逗号隔开,--all可发送全部
-- `漫画列表` - 查看已下载漫画列表,批量操作用逗号隔开
+- `漫画帮助` - 查看帮助信息（群聊中请先@机器人；别名：帮助、帮助漫画）
+- `漫画下载 350234` - 下载指定ID的漫画,批量操作用逗号隔开（别名：下载、下载漫画）
+- `发送漫画 350234` - 发送已下载的指定ID的漫画文件,批量操作用逗号隔开,--all可发送全部（别名：发送、漫画发送）
+- `漫画列表` - 查看已下载漫画列表（别名：列表、列表漫画）
 - `查询漫画 350234` - 查询指定ID的漫画是否已下载
 - `漫画版本` - 查看当前机器人的版本信息
 - `下载进度` - 查看当前漫画下载队列的状况
-- `发送进度` - 查看当前漫画下载队列的状况
+- `发送进度` - 查看当前漫画发送队列的状况
 - `测试id` - 查看当前机器人的id(QQ号)
 - `测试文件` - 发送一个txt文件测试当前是否能发送文件
-- `删除漫画` - 删除指定ID的漫画文件(这个权限只有唯一一位可以使用)
+- `删除漫画` - 删除指定ID的漫画文件
+- `重发重发` - 断线后确认重发未送达的漫画文件
+- `你好` / `hi` / `hello` / `在吗` - 打招呼
 
-- `注` - 建议别下韩漫那种章节太多的漫画
+- `注` - 批量操作支持中文/英文逗号、句号作为分隔符，例如 `350234,350235` 或 `350234，350235`
 ---
 
 ## 感谢以下两个项目的贡献
@@ -176,6 +178,9 @@ DELETE_PERMISSION_USER=""
 # true: 开启低占用模式，下载后立刻发送，发送后3分钟删除，启动时清空下载文件夹
 # false: 默认模式，保留下载的漫画（默认值）
 LOW_MEMORY_MODE=false
+
+# 更多高级配置项（如文件发送速率、批次大小、断线重发超时等）
+# 请参考项目根目录的 .env.example
 ```
 
 #### 第四步：配置 NapCat
@@ -356,6 +361,9 @@ LOW_MEMORY_MODE=false
    # true: 开启低占用模式，下载后立刻发送，发送后3分钟删除，启动时清空下载文件夹
    # false: 默认模式，保留下载的漫画（默认值）
    LOW_MEMORY_MODE=false
+
+   # 更多高级配置项（如文件发送速率、批次大小、断线重发超时等）
+   # 请参考项目根目录的 .env.example
    ```
    完成修改后保存并退出
 
@@ -365,69 +373,8 @@ LOW_MEMORY_MODE=false
    mkdir -p ~/JMBot/downloads
    ```
 
-#### 第四步：系统服务配置（可选）
 
-> **💡 重要提示**：系统服务配置是可选的，仅在以下情况下需要：
-> - 需要在服务器上24小时运行机器人
-> - 需要开机自动启动功能
-> - 需要自动故障恢复和重启
-> 
-> **如果只是临时使用或测试，可以直接跳过此步骤，使用手动启动方式即可。**
-
-1. **创建系统服务用户**
-   ```bash
-   # 创建专用用户
-   sudo useradd -r -s /bin/false JMBot
-   
-   # 设置目录权限
-   sudo chown -R JMBot:JMBot /opt/JMBot
-   sudo chown -R JMBot:JMBot /var/lib/JMBot
-   ```
-
-2. **创建系统服务文件**
-   ```bash
-   # 创建服务文件
-   sudo vim /etc/systemd/system/JMBot.service
-   ```
-   
-   添加以下内容：
-   ```ini
-   [Unit]
-   Description=JMBot QQ Robot
-   After=network.target
-   
-   [Service]
-   Type=simple
-   User=JMBot
-   WorkingDirectory=/opt/JMBot
-   Environment=PATH=/opt/JMBot/venv/bin
-   ExecStart=/opt/JMBot/venv/bin/python main.py
-   Restart=always
-   RestartSec=10
-   
-   [Install]
-   WantedBy=multi-user.target
-   ```
-
-3. **配置系统服务**
-   ```bash
-   # 重新加载系统服务
-   sudo systemctl daemon-reload
-   
-   # 启动服务
-   sudo systemctl start JMBot
-
-   # 停止服务
-   sudo systemctl stop JMBot
-
-   # 设置开机自启
-   sudo systemctl enable JMBot
-
-   # 查看服务状态
-   sudo systemctl status JMBot
-   ```
-
-#### 第五步：配置 NapCat
+#### 第四步：配置 NapCat
 
 1. **安装 NapCat**
    - 参考 NapCatQQ 文档安装 NapCat https://github.com/NapNeko/NapCatQQ
@@ -450,27 +397,7 @@ mlikiowa/napcat-docker:latest
 
 ```
 
-#### 第六步：使用方法
-
-##### 系统服务管理
-```bash
-# 启动服务
-sudo systemctl start JMBot
-
-# 停止服务
-sudo systemctl stop JMBot
-
-# 重启服务
-sudo systemctl restart JMBot
-
-# 查看服务状态
-sudo systemctl status JMBot
-
-# 查看实时日志
-sudo journalctl -u JMBot -f
-```
-
-##### 🔄 启动机器人
+#### 第五步：使用方法
 
 ##### 1. 启动 NapCat 服务
 - 确保 NapCat 已正确安装并配置
@@ -655,6 +582,9 @@ Ctrl+C
    # true: 开启低占用模式，下载后立刻发送，发送后3分钟删除，启动时清空下载文件夹
    # false: 默认模式，保留下载的漫画（默认值）
    LOW_MEMORY_MODE=false
+
+   # 更多高级配置项（如文件发送速率、批次大小、断线重发超时等）
+   # 请参考项目根目录的 .env.example
    ```
 5. **创建数据目录**
    ```bash

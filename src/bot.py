@@ -161,7 +161,6 @@ class MangaBot:
         if self._confirm_close():
             try:
                 self._close_resources()
-                print("JMComic下载机器人已安全关闭")
             except Exception as e:
                 logger.error(f"关闭资源时发生严重错误: {e}")
                 print(f"关闭过程中发生严重错误，但仍将强制退出: {e}")

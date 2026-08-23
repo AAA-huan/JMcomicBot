@@ -73,7 +73,7 @@ class ProgressTracker:
             unit="img",
             file=sys.stdout,
             bar_format=(
-                "{desc} [{bar}] {percentage:.1f}% " "章节 {postfix} [{elapsed}]"
+                "{desc} [{bar}] {percentage:.1f}% " " {postfix} [{elapsed}]"
             ),
         )
         self._bar.clear()
@@ -99,9 +99,9 @@ class ProgressTracker:
             self._total_images = page_count if page_count > 0 else 0
             self._album_name = match.group(3)
         self._logger.info(
-            f"本子获取成功: {self._manga_id}, "
+            f"本子获取成功: id{self._manga_id}, "
             f"标题: [{self._album_name}], "
-            f"{self._total_chapters}章{self._total_images}页"
+            f"{self._total_chapters}章"
         )
 
     def _on_photo_before(self, msg: str) -> None:
@@ -152,7 +152,7 @@ class ProgressTracker:
         if self._bar is None:
             return
         postfix = (
-            f"{self._current_chapter}/{self._total_chapters} "
+            f"章节{self._current_chapter}/{self._total_chapters}, "
             f"图片 {self._bar.n}/{self._total_images}"
         )
         if self._failed_images > 0:

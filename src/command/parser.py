@@ -25,6 +25,7 @@ class CommandParser:
             "test_file": ["测试文件"],
             "delete": ["删除", "删除漫画", "漫画删除"],
             "resend": ["重发重发"],
+            "egg": ["我坐好了"],
         }
 
         # 支持批量操作的命令
@@ -104,6 +105,7 @@ class CommandParser:
             "test_id",
             "test_file",
             "resend",
+            "egg",
             "unknown",
         ]
 
