@@ -2,6 +2,7 @@
 websocket-client>=1.7.0  # WebSocket客户端，支持Linux和Windows
 jmcomic>=2.3.3          # JMComic下载库，支持跨平台
 python-dotenv>=1.0.0    # 环境变量管理，跨平台兼容
+tqdm>=4.64.0            # 进度条，兼容各类终端环境
 
 # 图片处理依赖（生产必需）
 Pillow>=10.0.0          # 图片处理库，img2pdf处理非JPEG格式时需要
