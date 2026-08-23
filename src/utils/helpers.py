@@ -87,7 +87,9 @@ def find_manga_pdf(download_path: str, manga_id: str) -> list[str] | None:
 
     pdf_files = []
     for file_name in os.listdir(download_path):
-        if file_name.startswith(f"{manga_id}-") and file_name.endswith(".pdf"):
+        if file_name.endswith(".pdf") and (
+            file_name.startswith(f"{manga_id}-") or file_name == f"{manga_id}.pdf"
+        ):
             pdf_files.append(os.path.join(download_path, file_name))
 
     pdf_files.sort()

@@ -161,7 +161,6 @@ class MangaBot:
         if self._confirm_close():
             try:
                 self._close_resources()
-                print("JMComic下载机器人已安全关闭")
             except Exception as e:
                 logger.error(f"关闭资源时发生严重错误: {e}")
                 print(f"关闭过程中发生严重错误，但仍将强制退出: {e}")
@@ -181,6 +180,16 @@ class MangaBot:
         """
         logger.info("开始关闭JMComic下载机器人资源...")
 
+        # 先停消费者（下载/发送队列），让在跑的任务在WS存活时收尾，
+        # 再关WS连接，避免发送队列撞上已断开的连接
+        logger.info("停止下载队列处理线程...")
+        self.download_manager.stop()
+        logger.info("下载队列处理线程已停止")
+
+        logger.info("停止文件发送队列进程...")
+        self.message_manager.stop()
+        logger.info("文件发送队列进程已停止")
+
         if self.ws_client.ws is not None:
             try:
                 if self.ws_client.is_connected():
@@ -193,13 +202,7 @@ class MangaBot:
                 logger.error(f"关闭WebSocket连接时出错: {ws_error}")
                 raise RuntimeError(ws_error)
 
-        logger.info("停止下载队列处理线程...")
-        self.download_manager.queue_running = False
-        logger.info("下载队列线程已设置为停止状态")
-
-        logger.info("停止文件发送队列进程...")
-        self.message_manager.stop()
-        logger.info("文件发送队列进程已停止")
+        self.ws_client.stop_reconnect_manager()
 
         if self.download_manager.downloading_mangas:
             logger.info(
@@ -207,7 +210,5 @@ class MangaBot:
             )
             self.download_manager.downloading_mangas.clear()
 
-        self.ws_client.stop_reconnect_manager()
-
-        print("JMComic下载机器人已安全关闭")
         logger.info("JMComic下载机器人资源关闭完成")
+        print("JMComic下载机器人已安全关闭")

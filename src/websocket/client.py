@@ -199,6 +199,9 @@ class WebSocketClient:
         if self.ws is not None:
             self.ws.close()
             self.logger.info("WebSocket连接已关闭")
+        if self.run_thread is not None and self.run_thread.is_alive():
+            self.run_thread.join(timeout=2)
+            self.logger.info("WebSocket run_forever线程已停止")
 
     def set_message_handler(self, handler: Callable[[Dict[str, Any]], None]) -> None:
         """

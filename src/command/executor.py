@@ -154,6 +154,7 @@ class CommandExecutor:
             "welcome": self._send_welcome,
             "delete": self._handle_manga_delete,
             "resend": self._handle_manga_resend,
+            "egg": self._handle_egg,
         }
 
         handler = command_handlers.get(cmd)
@@ -176,7 +177,7 @@ class CommandExecutor:
         help_text += "- 漫画下载 <漫画ID>：下载指定ID的漫画\n"
         help_text += "- 发送漫画 <漫画ID>：发送指定ID的已下载漫画\n"
         help_text += "- 查询漫画 <漫画ID>：查询指定ID的漫画是否已下载\n"
-        help_text += "- 漫画列表：查询已下载的所有漫画\n"
+        help_text += "- 漫画列表：查询已下载的漫画（支持 -a 查看详情，-n 查看第n页）\n"
         help_text += "- 下载进度：查看当前漫画下载队列的状况\n"
         help_text += "- 发送进度：查看当前漫画发送队列的状况\n"
         help_text += "- 删除漫画 <漫画ID>：删除指定ID的已下载漫画（仅限特定用户）\n"
@@ -403,7 +404,7 @@ class CommandExecutor:
         self.message_sender(user_id, response, group_id, private)
 
     def _query_downloaded_manga(
-        self, user_id: str, args: str, group_id: Optional[str], private: bool
+        self, user_id: str, params: str, group_id: Optional[str], private: bool
     ) -> None:
         """查询已下载的漫画"""
         self.logger.info(f"开始处理漫画列表查询 - 用户{user_id}")
@@ -422,36 +423,61 @@ class CommandExecutor:
                 return
 
             total_size = sum(size for _, size in pdf_files)
+            pdf_count = len(pdf_files)
+            manga_count = len({name.split("-", 1)[0] for name, _ in pdf_files})
+            params = params.strip()
 
-            # 按漫画ID分组，多章节合并显示
-            grouped: Dict[str, List[Tuple[str, float]]] = {}
-            for name, size in pdf_files:
-                manga_id = name.split("-", 1)[0]
-                grouped.setdefault(manga_id, []).append((name, size))
+            # 模式 1：无参数 → 概览信息
+            if not params:
+                response = (
+                    f"📊 总计：{manga_count} 个漫画，{pdf_count} 个PDF文件，"
+                    f"总大小 {total_size} MB"
+                )
+                self.message_sender(user_id, response, group_id, private)
+                return
 
-            manga_blocks = []
-            for index, (manga_id, files) in enumerate(grouped.items(), 1):
-                if len(files) == 1:
-                    name, size = files[0]
-                    manga_blocks.append(f"  {index}. {name} ({size} MB)")
-                else:
-                    total = sum(size for _, size in files)
-                    first_name = files[0][0]
-                    manga_blocks.append(
-                        f"  {index}. {first_name}"
-                        f"（共{len(files)}章）（总大小 {total} MB）"
-                    )
+            # 模式 2：-a / --all → 发送全部页面
+            manga_blocks = [
+                f"  {i + 1}. {name} ({size} MB)"
+                for i, (name, size) in enumerate(pdf_files)
+            ]
 
-            pages = paginate_blocks(manga_blocks, "📚 已下载的漫画列表")
-            for i, page in enumerate(pages):
-                if i == len(pages) - 1:
-                    page += (
-                        f"\n\n总计：{len(grouped)} 个漫画，"
-                        f"共 {len(pdf_files)} 个PDF文件，总大小：{total_size} MB"
-                    )
-                self.message_sender(user_id, page, group_id, private)
-                if i < len(pages) - 1:
-                    time.sleep(0.325)
+            if params in ("-a", "--all"):
+                pages = paginate_blocks(manga_blocks, "📚 已下载的漫画列表")
+                for i, page in enumerate(pages):
+                    if i == len(pages) - 1:
+                        page += (
+                            f"\n\n总计：{manga_count} 个漫画，"
+                            f"{pdf_count} 个PDF文件，总大小：{total_size} MB"
+                        )
+                    self.message_sender(user_id, page, group_id, private)
+                    if i < len(pages) - 1:
+                        time.sleep(0.325)
+                return
+
+            # 模式 3：-n → 发送第 n 页
+            page_num = int(params[1:])
+            page_size = 50
+            total_pages = (pdf_count + page_size - 1) // page_size
+
+            if page_num < 1 or page_num > total_pages:
+                response = (
+                    f"❌ 页码无效！共有 {total_pages} 页，"
+                    f"当前页码应在 1~{total_pages} 之间"
+                )
+                self.message_sender(user_id, response, group_id, private)
+                return
+
+            start = (page_num - 1) * page_size
+            end = min(start + page_size, pdf_count)
+            page_content = "\n".join(manga_blocks[start:end])
+            response = (
+                f"📚 已下载的漫画列表（第{page_num}/{total_pages}页）\n\n"
+                f"{page_content}\n\n"
+                f"总计：{manga_count} 个漫画，{pdf_count} 个PDF文件，"
+                f"总大小：{total_size} MB"
+            )
+            self.message_sender(user_id, response, group_id, private)
 
         except FileNotFoundError as e:
             self.logger.error(f"查询已下载漫画出错: {e}")
@@ -724,10 +750,6 @@ class CommandExecutor:
         try:
             self.permission_manager.check_delete_permission(user_id)
         except ValueError as e:
-            if "必须且只能有一个用户" in str(e):
-                response = "❌ 删除功能不可用：" "删除权限用户名单必须且只能有一个用户"
-                self.message_sender(user_id, response, group_id, private)
-                return
             if "未配置删除权限用户" in str(e):
                 response = "❌ 删除功能不可用：未配置删除权限用户"
                 self.message_sender(user_id, response, group_id, private)
@@ -806,24 +828,55 @@ class CommandExecutor:
                     results.append((manga_id, False, "下载目录不存在"))
                     continue
 
-                pdf_path = None
+                pdf_paths = []
                 for file_name in os.listdir(download_path):
-                    if file_name.startswith(f"{manga_id}-") and file_name.endswith(
-                        ".pdf"
+                    if file_name.endswith(".pdf") and (
+                        file_name.startswith(f"{manga_id}-")
+                        or file_name == f"{manga_id}.pdf"
                     ):
-                        pdf_path = os.path.join(download_path, file_name)
-                        break
+                        pdf_paths.append(os.path.join(download_path, file_name))
 
-                if not pdf_path:
+                if not pdf_paths:
                     results.append((manga_id, False, "未找到PDF文件"))
                     continue
 
-                os.remove(pdf_path)
-                self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")
-                results.append((manga_id, True, "删除成功"))
+                for pdf_path in pdf_paths:
+                    os.remove(pdf_path)
+                    self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")
+                results.append((manga_id, True, f"删除成功（{len(pdf_paths)}个文件）"))
             except Exception as e:
                 self.logger.error(f"删除漫画 {manga_id} 出错: {e}")
                 results.append((manga_id, False, str(e)))
 
         batch_response = format_batch_response("删除", results)
         self.message_sender(user_id, batch_response, group_id, private)
+
+    def _handle_egg(self, user_id, args, group_id, private):
+        """这才是真正的新宿之战，五条老师没有输！！！！！"""
+        responses = [
+            "真拿你没办法，坐好喽~",
+            "「苍」和「赫」互相碰撞就是能产生假想质量爆发的「虚式·茈」",
+            "但此时空中的「赫」与当时绕场一圈击中宿傩的那次一样，在爆炸之前速度并不算快。魔虚罗只要比「赫」先一步接触到「苍」完成适应的它就可以轻松的将这个术式消除，成功阻止「苍」和「赫」碰撞",
+            "此时已经十分接近「苍」的魔虚罗脑海中已经开始浮现「任务完成」的想法，没想到五条悟居然凭借「苍」的引力直接出现在他和「仓」之间！",
+            "五条悟甚至都不需要选择木式对象，因为魔虚罗对于「苍」的适应让他完全不受引力的影响，这个千年来近乎无解的能力居然在这个时候成为五条悟逆转战局的关键！",
+            "魔虚罗将退魔之剑横在面前却依然无法阻挡五条悟充满咒力的重拳，宿傩也终于在此时回到战场并摆出了「穿血」的起式，他想要在他们碰撞之前用手中射出的水流将「赫」提前引爆",
+            "五条物瞬间出现在宿傩面前，但他的拳头却无法阻止已经射出的「穿血」！",
+            "宿傩看着即将命中「赫」的水柱不忘嘲讽自己的对手「动作太慢」五条悟却在这个时候再次开始吟唱咒词！",
+            "「位相」 「黄昏」 「智慧之瞳」！急促且简短的咒词瞬间恢复了「苍」的输出，巨大的引力让原本射向「赫」的水流方向直接偏转并在片刻之后就被全力输出的「苍」直接吸收！战场中也响起了对于宿来说有些陌生的咒词",
+            "「九钢」「偏光」「乌与声明」「表里之间」此时战场中再也没有任何人可以阻止「苍」和「赫」互相靠近了…",
+            "「虚式·茈」",
+            "充斥天地的紫色光辉仿佛利剑一般刺入了所有人的双眼，当其中蕴含的可怕力量开始喷涌时这座城市便在假想质量中的爆发渐渐粉碎，曾经代表着浮世繁华的高楼与街区此刻都无法阻挡来自「最强」的无差别攻击",
+            "原本能适应一切的法阵也在紫色光芒吞噬下彻底化为齑粉",
+            "当一切归于寂静他们所处的街区也成为一片废墟，自烟尘中踉踉跄跄走出的是已经失去了左手同时身体各处都破败不堪的宿傩，似乎是来自战场的嘲讽就连他倚靠的半堵围墙也在此刻直接倒塌",
+            "而作为他对手的五条悟也开始了颇具嘲讽意味的「战斗复盘」    ",
+            "五条悟：「不指定对象，连我自己都会被卷进去的无限制的「茈」……」「但是…好像受伤的程度不太一样呢」「看来是不是自己的咒力影响很大啊」「不过…结果好就行了吧」「急性创作的远距离操作「茈」」「好像完成的还不错？」「这还是我第一次自爆呢」",
+            "「也就是说……」\n「没错 是五条悟赢了！」",
+        ]
+        count = 0
+        for response in responses:
+            count += 1
+            self.message_sender(user_id, response, group_id, private)
+            if count == 11:
+                time.sleep(3.25)
+            else:
+                time.sleep(1.2)
