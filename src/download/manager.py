@@ -130,24 +130,30 @@ class DownloadManager:
 
     def _find_chapter_folders(self, temp_download_dir: str, manga_id: str) -> List[str]:
         """
-        查找临时下载目录中的所有章节文件夹
+        查找临时下载目录中指定漫画的所有章节文件夹
+
+        目录结构由 DirRule ``Bd / {Aid}/{Pindex:03d}-{Ptitle}`` 决定，
+        章节文件夹形如 ``temp/{manga_id}/001-章节标题``，序号零填充保证
+        字符串字典序与章节实际顺序一致。
 
         Args:
-            temp_download_dir: 临时下载目录
+            temp_download_dir: 临时下载目录（其下应有以 manga_id 命名的子目录）
             manga_id: 漫画ID
 
         Returns:
-            章节文件夹路径列表
+            按章节序号排序的文件夹路径列表
         """
-        chapter_folders = []
-        if not os.path.exists(temp_download_dir):
+        album_dir = os.path.join(temp_download_dir, manga_id)
+        chapter_folders: List[str] = []
+        if not os.path.exists(album_dir):
             return chapter_folders
 
-        for dir_name in os.listdir(temp_download_dir):
-            dir_path = os.path.join(temp_download_dir, dir_name)
+        for dir_name in os.listdir(album_dir):
+            dir_path = os.path.join(album_dir, dir_name)
             if os.path.isdir(dir_path):
                 chapter_folders.append(dir_path)
 
+        chapter_folders.sort()
         return chapter_folders
 
     def _collect_images_from_chapter(self, chapter_folder: str) -> List[str]:
@@ -270,7 +276,7 @@ class DownloadManager:
             temp_download_dir = os.path.join(download_path, "temp")
             option.dir_rule.base_dir = temp_download_dir
 
-            new_rule = "Bd / {Aid}-{Ptitle}"
+            new_rule = "Bd / {Aid}/{Pindex:03d}-{Ptitle}"
             option.dir_rule = DirRule(new_rule, base_dir=option.dir_rule.base_dir)
 
             # 安装进度追踪器，替换 jmcomic 日志为控制台进度条
