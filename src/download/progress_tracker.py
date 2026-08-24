@@ -5,6 +5,7 @@ import sys
 import threading
 from typing import Any, Callable, Optional
 
+from jmcomic.jm_entity import JmAlbumDetail
 from tqdm import tqdm
 
 
@@ -47,6 +48,27 @@ class ProgressTracker:
             self._on_log(topic, msg)
 
         return handler
+
+    def setup_from_album(self, album: JmAlbumDetail) -> None:
+        """从 album 元数据设置进度追踪器（不依赖 album.before 事件）
+
+        用于 per-chapter 下载场景（download_photo 不触发 album.before），
+        在安装日志处理器前调用，手动设置章节总数、总页数、漫画标题。
+
+        Args:
+            album: 从 jmcomic 获取的 album 详情
+        """
+        with self._lock:
+            self._total_chapters = len(album.episode_list)
+            self._album_name = album.name
+            if album.page_count > 0:
+                self._total_images = album.page_count
+                self._album_has_page_count = True
+        self._logger.info(
+            f"本子获取成功: id{self._manga_id}, "
+            f"标题: [{self._album_name}], "
+            f"{self._total_chapters}章"
+        )
 
     def _on_log(self, topic: str, msg: str) -> None:
         if topic == "album.before":
