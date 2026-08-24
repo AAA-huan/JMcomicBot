@@ -1,7 +1,5 @@
 """下载管理器模块，负责漫画下载功能并对下载队列进行管理"""
 
-import contextlib
-import io
 import os
 import queue
 import shutil
@@ -10,7 +8,10 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import jmcomic
+from jmcomic.jm_config import JmModuleConfig
 from jmcomic.jm_option import DirRule
+
+from src.download.progress_tracker import ProgressTracker
 
 
 class DownloadManager:
@@ -38,6 +39,7 @@ class DownloadManager:
         self.file_sender = file_sender
         self.download_queue: queue.Queue = queue.Queue()
         self.queue_running: bool = True
+        self._queue_thread: Optional[threading.Thread] = None
         self.queued_tasks: Dict[str, Tuple[str, Optional[str], bool]] = {}
         self.downloading_mangas: Dict[str, bool] = {}
         self._start_download_queue_processor()
@@ -72,9 +74,18 @@ class DownloadManager:
                     except Exception:
                         pass
 
-        queue_thread = threading.Thread(target=process_queue, daemon=True)
-        queue_thread.start()
+        self._queue_thread = threading.Thread(
+            target=process_queue, daemon=True, name="download-queue"
+        )
+        self._queue_thread.start()
         self.logger.info("下载队列处理线程已启动")
+
+    def stop(self) -> None:
+        """停止下载队列处理线程，等待其退出（最多2秒）"""
+        self.queue_running = False
+        if self._queue_thread is not None and self._queue_thread.is_alive():
+            self._queue_thread.join(timeout=2)
+            self.logger.info("下载队列处理线程已停止")
 
     def _clear_download_folder(self) -> None:
         """
@@ -129,24 +140,30 @@ class DownloadManager:
 
     def _find_chapter_folders(self, temp_download_dir: str, manga_id: str) -> List[str]:
         """
-        查找临时下载目录中的所有章节文件夹
+        查找临时下载目录中指定漫画的所有章节文件夹
+
+        目录结构由 DirRule ``Bd / {Aid}/{Pindex:03d}-{Ptitle}`` 决定，
+        章节文件夹形如 ``temp/{manga_id}/001-章节标题``，序号零填充保证
+        字符串字典序与章节实际顺序一致。
 
         Args:
-            temp_download_dir: 临时下载目录
+            temp_download_dir: 临时下载目录（其下应有以 manga_id 命名的子目录）
             manga_id: 漫画ID
 
         Returns:
-            章节文件夹路径列表
+            按章节序号排序的文件夹路径列表
         """
-        chapter_folders = []
-        if not os.path.exists(temp_download_dir):
+        album_dir = os.path.join(temp_download_dir, manga_id)
+        chapter_folders: List[str] = []
+        if not os.path.exists(album_dir):
             return chapter_folders
 
-        for dir_name in os.listdir(temp_download_dir):
-            dir_path = os.path.join(temp_download_dir, dir_name)
+        for dir_name in os.listdir(album_dir):
+            dir_path = os.path.join(album_dir, dir_name)
             if os.path.isdir(dir_path):
                 chapter_folders.append(dir_path)
 
+        chapter_folders.sort()
         return chapter_folders
 
     def _collect_images_from_chapter(self, chapter_folder: str) -> List[str]:
@@ -170,49 +187,56 @@ class DownloadManager:
         image_files.sort()
         return image_files
 
-    def _convert_chapter_to_pdf(
-        self, chapter_folder: str, download_path: str
+    def _merge_chapters_to_single_pdf(
+        self,
+        chapter_folders: List[str],
+        download_path: str,
+        manga_id: str,
+        album_name: str = "",
     ) -> Optional[str]:
-        """
-        将单个章节文件夹转换为PDF文件
+        """将所有章节的图片合并为单个PDF文件
 
         Args:
-            chapter_folder: 章节文件夹路径
+            chapter_folders: 章节文件夹路径列表
             download_path: 最终PDF存放目录
+            manga_id: 漫画ID
+            album_name: 漫画标题，用于PDF文件名
 
         Returns:
-            PDF文件路径，转换失败返回None
+            PDF文件路径，合并失败返回None
         """
-        image_files = self._collect_images_from_chapter(chapter_folder)
+        chapter_folders.sort()
+        all_images: List[str] = []
+        for folder in chapter_folders:
+            images = self._collect_images_from_chapter(folder)
+            if not images:
+                self.logger.warning(f"章节文件夹中未找到图片: {folder}")
+                continue
+            all_images.extend(images)
 
-        if not image_files:
-            self.logger.warning(f"章节文件夹中未找到图片: {chapter_folder}")
+        if not all_images:
+            self.logger.warning("所有章节均未找到图片，无法生成PDF")
             return None
 
-        chapter_name = os.path.basename(chapter_folder)
-        temp_pdf_path = os.path.join(
-            os.path.dirname(chapter_folder), f"{chapter_name}.pdf"
+        chapter_count = len(chapter_folders)
+        album_name = album_name or manga_id
+        pdf_path = os.path.join(
+            download_path,
+            f"{manga_id}-{album_name}({chapter_count}章).pdf",
         )
-        final_pdf_path = os.path.join(download_path, f"{chapter_name}.pdf")
-
         try:
             import img2pdf
 
-            with open(temp_pdf_path, "wb") as pdf_file:
+            with open(pdf_path, "wb") as pdf_file:
                 img2pdf.convert(
-                    image_files,
+                    all_images,
                     outputstream=pdf_file,
                     rotation=img2pdf.Rotation.ifvalid,
                 )
-            self.logger.info(f"成功将章节 {chapter_name} 转换为PDF: {temp_pdf_path}")
-
-            # 移动PDF到downloads目录
-            shutil.move(temp_pdf_path, final_pdf_path)
-            self.logger.info(f"已移动PDF到: {final_pdf_path}")
-            return final_pdf_path
-
+            self.logger.info(f"成功合并为PDF: {pdf_path} ({len(all_images)}页)")
+            return pdf_path
         except Exception as e:
-            self.logger.error(f"转换章节 {chapter_name} 为PDF失败: {e}")
+            self.logger.error(f"合并PDF失败: {e}")
             return None
 
     def _cleanup_chapter_folders(self, temp_download_dir: str) -> None:
@@ -262,13 +286,20 @@ class DownloadManager:
             temp_download_dir = os.path.join(download_path, "temp")
             option.dir_rule.base_dir = temp_download_dir
 
-            new_rule = "Bd / {Aid}-{Ptitle}"
+            new_rule = "Bd / {Aid}/{Pindex:03d}-{Ptitle}"
             option.dir_rule = DirRule(new_rule, base_dir=option.dir_rule.base_dir)
 
-            with contextlib.redirect_stdout(io.StringIO()), contextlib.redirect_stderr(
-                io.StringIO()
-            ):
+            # 安装进度追踪器，替换 jmcomic 日志为控制台进度条
+            tracker = ProgressTracker(self.logger, manga_id)
+            original_executor = JmModuleConfig.EXECUTOR_LOG  # type: ignore
+            JmModuleConfig.EXECUTOR_LOG = tracker.make_log_handler()  # type: ignore
+            JmModuleConfig.FLAG_ENABLE_JM_LOG = True
+
+            try:
                 jmcomic.download_album(manga_id, option=option)
+            finally:
+                JmModuleConfig.EXECUTOR_LOG = original_executor  # type: ignore
+                tracker.finish()
 
             # 查找临时文件夹中的所有章节文件夹
             chapter_folders = self._find_chapter_folders(temp_download_dir, manga_id)
@@ -283,64 +314,54 @@ class DownloadManager:
                 self.message_sender(user_id, response, group_id, private)
                 return
 
-            # 为每个章节单独生成PDF
-            success_count = 0
-            failed_count = 0
-            pdf_files = []
-
-            for chapter_folder in chapter_folders:
-                chapter_name = os.path.basename(chapter_folder)
-                pdf_path = self._convert_chapter_to_pdf(chapter_folder, download_path)
-
-                if pdf_path:
-                    pdf_files.append(pdf_path)
-                    success_count += 1
-                else:
-                    failed_count += 1
+            # 将所有章节合并为单个PDF
+            total_pages = sum(
+                len(self._collect_images_from_chapter(f)) for f in chapter_folders
+            )
+            pdf_path = self._merge_chapters_to_single_pdf(
+                chapter_folders,
+                download_path,
+                manga_id,
+                album_name=tracker._album_name,  # pylint: disable=protected-access
+            )
 
             # 清理临时文件夹
             self._cleanup_chapter_folders(temp_download_dir)
 
             # 生成响应消息
-            if success_count > 0:
+            if pdf_path:
+                chapter_count = len(chapter_folders)
                 chapter_info = (
-                    f"（{success_count} 个章节）" if success_count > 1 else ""
+                    f"（{chapter_count} 个章节）" if chapter_count > 1 else ""
                 )
                 if self.low_memory_mode and self.file_sender:
-                    # 低占用模式：自动发送所有PDF
                     delete_delay = self.config.get("LOW_MEMORY_DELETE_DELAY", 3)
                     response = (
                         f"✅ദ്ദി˶>ω<)✧ "
                         f"漫画ID {manga_id}{chapter_info} 下载完成！\n\n"
-                        f"成功生成 {success_count} 个PDF文件\n"
+                        f"成功生成PDF文件（共{total_pages}页）\n"
                         f"⚠️ 低占用模式：文件将在{delete_delay}分钟后自动删除"
                     )
 
-                    # 自动发送所有PDF文件
-                    for pdf_path in pdf_files:
-                        try:
-                            self.file_sender(user_id, pdf_path, group_id, private)
-                            self.logger.info(
-                                f"低占用模式：已自动发送PDF文件: {os.path.basename(pdf_path)}"
-                            )
-                        except Exception as send_error:
-                            self.logger.error(f"发送PDF文件失败: {send_error}")
+                    try:
+                        self.file_sender(user_id, pdf_path, group_id, private)
+                        self.logger.info(
+                            f"低占用模式：已自动发送PDF文件: {os.path.basename(pdf_path)}"
+                        )
+                    except Exception as send_error:
+                        self.logger.error(f"发送PDF文件失败: {send_error}")
 
-                    # 安排延迟删除所有PDF文件
-                    for pdf_path in pdf_files:
-                        self._schedule_file_deletion(pdf_path, delete_delay)
+                    self._schedule_file_deletion(pdf_path, delete_delay)
                 else:
-                    # 普通模式
                     response = (
                         f"✅ദ്ദി˶>ω<)✧ "
                         f"漫画ID {manga_id}{chapter_info} 下载并转换为PDF完成！\n\n"
-                        f"成功生成 {success_count} 个PDF文件\n"
+                        f"成功生成PDF文件（共{total_pages}页）\n"
                         f"友情提示：输入'发送 {manga_id}'可以将PDF发送给您"
                     )
             else:
                 response = (
-                    f"❌ 漫画ID {manga_id} 下载完成，但所有章节转换失败\n"
-                    f"失败：{failed_count} 个章节\n"
+                    f"❌ 漫画ID {manga_id} 下载完成，但转换为PDF失败\n"
                     f"请查看日志获取详细错误信息"
                 )
 
@@ -394,21 +415,27 @@ class DownloadManager:
             self.message_sender(user_id, error_msg, group_id, private)
             raise FileNotFoundError(f"下载目录不存在: {download_path}")
 
-        pdf_path = None
+        pdf_paths: List[str] = []
         for file_name in os.listdir(download_path):
-            if file_name.startswith(f"{manga_id}-") and file_name.endswith(".pdf"):
-                pdf_path = os.path.join(download_path, file_name)
-                break
+            if file_name.endswith(".pdf") and (
+                file_name.startswith(f"{manga_id}-") or file_name == f"{manga_id}.pdf"
+            ):
+                pdf_paths.append(os.path.join(download_path, file_name))
 
-        if not pdf_path:
+        if not pdf_paths:
             response = f"❌（｀Δ´）！ 未找到漫画ID {manga_id} 的PDF文件"
             self.message_sender(user_id, response, group_id, private)
             return
 
         try:
-            os.remove(pdf_path)
-            self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")
-            response = f"✅ദ്ദി˶>ω<)✧ 漫画ID {manga_id} 的PDF文件已成功删除！"
+            deleted_count = 0
+            for pdf_path in pdf_paths:
+                os.remove(pdf_path)
+                self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")
+                deleted_count += 1
+            response = (
+                f"✅ദ്ദി˶>ω<)✧ 漫画ID {manga_id} 的{deleted_count}个PDF文件已成功删除！"
+            )
             self.message_sender(user_id, response, group_id, private)
         except Exception as e:
             self.logger.error(f"删除漫画PDF文件失败: {e}")

@@ -118,7 +118,7 @@ class PermissionManager:
         检查用户是否有删除漫画的权限
 
         删除权限规则：
-        1. 删除权限用户名单必须且只能有一个用户
+        1. 删除权限用户名单为空时删除功能不可用
         2. 用户必须在删除权限用户名单中
 
         Args:
@@ -128,15 +128,10 @@ class PermissionManager:
             bool: 用户是否有删除权限
 
         Raises:
-            ValueError: 当删除权限用户名单为空或包含多个用户时
+            ValueError: 当删除权限用户名单为空或用户不在名单中时
         """
         if len(self.delete_permission_user) == 0:
             error_msg = "删除功能不可用：未配置删除权限用户"
-            self.logger.warning(error_msg)
-            raise ValueError(error_msg)
-
-        if len(self.delete_permission_user) != 1:
-            error_msg = "删除功能不可用：删除权限用户名单必须且只能有一个用户"
             self.logger.warning(error_msg)
             raise ValueError(error_msg)
 
