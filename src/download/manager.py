@@ -223,26 +223,23 @@ class DownloadManager:
             self.logger.error(f"合并PDF失败: {e}")
             return None
 
-    def _cleanup_chapter_folders(self, temp_download_dir: str) -> None:
+    def _cleanup_chapter_folders(self, temp_download_dir: str, manga_id: str) -> None:
         """
-        清理临时下载目录中的所有章节文件夹
+        清理临时下载目录中指定漫画的章节文件夹
 
         Args:
             temp_download_dir: 临时下载目录
+            manga_id: 漫画ID
         """
-        if not os.path.exists(temp_download_dir):
+        album_dir = os.path.join(temp_download_dir, manga_id)
+        if not os.path.exists(album_dir):
             return
 
         try:
-            for item in os.listdir(temp_download_dir):
-                item_path = os.path.join(temp_download_dir, item)
-                if os.path.isdir(item_path):
-                    shutil.rmtree(item_path)
-            self.logger.info(f"已清理临时下载目录中的章节文件夹: {temp_download_dir}")
+            shutil.rmtree(album_dir)
+            self.logger.info(f"已清理临时下载目录: {album_dir}")
         except Exception as e:
-            self.logger.error(
-                f"清理临时下载目录 {temp_download_dir} 中的章节文件夹时出错: {e}"
-            )
+            self.logger.error(f"清理临时下载目录 {album_dir} 时出错: {e}")
 
     def _process_download_task(
         self, user_id: str, manga_id: str, group_id: str, private: bool
@@ -257,6 +254,7 @@ class DownloadManager:
             group_id: 群ID，用于在群聊中发送消息
             private: 是否为私聊，决定消息发送的目标
         """
+        temp_download_dir = None
         try:
             if manga_id in self.queued_tasks:
                 del self.queued_tasks[manga_id]
@@ -309,9 +307,6 @@ class DownloadManager:
                 album_name=tracker._album_name,  # pylint: disable=protected-access
             )
 
-            # 清理临时文件夹
-            self._cleanup_chapter_folders(temp_download_dir)
-
             # 生成响应消息
             if pdf_path:
                 chapter_count = len(chapter_folders)
@@ -358,6 +353,8 @@ class DownloadManager:
         finally:
             if manga_id in self.downloading_mangas:
                 del self.downloading_mangas[manga_id]
+            if temp_download_dir is not None:
+                self._cleanup_chapter_folders(temp_download_dir, manga_id)
 
     def download_manga(
         self, user_id: str, manga_id: str, group_id: Optional[str], private: bool

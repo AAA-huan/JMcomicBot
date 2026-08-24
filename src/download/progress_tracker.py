@@ -72,9 +72,7 @@ class ProgressTracker:
             desc=self._manga_id,
             unit="img",
             file=sys.stdout,
-            bar_format=(
-                "{desc} [{bar}] {percentage:.1f}% " " {postfix} [{elapsed}]"
-            ),
+            bar_format=("{desc} [{bar}] {percentage:.1f}% " " {postfix} [{elapsed}]"),
         )
         self._bar.clear()
         self._refresh_stop.clear()
@@ -130,6 +128,11 @@ class ProgressTracker:
             return
         self._log_separator()
         self._logger.info(f"章节下载完成: {match.group(2)}/{match.group(3)}")
+        with self._lock:
+            if self._bar is not None:
+                self._bar.disable = True
+                self._bar.close()
+                self._bar = None
 
     def _on_image_after(self) -> None:
         with self._lock:
