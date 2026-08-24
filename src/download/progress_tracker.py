@@ -5,6 +5,7 @@ import sys
 import threading
 from typing import Any, Callable, Optional
 
+from jmcomic.jm_entity import JmAlbumDetail
 from tqdm import tqdm
 
 
@@ -48,6 +49,27 @@ class ProgressTracker:
 
         return handler
 
+    def setup_from_album(self, album: JmAlbumDetail) -> None:
+        """从 album 元数据设置进度追踪器（不依赖 album.before 事件）
+
+        用于 per-chapter 下载场景（download_photo 不触发 album.before），
+        在安装日志处理器前调用，手动设置章节总数、总页数、漫画标题。
+
+        Args:
+            album: 从 jmcomic 获取的 album 详情
+        """
+        with self._lock:
+            self._total_chapters = len(album.episode_list)
+            self._album_name = album.name
+            if album.page_count > 0:
+                self._total_images = album.page_count
+                self._album_has_page_count = True
+        self._logger.info(
+            f"本子获取成功: id{self._manga_id}, "
+            f"标题: [{self._album_name}], "
+            f"{self._total_chapters}章"
+        )
+
     def _on_log(self, topic: str, msg: str) -> None:
         if topic == "album.before":
             self._on_album_before(msg)
@@ -66,15 +88,15 @@ class ProgressTracker:
             sys.stdout.write("\n")
             sys.stdout.flush()
 
-    def _init_bar(self) -> None:
+    def _init_bar(self, total: int = 0) -> None:
+        if total == 0:
+            total = self._total_images
         self._bar = tqdm(
-            total=self._total_images,
+            total=total,
             desc=self._manga_id,
             unit="img",
             file=sys.stdout,
-            bar_format=(
-                "{desc} [{bar}] {percentage:.1f}% " " {postfix} [{elapsed}]"
-            ),
+            bar_format=("{desc} [{bar}] {percentage:.1f}% " " {postfix} [{elapsed}]"),
         )
         self._bar.clear()
         self._refresh_stop.clear()
@@ -114,10 +136,8 @@ class ProgressTracker:
             chapter_images = int(match.group(5))
             if not self._album_has_page_count:
                 self._total_images += chapter_images
-            if self._bar is None and self._total_images > 0:
-                self._init_bar()
-            elif self._bar is not None:
-                self._bar.total = self._total_images
+            if self._bar is None:
+                self._init_bar(total=chapter_images)
         self._log_separator()
         self._logger.info(
             f"开始下载章节: {self._current_chapter}/{self._total_chapters} "
@@ -130,6 +150,11 @@ class ProgressTracker:
             return
         self._log_separator()
         self._logger.info(f"章节下载完成: {match.group(2)}/{match.group(3)}")
+        with self._lock:
+            if self._bar is not None:
+                self._bar.disable = True
+                self._bar.close()
+                self._bar = None
 
     def _on_image_after(self) -> None:
         with self._lock:
@@ -153,7 +178,7 @@ class ProgressTracker:
             return
         postfix = (
             f"章节{self._current_chapter}/{self._total_chapters}, "
-            f"图片 {self._bar.n}/{self._total_images}"
+            f"图片 {self._bar.n}/{self._bar.total}"
         )
         if self._failed_images > 0:
             postfix += f" \u26a0 {self._failed_images}张失败"
