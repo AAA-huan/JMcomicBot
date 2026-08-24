@@ -66,9 +66,11 @@ class ProgressTracker:
             sys.stdout.write("\n")
             sys.stdout.flush()
 
-    def _init_bar(self) -> None:
+    def _init_bar(self, total: int = 0) -> None:
+        if total == 0:
+            total = self._total_images
         self._bar = tqdm(
-            total=self._total_images,
+            total=total,
             desc=self._manga_id,
             unit="img",
             file=sys.stdout,
@@ -112,10 +114,8 @@ class ProgressTracker:
             chapter_images = int(match.group(5))
             if not self._album_has_page_count:
                 self._total_images += chapter_images
-            if self._bar is None and self._total_images > 0:
-                self._init_bar()
-            elif self._bar is not None:
-                self._bar.total = self._total_images
+            if self._bar is None:
+                self._init_bar(total=chapter_images)
         self._log_separator()
         self._logger.info(
             f"开始下载章节: {self._current_chapter}/{self._total_chapters} "
@@ -156,7 +156,7 @@ class ProgressTracker:
             return
         postfix = (
             f"章节{self._current_chapter}/{self._total_chapters}, "
-            f"图片 {self._bar.n}/{self._total_images}"
+            f"图片 {self._bar.n}/{self._bar.total}"
         )
         if self._failed_images > 0:
             postfix += f" \u26a0 {self._failed_images}张失败"
