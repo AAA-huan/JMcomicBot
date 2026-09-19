@@ -16,6 +16,7 @@ from pypdf import PdfWriter
 
 from src.database.repositories import MangaRepository, TaskLogRepository
 from src.download.progress_tracker import ProgressTracker
+from src.utils.helpers import sanitize_filename
 
 
 class DownloadManager:
@@ -173,10 +174,11 @@ class DownloadManager:
             JmModuleConfig.EXECUTOR_LOG = tracker.make_log_handler()  # type: ignore
             JmModuleConfig.FLAG_ENABLE_JM_LOG = True
 
-            # 创建累积 PDF
+            # 创建累积 PDF（标题需清洗，避免文件名过长或含非法字符导致写入失败）
+            safe_title = sanitize_filename(album_name)
             pdf_path = os.path.join(
                 download_path,
-                f"{manga_id}-{album_name}({chapter_count}章).pdf",
+                f"{manga_id}-{safe_title}({chapter_count}章).pdf",
             )
             pdf_writer = PdfWriter()
             total_pages = 0

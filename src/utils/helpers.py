@@ -5,6 +5,38 @@ from typing import List, Tuple
 
 from src.logging.logger_config import logger
 
+# 文件名字段中不允许出现的非法字符（兼容Windows与Linux）
+_INVALID_FILENAME_CHARS = '\\/:*?"<>|\n\t\r'
+
+# 文件名安全长度下限（字节），主用于标题截断以避免文件名超长
+_FILENAME_BYTE_LIMIT = 200
+
+
+def sanitize_filename(title: str, max_bytes: int = _FILENAME_BYTE_LIMIT) -> str:
+    """
+    清洗漫画标题用于生成文件名的合法且不超长的字符串
+
+    将路径分隔符与非法字符替换为下划线，并按 UTF-8 字节数截断，
+    防止最终文件名因标题过长（errno 36）或含路径分隔符（errno 2）导致写入失败。
+    截断时会避免切断多字节的UTF-8字符边界。
+
+    Args:
+        title: 原始标题
+        max_bytes: 标题允许的最大字节数
+
+    Returns:
+        str: 清洗后的安全标题
+    """
+    sanitized = "".join(
+        "_" if char in _INVALID_FILENAME_CHARS else char for char in title
+    ).strip(".")
+
+    # 按字节数截断，保证不切断多字节UTF-8字符
+    while len(sanitized.encode("utf-8")) > max_bytes and sanitized:
+        sanitized = sanitized[:-1]
+
+    return sanitized
+
 
 def parse_id_list(id_string: str) -> List[str]:
     """
