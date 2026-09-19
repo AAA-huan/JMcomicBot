@@ -150,17 +150,6 @@ venv/
 env/
 .venv/
 
-# 测试产物（本地单测文件按需忽略）
-tests/test_download_manager.py
-test_bot_linux.py
-test_whitelist.py
-test_low_memory_mode.py
-test_file_helpers.py
-test_delete_permission.py
-test_batch.py
-test_download.py
-test_parser.py
-
 # 临时文件
 *.tmp
 *.temp
