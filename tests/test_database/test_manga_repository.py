@@ -1,0 +1,107 @@
+"""漫画元数据仓储的测试"""
+
+from src.database.repositories.manga_repository import MangaRepository
+from src.database.models import Manga
+
+
+class TestManga:
+    """漫画元数据仓储测试类"""
+
+    def test_upsert_and_get(self, manga_repo: MangaRepository) -> None:
+        manga = manga_repo.upsert(
+            manga_id="11",
+            title="标题",
+            author="作者",
+            tags="热血,格斗",
+            chapter_count=3,
+            page_count=100,
+        )
+        assert manga.id == "11"
+        assert manga.title == "标题"
+        assert manga.tags == "热血,格斗"
+
+        loaded = manga_repo.get("11")
+        assert loaded is not None
+        assert loaded.title == "标题"
+
+    def test_upsert_existing(self, manga_repo: MangaRepository) -> None:
+        manga_repo.upsert(
+            manga_id="12",
+            title="旧标题",
+            author="作者",
+            tags="",
+            chapter_count=1,
+            page_count=10,
+        )
+        manga_repo.upsert(
+            manga_id="12",
+            title="新标题",
+            author="作者",
+            tags="新标签",
+            chapter_count=2,
+            page_count=20,
+        )
+        assert manga_repo.count() == 1
+        loaded = manga_repo.get("12")
+        assert loaded is not None
+        assert loaded.title == "新标题"
+        assert loaded.tags == "新标签"
+
+    def test_count(self, manga_repo: MangaRepository) -> None:
+        assert manga_repo.count() == 0
+        manga_repo.upsert(
+            manga_id="13", title="A", author="", tags="", chapter_count=1, page_count=1
+        )
+        manga_repo.upsert(
+            manga_id="14", title="B", author="", tags="", chapter_count=1, page_count=1
+        )
+        assert manga_repo.count() == 2
+
+    def test_add_and_list_files(self, manga_repo: MangaRepository, tmp_path) -> None:
+        pdf = tmp_path / "11-标题(3章).pdf"
+        pdf.write_bytes(b"%PDF")
+        manga_repo.upsert(
+            manga_id="11",
+            title="标题",
+            author="",
+            tags="",
+            chapter_count=3,
+            page_count=100,
+        )
+        manga_repo.add_file("11", str(pdf), 1.5)
+
+        files = manga_repo.list_files("11")
+        assert len(files) == 1
+        assert files[0].file_path == str(pdf)
+        assert files[0].file_size_mb == 1.5
+
+    def test_get_all(self, manga_repo: MangaRepository) -> None:
+        manga_repo.upsert(
+            manga_id="15", title="A", author="", tags="", chapter_count=1, page_count=1
+        )
+        result = manga_repo.get_all()
+        assert len(result) == 1
+        assert isinstance(result[0], Manga)
+
+    def test_delete(self, manga_repo: MangaRepository) -> None:
+        manga_repo.upsert(
+            manga_id="16", title="A", author="", tags="", chapter_count=1, page_count=1
+        )
+        assert manga_repo.delete("16") is True
+        assert manga_repo.get("16") is None
+        assert manga_repo.delete("16") is False
+
+    def test_delete_files(self, manga_repo: MangaRepository, tmp_path) -> None:
+        pdf = tmp_path / "17-标题(1章).pdf"
+        pdf.write_bytes(b"%PDF")
+        manga_repo.upsert(
+            manga_id="17",
+            title="标题",
+            author="",
+            tags="",
+            chapter_count=1,
+            page_count=1,
+        )
+        manga_repo.add_file("17", str(pdf), 0.5)
+        assert manga_repo.delete_files("17") == 1
+        assert manga_repo.list_files("17") == []
