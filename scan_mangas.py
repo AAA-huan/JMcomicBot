@@ -1,0 +1,90 @@
+"""漫画扫描入库脚本
+
+扫描漫画下载目录内已下载的漫画PDF文件，将元数据与文件记录同步到SQLite数据库。
+
+用法:
+    uv run python scan_mangas.py              # 扫描并写入数据库
+    uv run python scan_mangas.py --dry-run    # 仅预览将入库的内容，不写入
+"""
+
+import argparse
+import sys
+
+from src.config.manager import ConfigManager
+from src.database.database import DatabaseManager
+from src.database.repositories import MangaRepository
+from src.logging.logger_config import logger
+from src.utils.manga_scanner import scan_download_dir, sync_scanned_to_db
+
+
+def parse_args() -> argparse.Namespace:
+    """解析命令行参数"""
+    parser = argparse.ArgumentParser(description="扫描漫画下载目录并将元数据写入数据库")
+    parser.add_argument(
+        "--dry-run",
+        action="store_true",
+        help="仅预览将入库的漫画，不实际写入数据库",
+    )
+    return parser.parse_args()
+
+
+def main() -> None:
+    """扫描漫画并将元数据同步到数据库的主入口"""
+    args = parse_args()
+
+    # 加载配置，读取下载路径与数据库路径
+    config_manager = ConfigManager()
+    config_manager.load_config()
+    download_path = str(config_manager.get("MANGA_DOWNLOAD_PATH"))
+    db_path = str(config_manager.get("DB_PATH"))
+
+    logger.info(f"下载目录: {download_path}")
+    if args.dry_run:
+        logger.info("当前为预览模式(--dry-run)，不会写入数据库")
+
+    try:
+        entries = scan_download_dir(download_path)
+    except FileNotFoundError as e:
+        logger.error(str(e))
+        sys.exit(1)
+
+    if not entries:
+        logger.info("没有扫描到漫画，无需同步")
+        sys.exit(0)
+
+    # 初始化数据库并同步
+    db_manager = DatabaseManager(db_path=db_path)
+    db_manager.init_db()
+    repo = MangaRepository(db_manager)
+
+    try:
+        result = sync_scanned_to_db(repo, entries, dry_run=args.dry_run)
+        _print_result(result, dry_run=args.dry_run)
+    finally:
+        db_manager.close()
+
+
+def _print_result(result, dry_run: bool) -> None:
+    """打印扫描同步结果统计
+
+    Args:
+        result: 扫描同步结果
+        dry_run: 是否为预览模式
+    """
+    mode_desc = "预览：将新增" if dry_run else "完成：新增"
+    lines = [
+        f"📊 扫描同步{mode_desc}",
+        f"  扫描到 PDF 文件: {result.scanned_files} 个",
+        f"  聚合漫画: {result.manga_count} 本",
+        f"  新增: {result.new_count} 本",
+        f"  更新: {result.updated_count} 本",
+    ]
+    if dry_run:
+        lines.append(f"  待清理残留: {result.pending_cleanup_count} 条")
+    else:
+        lines.append(f"  清理残留: {result.deleted_count} 条")
+    logger.info("\n".join(lines))
+
+
+if __name__ == "__main__":
+    main()
