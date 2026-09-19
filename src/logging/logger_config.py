@@ -29,6 +29,8 @@ MODULE_COLORS_HEX: Dict[str, Tuple[str, str]] = {
     "src.config.manager": ("[config]", "#808080"),  # 灰色
     "src.platform.compatibility": ("[platform]", "#808080"),  # 灰色
     "src.permission.manager": ("[perm]", "#808080"),  # 灰色
+    "src.database.database": ("[database]", "#808080"),  # 灰色
+    "src.database.repositories": ("[database]", "#808080"),  # 灰色
     "src.utils.helpers": ("[utils]", "#808080"),  # 灰色
     "src.utils.batch": ("[batch]", "#808080"),  # 灰色
 }

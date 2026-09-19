@@ -126,6 +126,9 @@ logs/
 # 下载的漫画内容
 downloads/
 
+# SQLite数据库文件
+data/
+
 # 本地测试配置（不入库）
 pytest.ini
 
@@ -148,7 +151,7 @@ env/
 .venv/
 
 # 测试产物（本地单测文件按需忽略）
-tests/*
+tests/test_download_manager.py
 test_bot_linux.py
 test_whitelist.py
 test_low_memory_mode.py
@@ -157,7 +160,6 @@ test_delete_permission.py
 test_batch.py
 test_download.py
 test_parser.py
-tests/test_download_manager.py
 
 # 临时文件
 *.tmp
@@ -171,5 +173,5 @@ option.yml
 # 本地 PR 说明文档（不入库）
 pr.md
 AGENTS.md
-conftest.py
+/conftest.py
 TODO.md
