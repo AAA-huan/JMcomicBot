@@ -6,6 +6,13 @@ from typing import Any, Dict, Optional
 
 from src.command.executor import CommandExecutor
 from src.config.manager import ConfigManager
+from src.database.database import DatabaseManager
+from src.database.repositories import (
+    MangaRepository,
+    PermissionRepository,
+    TaskLogRepository,
+    UserGroupRepository,
+)
 from src.download.manager import DownloadManager
 from src.event.handler import EventHandler
 from src.logging.logger_config import logger
@@ -13,6 +20,7 @@ from src.message.manager import MessageManager
 from src.permission.manager import PermissionManager
 from src.platform.compatibility import PlatformChecker
 from src.utils.helpers import cleanup_failed_downloads
+from src.utils.name_cache import NameCache
 from src.websocket.client import WebSocketClient
 
 
@@ -31,16 +39,34 @@ class MangaBot:
         self.config_manager.load_config()
         self.config_manager.make_download_dir()
 
+        # 初始化数据库管理器（SQLite），并创建各数据仓储
+        self.database_manager = DatabaseManager(
+            db_path=str(self.config_manager.config_dict["DB_PATH"]),
+            echo=bool(self.config_manager.config_dict["DB_ECHO"]),
+        )
+        self.database_manager.init_db()
+
+        self.manga_repo = MangaRepository(self.database_manager)
+        self.task_log_repo = TaskLogRepository(self.database_manager)
+        self.user_group_repo = UserGroupRepository(self.database_manager)
+        self.permission_repo = PermissionRepository(self.database_manager)
+
+        # 挂载名称缓存持久化仓储
+        NameCache.get_instance().attach_user_group_repo(self.user_group_repo)
+
         self.permission_manager = PermissionManager(
-            group_whitelist=self.config_manager.group_whitelist,
-            private_whitelist=self.config_manager.private_whitelist,
-            global_blacklist=self.config_manager.global_blacklist,
-            delete_permission_user=self.config_manager.delete_permission_user,
+            permission_repo=self.permission_repo,
+            seed_group_whitelist=self.config_manager.group_whitelist,
+            seed_private_whitelist=self.config_manager.private_whitelist,
+            seed_global_blacklist=self.config_manager.global_blacklist,
+            seed_delete_permission_user=self.config_manager.delete_permission_user,
         )
 
         self.ws_client = WebSocketClient(self.config_manager.config_dict)
         self.message_manager = MessageManager(
-            config=self.config_manager.config_dict, ws_client=self.ws_client
+            config=self.config_manager.config_dict,
+            ws_client=self.ws_client,
+            task_log_repo=self.task_log_repo,
         )
 
         self.download_manager = DownloadManager(
@@ -48,6 +74,8 @@ class MangaBot:
             config=self.config_manager.config_dict,
             message_sender=self.message_manager.send_message,
             file_sender=self.message_manager.send_file,
+            manga_repo=self.manga_repo,
+            task_log_repo=self.task_log_repo,
         )
 
         self.command_executor = CommandExecutor(
@@ -60,6 +88,7 @@ class MangaBot:
             resend_handler=self.message_manager.resend_pending_files,
             send_status_provider=self.message_manager.get_send_queue_status,
             add_send_pending_count=self.message_manager.add_send_pending_count,
+            manga_repo=self.manga_repo,
         )
 
         self.SELF_ID: Optional[str] = None
@@ -207,6 +236,10 @@ class MangaBot:
             self.download_manager.downloading_mangas.clear()
 
         self.ws_client.stop_reconnect_manager()
+
+        logger.info("关闭SQLite数据库连接...")
+        self.database_manager.close()
+        logger.info("SQLite数据库连接已关闭")
 
         print("JMComic下载机器人已安全关闭")
         logger.info("JMComic下载机器人资源关闭完成")

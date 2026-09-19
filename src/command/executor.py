@@ -6,6 +6,7 @@ import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.command.parser import CommandParser
+from src.database.repositories import MangaRepository
 from src.logging.logger_config import logger
 from src.utils.batch import (
     format_batch_response,
@@ -25,7 +26,7 @@ class CommandExecutor:
 
     VERSION = "3.2.5"
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         message_sender: Callable[[str, str, Optional[str], bool], None],
         file_sender: Callable[[str, str, Optional[str], bool], None],
@@ -36,6 +37,7 @@ class CommandExecutor:
         resend_handler: Optional[Callable[[str, Optional[str], bool], int]] = None,
         send_status_provider: Optional[Callable[[], Dict[str, Any]]] = None,
         add_send_pending_count: Optional[Callable[[int], None]] = None,
+        manga_repo: Optional[MangaRepository] = None,
     ) -> None:
         """
         初始化命令执行器
@@ -50,6 +52,7 @@ class CommandExecutor:
             resend_handler: 重发断线留存文件的处理函数，入参(user_id, group_id, private)，返回重发数量
             send_status_provider: 获取文件发送队列状态的函数，返回包含running等字段的字典
             add_send_pending_count: 增加/减少尚未入队的批次余量计数
+            manga_repo: 漫画元数据仓储，用于数据库查询
         """
         self.message_sender = message_sender
         self.file_sender = file_sender
@@ -60,6 +63,7 @@ class CommandExecutor:
         self.resend_handler = resend_handler
         self.send_status_provider = send_status_provider
         self._add_send_pending_count = add_send_pending_count
+        self.manga_repo = manga_repo
         self.command_parser = CommandParser()
         self.logger = logger
         self.SELF_ID: Optional[str] = None
@@ -410,9 +414,7 @@ class CommandExecutor:
         self.logger.info(f"开始处理漫画列表查询 - 用户{user_id}")
 
         try:
-            pdf_files = list_downloaded_mangas_with_size(
-                str(self.config["MANGA_DOWNLOAD_PATH"])
-            )
+            pdf_files = self._list_pdf_files()
 
             if not pdf_files:
                 response = (
@@ -487,13 +489,35 @@ class CommandExecutor:
     def _get_all_downloaded_manga_ids(self) -> List[str]:
         """获取所有已下载的漫画ID列表"""
         try:
-            pdf_files = list_downloaded_mangas_with_size(
-                str(self.config["MANGA_DOWNLOAD_PATH"])
-            )
+            pdf_files = self._list_pdf_files()
             return [name.split("-")[0] for name, _ in pdf_files]
         except FileNotFoundError as e:
             self.logger.error(f"查询已下载漫画出错: {e}")
             return []
+
+    def _list_pdf_files(self) -> List[Tuple[str, float]]:
+        """获取已下载漫画PDF文件列表
+
+        优先从数据库读取漫画元数据及文件记录，并校验文件真实存在于磁盘；
+        数据库无记录（首次迁移前）或未接入数据库时，回退到扫描下载目录。
+        返回格式与 list_downloaded_mangas_with_size 一致。
+        """
+        download_path = str(self.config["MANGA_DOWNLOAD_PATH"])
+
+        if self.manga_repo is not None:
+            db_files: List[Tuple[str, float]] = []
+            for manga in self.manga_repo.get_all():
+                for manga_file in manga.files:
+                    if os.path.exists(manga_file.file_path):
+                        name_without_ext = os.path.splitext(
+                            os.path.basename(manga_file.file_path)
+                        )[0]
+                        db_files.append((name_without_ext, manga_file.file_size_mb))
+            if db_files:
+                db_files.sort(key=lambda x: x[0])
+                return db_files
+
+        return list_downloaded_mangas_with_size(download_path)
 
     def _handle_manga_query(
         self, user_id: str, params: str, group_id: Optional[str], private: bool

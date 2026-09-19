@@ -8,6 +8,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
 
+from src.database.repositories import TaskLogRepository
 from src.logging.logger_config import logger
 
 
@@ -26,16 +27,23 @@ class SendTask:
 class MessageManager:
     """消息管理器，负责发送文本消息和文件"""
 
-    def __init__(self, config: Dict[str, Any], ws_client: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        ws_client: Optional[Any] = None,
+        task_log_repo: Optional[TaskLogRepository] = None,
+    ) -> None:
         """
         初始化消息管理器
 
         Args:
             config: 配置字典，包含NAPCAT_TOKEN等信息
             ws_client: WebSocket客户端实例
+            task_log_repo: 任务日志仓储，记录文件发送任务
         """
         self.config = config
         self.ws_client = ws_client
+        self.task_log_repo = task_log_repo
         self.logger = logger
         self._file_queue: queue.Queue = queue.Queue()
         self._queue_running: bool = True
@@ -119,16 +127,42 @@ class MessageManager:
         self._file_thread.start()
         self.logger.info("文件发送队列后台线程已启动")
 
+    def _log_send_task(self, task: SendTask, status: str, message: str) -> None:
+        """记录文件发送任务到数据库
+
+        Args:
+            task: 文件发送任务
+            status: 任务状态
+            message: 结果信息
+        """
+        if self.task_log_repo is None:
+            return
+        manga_id = os.path.basename(task.file_path).split("-", 1)[0]
+        try:
+            self.task_log_repo.add(
+                task_type="send",
+                status=status,
+                manga_id=manga_id,
+                user_id=task.user_id,
+                group_id=task.group_id or "",
+                private=task.private,
+                message=f"{message} {task.file_path}".strip(),
+            )
+        except Exception as e:
+            self.logger.error(f"记录发送任务日志失败: {e}")
+
     def _process_send_task(self, task: SendTask) -> None:
         """处理单个文件发送任务，发送结果通过条件变量通知等待线程"""
         self._current_sending_file = os.path.basename(task.file_path)
         try:
             self._send_file_with_retry(task)
             task.status = "done"
+            self._log_send_task(task, "success", "")
         except Exception as e:
             self.logger.error(f"发送文件失败: {task.file_path}, {e}")
             task.status = "failed"
             task.error = str(e)
+            self._log_send_task(task, "failed", str(e))
             self._store_pending_error(
                 user_id=task.user_id,
                 content_type="file",

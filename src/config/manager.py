@@ -105,6 +105,16 @@ class ConfigManager:
         except ValueError:
             resend_confirm_timeout = 300
 
+        # 获取SQLite数据库目录配置，处理路径并转换为绝对路径
+        db_path = os.getenv("DB_PATH", "./data")
+        if db_path.startswith("~"):
+            db_path = os.path.expanduser(db_path)
+        absolute_db_path = os.path.abspath(db_path)
+
+        # 获取数据库SQL日志开关
+        db_echo_str = os.getenv("DB_ECHO", "false").lower()
+        db_echo = db_echo_str in ("true", "1", "yes", "on")
+
         self.config_dict: Dict[str, Union[str, int, float, bool]] = {
             "MANGA_DOWNLOAD_PATH": absolute_download_path,
             "NAPCAT_WS_URL": ws_url,
@@ -116,6 +126,8 @@ class ConfigManager:
             "FILE_SEND_BATCH_INTERVAL": file_send_batch_interval,
             "SEND_RETRY_TIMEOUT": send_retry_timeout,
             "RESEND_CONFIRM_TIMEOUT": resend_confirm_timeout,
+            "DB_PATH": absolute_db_path,
+            "DB_ECHO": db_echo,
         }
 
         # 初始化黑白名单配置

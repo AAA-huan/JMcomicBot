@@ -14,6 +14,7 @@ from jmcomic.jm_config import JmModuleConfig
 from jmcomic.jm_option import DirRule
 from pypdf import PdfWriter
 
+from src.database.repositories import MangaRepository, TaskLogRepository
 from src.download.progress_tracker import ProgressTracker
 
 
@@ -26,6 +27,8 @@ class DownloadManager:
         config: Dict[str, Any],
         message_sender: Callable[[str, str, Optional[str], bool], None],
         file_sender: Optional[Callable[[str, str, Optional[str], bool], None]] = None,
+        manga_repo: Optional[MangaRepository] = None,
+        task_log_repo: Optional[TaskLogRepository] = None,
     ) -> None:
         """
         初始化下载管理器
@@ -35,11 +38,15 @@ class DownloadManager:
             config: 配置字典
             message_sender: 消息发送函数
             file_sender: 文件发送函数（用于低占用模式自动发送）
+            manga_repo: 漫画元数据仓储，持久化漫画信息到数据库
+            task_log_repo: 任务日志仓储，记录下载任务到数据库
         """
         self.logger = logger_instance
         self.config = config
         self.message_sender = message_sender
         self.file_sender = file_sender
+        self.manga_repo = manga_repo
+        self.task_log_repo = task_log_repo
         self.download_queue: queue.Queue = queue.Queue()
         self.queue_running: bool = True
         self.queued_tasks: Dict[str, Tuple[str, Optional[str], bool]] = {}
@@ -155,6 +162,8 @@ class DownloadManager:
             album = client.get_album_detail(manga_id)
             episode_list = album.episode_list
             album_name = album.name
+            album_author = ",".join(getattr(album, "authors", []))
+            album_tags = ",".join(getattr(album, "tags", []))
             chapter_count = len(episode_list)
 
             # 安装进度追踪器（先注入 album 元数据，再安装日志处理器）
@@ -217,6 +226,39 @@ class DownloadManager:
                 pdf_writer.write(f)
             pdf_writer.close()
 
+            # 持久化漫画元数据：首次下载时写入漫画记录与 PDF 文件记录
+            if self.manga_repo is not None:
+                try:
+                    self.manga_repo.upsert(
+                        manga_id=manga_id,
+                        title=album_name,
+                        author=album_author,
+                        tags=album_tags,
+                        chapter_count=chapter_count,
+                        page_count=total_pages,
+                    )
+                    file_size_mb = round(os.path.getsize(pdf_path) / (1024 * 1024), 2)
+                    self.manga_repo.add_file(
+                        manga_id=manga_id,
+                        file_path=pdf_path,
+                        file_size_mb=file_size_mb,
+                    )
+                except Exception as e:
+                    self.logger.error(f"持久化漫画元数据失败: {e}")
+            if self.task_log_repo is not None:
+                try:
+                    self.task_log_repo.add(
+                        task_type="download",
+                        status="success",
+                        manga_id=manga_id,
+                        user_id=user_id,
+                        group_id=group_id or "",
+                        private=private,
+                        message=f"标题: {album_name}, 共{total_pages}页",
+                    )
+                except Exception as e:
+                    self.logger.error(f"记录下载任务日志失败: {e}")
+
             # 生成响应消息
             chapter_info = f"（{chapter_count} 个章节）" if chapter_count > 1 else ""
             if self.low_memory_mode and self.file_sender:
@@ -248,6 +290,19 @@ class DownloadManager:
 
         except Exception as e:
             self.logger.error(f"下载漫画出错: {e}")
+            if self.task_log_repo is not None:
+                try:
+                    self.task_log_repo.add(
+                        task_type="download",
+                        status="failed",
+                        manga_id=manga_id,
+                        user_id=user_id,
+                        group_id=group_id or "",
+                        private=private,
+                        message=str(e),
+                    )
+                except Exception as log_error:
+                    self.logger.error(f"记录下载失败日志出错: {log_error}")
             error_msg = f"❌ 下载失败：{str(e)}\n\n快让主人帮我检查一下∑(O_O；)"
             self.message_sender(user_id, error_msg, group_id, private)
         finally:
@@ -314,6 +369,27 @@ class DownloadManager:
                 os.remove(pdf_path)
                 self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")
                 deleted_count += 1
+
+            # 同步删除数据库中的漫画元数据与PDF文件记录
+            if self.manga_repo is not None:
+                try:
+                    self.manga_repo.delete(manga_id)
+                except Exception as e:
+                    self.logger.error(f"删除数据库漫画记录失败: {e}")
+            if self.task_log_repo is not None:
+                try:
+                    self.task_log_repo.add(
+                        task_type="delete",
+                        status="success",
+                        manga_id=manga_id,
+                        user_id=user_id,
+                        group_id=group_id or "",
+                        private=private,
+                        message=f"删除{deleted_count}个PDF文件",
+                    )
+                except Exception as e:
+                    self.logger.error(f"记录删除任务日志失败: {e}")
+
             response = (
                 f"✅ദ്ദി˶>ω<)✧ 漫画ID {manga_id} 的{deleted_count}个PDF文件已成功删除！"
             )
