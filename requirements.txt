@@ -2,12 +2,13 @@
 websocket-client>=1.9.2  # WebSocket客户端，支持Linux和Windows
 jmcomic>=2.7.7          # JMComic下载库，支持跨平台
 python-dotenv>=1.2.3    # 环境变量管理，跨平台兼容
-tqdm>=4.70.1            # 进度条，兼容各类终端环境
 
 # 图片处理依赖（生产必需）
 pillow>=12.3.0          # 图片处理库，生成JPEG缩略图时使用
-img2pdf>=0.6.3          # PDF转换库，JPEG图片直接嵌入内存占用极低（必需）
-pypdf>=6.19.0           # PDF合并库，用于逐章追加PDF（纯Python，无原生依赖）
+img2pdf>=0.6.3          # PDF转换库，jmcomic img2pdf 插件合并PDF时使用（必需）
+
+# 进度条依赖（生产必需，download_progress 插件使用）
+rich>=15.0.0            # 富文本终端支持，jmcomic 下载进度插件依赖
 
 # 数据库依赖（生产必需）
 sqlalchemy>=2.0.54      # ORM，SQLite持久化存储

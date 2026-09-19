@@ -26,6 +26,7 @@ class CommandParser:
             "delete": ["删除", "删除漫画", "漫画删除"],
             "resend": ["重发重发"],
             "egg": ["我坐好了"],
+            "welcome": ["你好", "在吗", "hello", "hi"],
         }
 
         # 支持批量操作的命令

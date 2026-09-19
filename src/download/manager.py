@@ -3,20 +3,47 @@
 import os
 import queue
 import shutil
-import tempfile
 import threading
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
-import img2pdf
 import jmcomic
-from jmcomic.jm_config import JmModuleConfig
 from jmcomic.jm_option import DirRule
-from pypdf import PdfWriter
 
 from src.database.repositories import MangaRepository, TaskLogRepository
-from src.download.progress_tracker import ProgressTracker
 from src.utils.helpers import sanitize_filename
+
+
+def build_pdf_filename(manga_id: str, safe_title: str, chapter_count: int) -> str:
+    """构造漫画 PDF 文件名（不含后缀），标题使用已清洗的安全标题，规避文件名超长/非法字符问题"""
+    filename = f"{manga_id}-{safe_title}({chapter_count}章)"
+    # 大括号会干扰 jmcomic f-string 规则解析，替换为下划线
+    return filename.replace("{", "_").replace("}", "_")
+
+
+def build_pdf_plugin_config(
+    manga_id: str, safe_title: str, chapter_count: int, pdf_dir: str
+) -> Dict[str, Any]:
+    """构造 img2pdf 插件的 YAML 风格配置，供代码注入 option.plugins 使用"""
+    return {
+        "plugin": "img2pdf",
+        "kwargs": {
+            "pdf_dir": pdf_dir,
+            "filename_rule": build_pdf_filename(manga_id, safe_title, chapter_count),
+            "delete_original_file": True,
+        },
+    }
+
+
+def build_progress_plugin_config(log_file: str) -> Dict[str, Any]:
+    """构造 download_progress 插件的 YAML 风格配置，供代码注入 option.plugins 使用"""
+    return {
+        "plugin": "download_progress",
+        "kwargs": {
+            "log_file": log_file,
+            "terminal_log_lines": 6,
+        },
+    }
 
 
 class DownloadManager:
@@ -144,7 +171,7 @@ class DownloadManager:
     ) -> None:
         """
         处理队列中的下载任务
-        串行下载各个章节，每章下载后立即收集图片，最后统一通过 img2pdf + pypdf 合并为单个 PDF。
+        通过 jmcomic 原生 download_album 整本下载，并注入 img2pdf 插件在下载完成后自动合并为单个 PDF。
         """
         temp_download_dir = None
         try:
@@ -167,66 +194,40 @@ class DownloadManager:
             album_tags = ",".join(getattr(album, "tags", []))
             chapter_count = len(episode_list)
 
-            # 安装进度追踪器（先注入 album 元数据，再安装日志处理器）
-            tracker = ProgressTracker(self.logger, manga_id)
-            tracker.setup_from_album(album)
-            original_executor = JmModuleConfig.EXECUTOR_LOG  # type: ignore
-            JmModuleConfig.EXECUTOR_LOG = tracker.make_log_handler()  # type: ignore
-            JmModuleConfig.FLAG_ENABLE_JM_LOG = True
-
-            # 创建累积 PDF（标题需清洗，避免文件名过长或含非法字符导致写入失败）
+            # 配置下载目录规则：临时目录下按 漫画ID/章节序号 组织图片目录，
+            # 供 img2pdf 插件在 after_album 阶段逐章收集图片合并为单个 PDF
             safe_title = sanitize_filename(album_name)
-            pdf_path = os.path.join(
-                download_path,
-                f"{manga_id}-{safe_title}({chapter_count}章).pdf",
-            )
-            pdf_writer = PdfWriter()
-            total_pages = 0
+            option.dir_rule = DirRule("Bd/{Aid}/{Pindex}", base_dir=temp_download_dir)
 
-            try:
-                for photo_id, photo_index, photo_title, *_ in episode_list:
-                    # 本章唯一临时目录（扁平，无子文件夹）
-                    chapter_dir = tempfile.mkdtemp(dir=temp_download_dir)
-                    option.dir_rule = DirRule("Bd", base_dir=chapter_dir)
-
-                    # 下载本章
-                    jmcomic.download_photo(photo_id, option=option)
-
-                    # 收集图片
-                    image_extensions = [".jpg", ".jpeg", ".png", ".gif", ".webp"]
-                    images = sorted(
-                        [
-                            os.path.join(chapter_dir, f)
-                            for f in os.listdir(chapter_dir)
-                            if any(f.lower().endswith(ext) for ext in image_extensions)
-                        ]
+            # 注入插件（若用户已在 option.yml 自定义同名插件则尊重用户配置）
+            after_album = option.plugins.get("after_album") or []
+            if not any(p.get("plugin") == "img2pdf" for p in after_album):
+                option.plugins["after_album"] = after_album + [
+                    build_pdf_plugin_config(
+                        manga_id, safe_title, chapter_count, download_path
                     )
+                ]
 
-                    if not images:
-                        self.logger.warning(f"章节 {photo_title} 中未找到图片，跳过")
-                        continue
+            after_init = option.plugins.get("after_init") or []
+            if not any(p.get("plugin") == "download_progress" for p in after_init):
+                log_file = os.path.join("logs", "jmcomic-download.log")
+                option.plugins["after_init"] = after_init + [
+                    build_progress_plugin_config(log_file)
+                ]
+                # create_option_by_file 已执行过 after_init 插件组，此处手动触发补充注入的插件
+                option.call_all_plugin("after_init", safe=True)
 
-                    # 本章图片 → 临时 PDF → 追加到累积 PDF
-                    chapter_pdf = os.path.join(chapter_dir, "chapter.pdf")
-                    with open(chapter_pdf, "wb") as f:
-                        img2pdf.convert(
-                            images,
-                            outputstream=f,
-                            rotation=img2pdf.Rotation.ifvalid,
-                        )
-                    pdf_writer.append(chapter_pdf)
-                    total_pages += len(images)
+            # 整本下载，完成后自动触发 img2pdf 插件合并 PDF（含删除原图）
+            result = jmcomic.download_album(manga_id, option=option)
+            if isinstance(result, set):
+                raise RuntimeError(f"漫画 {manga_id} 批量下载返回了集合，不符合预期")
 
-                    # 清理本章临时目录
-                    shutil.rmtree(chapter_dir)
-            finally:
-                JmModuleConfig.EXECUTOR_LOG = original_executor  # type: ignore
-                tracker.finish()
-
-            # 写出最终 PDF
-            with open(pdf_path, "wb") as f:
-                pdf_writer.write(f)
-            pdf_writer.close()
+            # 从下载清单获取实际生成的 PDF 路径与实际成功下载的图片数
+            pdf_paths = result.manifest.get_export_filepath_list("pdf")
+            if not pdf_paths:
+                raise RuntimeError(f"漫画 {manga_id} 下载完成但未生成PDF文件")
+            pdf_path = pdf_paths[0]
+            total_pages = len(result.manifest.image_filepath_list)
 
             # 持久化漫画元数据：首次下载时写入漫画记录与 PDF 文件记录
             if self.manga_repo is not None:

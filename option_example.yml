@@ -9,3 +9,18 @@ download:
     photo: 1  # 章节下载并发数，默认CPU线程数，调低以降低内存占用
   dir:
     base: ./downloads  # 基础下载目录, 不用改
+
+# 插件配置（以下为示例，bot 代码会自动注入等价的 img2pdf 与 download_progress 插件；
+# 如需自定义，可在此覆盖，代码会尊重用户配置）
+plugins:
+  after_init:
+    - plugin: download_progress  # 下载进度插件（依赖库 rich，已在依赖中声明）
+      kwargs:
+        log_file: ./logs/jmcomic-download.log  # jmcomic 下载日志输出文件
+        terminal_log_lines: 6
+  after_album:
+    - plugin: img2pdf  # 整本下载完成后，将全部章节图片合并为单个 PDF（依赖库 img2pdf）
+      kwargs:
+        pdf_dir: ./downloads  # PDF 输出目录
+        filename_rule: '{Aid}-{Aname}({Apage_count}章)'  # PDF 文件名规则（f-string 语法）
+        delete_original_file: true  # 合并成功后删除原始图片，节省磁盘空间
