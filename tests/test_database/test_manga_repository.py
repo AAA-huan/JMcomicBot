@@ -105,3 +105,41 @@ class TestManga:
         manga_repo.add_file("17", str(pdf), 0.5)
         assert manga_repo.delete_files("17") == 1
         assert manga_repo.list_files("17") == []
+
+    def test_find_by_author(self, manga_repo: MangaRepository) -> None:
+        manga_repo.upsert(
+            manga_id="20",
+            title="A",
+            author="しにま",
+            tags="",
+            chapter_count=1,
+            page_count=1,
+        )
+        manga_repo.upsert(
+            manga_id="21",
+            title="B",
+            author="しにま,佐々木篠",
+            tags="",
+            chapter_count=1,
+            page_count=1,
+        )
+        manga_repo.upsert(
+            manga_id="22",
+            title="C",
+            author="某人",
+            tags="",
+            chapter_count=1,
+            page_count=1,
+        )
+
+        # 模糊匹配命中包含该作者的漫画（含多作者逗号分隔）
+        result = manga_repo.find_by_author("しにま")
+        assert {m.id for m in result} == {"20", "21"}
+
+        # 单作者精确命中
+        result = manga_repo.find_by_author("某人")
+        assert {m.id for m in result} == {"22"}
+
+        # 无匹配时返回空列表
+        result = manga_repo.find_by_author("不存在作者")
+        assert result == []

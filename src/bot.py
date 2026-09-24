@@ -9,6 +9,7 @@ from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
 from src.database.repositories import (
     MangaRepository,
+    MangaTagRepository,
     PermissionRepository,
     TaskLogRepository,
     UserGroupRepository,
@@ -50,6 +51,7 @@ class MangaBot:
         self.task_log_repo = TaskLogRepository(self.database_manager)
         self.user_group_repo = UserGroupRepository(self.database_manager)
         self.permission_repo = PermissionRepository(self.database_manager)
+        self.tag_repo = MangaTagRepository(self.database_manager)
 
         # 挂载名称缓存持久化仓储
         NameCache.get_instance().attach_user_group_repo(self.user_group_repo)
@@ -76,6 +78,7 @@ class MangaBot:
             file_sender=self.message_manager.send_file,
             manga_repo=self.manga_repo,
             task_log_repo=self.task_log_repo,
+            tag_repo=self.tag_repo,
         )
 
         self.command_executor = CommandExecutor(
@@ -89,6 +92,7 @@ class MangaBot:
             send_status_provider=self.message_manager.get_send_queue_status,
             add_send_pending_count=self.message_manager.add_send_pending_count,
             manga_repo=self.manga_repo,
+            tag_repo=self.tag_repo,
         )
 
         self.SELF_ID: Optional[str] = None
@@ -126,6 +130,17 @@ class MangaBot:
         cleanup_failed_downloads(
             str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"])
         )
+
+        self._backfill_manga_tags()
+
+    def _backfill_manga_tags(self) -> None:
+        """回填已有漫画的标签到 tag 表（幂等，用于存量数据的标签查询兜底）"""
+        try:
+            count = self.tag_repo.sync_from_manga()
+            if count:
+                logger.info(f"标签表回填完成：共同步 {count} 条漫画标签记录")
+        except Exception as e:
+            logger.error(f"标签表回填失败: {e}")
 
     def _check_platform_compatibility(self) -> None:
         """检查操作系统兼容性"""

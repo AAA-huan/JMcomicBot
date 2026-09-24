@@ -5,6 +5,7 @@
 用法:
     uv run python scan_mangas.py              # 扫描并写入数据库
     uv run python scan_mangas.py --dry-run    # 仅预览将入库的内容，不写入
+    uv run python scan_mangas.py --enrich     # 扫描后联网补全作者/标签等元数据
 """
 
 import argparse
@@ -12,9 +13,13 @@ import sys
 
 from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
-from src.database.repositories import MangaRepository
+from src.database.repositories import MangaRepository, MangaTagRepository
 from src.logging.logger_config import logger
-from src.utils.manga_scanner import scan_download_dir, sync_scanned_to_db
+from src.utils.manga_scanner import (
+    enrich_metadata_from_jmcomic,
+    scan_download_dir,
+    sync_scanned_to_db,
+)
 
 
 def parse_args() -> argparse.Namespace:
@@ -24,6 +29,11 @@ def parse_args() -> argparse.Namespace:
         "--dry-run",
         action="store_true",
         help="仅预览将入库的漫画，不实际写入数据库",
+    )
+    parser.add_argument(
+        "--enrich",
+        action="store_true",
+        help="扫描后联网补全作者/标签等元数据",
     )
     return parser.parse_args()
 
@@ -52,13 +62,26 @@ def main() -> None:
         logger.info("没有扫描到漫画，无需同步")
         sys.exit(0)
 
+    # 可选：联网补全作者/标签等元数据
+    if args.enrich:
+        if args.dry_run:
+            logger.warning(
+                "--enrich 与 --dry-run 同时使用时，联网补全仍会写入 entry（不入库）"
+            )
+        logger.info("正在联网补全漫画元数据，请稍候……")
+        enriched = enrich_metadata_from_jmcomic(entries)
+        logger.info(f"联网补全元数据完成：成功补全 {enriched} 个漫画")
+
     # 初始化数据库并同步
     db_manager = DatabaseManager(db_path=db_path)
     db_manager.init_db()
     repo = MangaRepository(db_manager)
+    tag_repo = MangaTagRepository(db_manager)
 
     try:
-        result = sync_scanned_to_db(repo, entries, dry_run=args.dry_run)
+        result = sync_scanned_to_db(
+            repo, entries, dry_run=args.dry_run, tag_repo=tag_repo
+        )
         _print_result(result, dry_run=args.dry_run)
     finally:
         db_manager.close()

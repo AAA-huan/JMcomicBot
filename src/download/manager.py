@@ -10,7 +10,11 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 import jmcomic
 from jmcomic.jm_option import DirRule
 
-from src.database.repositories import MangaRepository, TaskLogRepository
+from src.database.repositories import (
+    MangaRepository,
+    MangaTagRepository,
+    TaskLogRepository,
+)
 from src.utils.helpers import sanitize_filename
 
 
@@ -57,6 +61,7 @@ class DownloadManager:
         file_sender: Optional[Callable[[str, str, Optional[str], bool], None]] = None,
         manga_repo: Optional[MangaRepository] = None,
         task_log_repo: Optional[TaskLogRepository] = None,
+        tag_repo: Optional[MangaTagRepository] = None,
     ) -> None:
         """
         初始化下载管理器
@@ -68,6 +73,7 @@ class DownloadManager:
             file_sender: 文件发送函数（用于低占用模式自动发送）
             manga_repo: 漫画元数据仓储，持久化漫画信息到数据库
             task_log_repo: 任务日志仓储，记录下载任务到数据库
+            tag_repo: 漫画标签仓储，下载时记录漫画标签
         """
         self.logger = logger_instance
         self.config = config
@@ -75,11 +81,15 @@ class DownloadManager:
         self.file_sender = file_sender
         self.manga_repo = manga_repo
         self.task_log_repo = task_log_repo
+        self.tag_repo = tag_repo
         self.download_queue: queue.Queue = queue.Queue()
         self.queue_running: bool = True
         self.queued_tasks: Dict[str, Tuple[str, Optional[str], bool]] = {}
         self.downloading_mangas: Dict[str, bool] = {}
         self._start_download_queue_processor()
+
+        # 取消下载任务标记：排队中尚未开始的任务可通过取消标记被跳过
+        self.cancelled_downloads: Dict[str, bool] = {}
 
         # 检查是否启用低占用模式
         self.low_memory_mode: bool = bool(self.config.get("LOW_MEMORY_MODE", False))
@@ -175,6 +185,14 @@ class DownloadManager:
         """
         temp_download_dir = None
         try:
+            # 若任务已被取消（排队期间被 -c 取消），直接跳过不执行下载
+            if manga_id in self.cancelled_downloads:
+                del self.cancelled_downloads[manga_id]
+                if manga_id in self.queued_tasks:
+                    del self.queued_tasks[manga_id]
+                self.logger.info(f"漫画ID {manga_id} 的下载任务已被取消，跳过")
+                return
+
             if manga_id in self.queued_tasks:
                 del self.queued_tasks[manga_id]
             self.downloading_mangas[manga_id] = True
@@ -248,6 +266,11 @@ class DownloadManager:
                     )
                 except Exception as e:
                     self.logger.error(f"持久化漫画元数据失败: {e}")
+            if self.tag_repo is not None:
+                try:
+                    self._sync_tags_to_db(manga_id, album_tags, pdf_path)
+                except Exception as e:
+                    self.logger.error(f"同步漫画标签失败: {e}")
             if self.task_log_repo is not None:
                 try:
                     self.task_log_repo.add(
@@ -314,6 +337,23 @@ class DownloadManager:
             if temp_download_dir is not None:
                 shutil.rmtree(temp_download_dir, ignore_errors=True)
 
+    def _sync_tags_to_db(self, manga_id: str, tags: str, pdf_path: str) -> None:
+        """将漫画标签及其PDF文件名同步到标签表
+
+        Args:
+            manga_id: 漫画ID
+            tags: 逗号分隔的标签字符串
+            pdf_path: PDF文件路径
+        """
+        if self.tag_repo is None or not tags:
+            return
+
+        pdf_name = os.path.basename(pdf_path)
+        for tag in tags.split(","):
+            tag = tag.strip()
+            if tag:
+                self.tag_repo.add(tag, manga_id, pdf_name)
+
     def download_manga(
         self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
     ) -> None:
@@ -331,6 +371,45 @@ class DownloadManager:
         self.queued_tasks[manga_id] = (user_id, group_id, private)
         self.download_queue.put((user_id, manga_id, group_id, private))
         self.logger.info(f"漫画ID {manga_id} 的下载任务已添加到队列")
+
+    def cancel_download(self, manga_id: str) -> bool:
+        """取消指定漫画的下载任务（仅对排队中尚未开始的任务生效）
+
+        Args:
+            manga_id: 漫画ID
+
+        Returns:
+            bool: 是否确实取消了排队中的任务
+        """
+        if manga_id in self.downloading_mangas:
+            self.logger.info(f"漫画ID {manga_id} 正在下载中，无法取消")
+            return False
+
+        self.cancelled_downloads[manga_id] = True
+        if manga_id in self.queued_tasks:
+            del self.queued_tasks[manga_id]
+            self.logger.info(f"漫画ID {manga_id} 的下载任务已取消")
+            return True
+
+        self.logger.info(f"漫画ID {manga_id} 不在下载队列中，无需取消")
+        return False
+
+    def cancel_all_downloads(self) -> int:
+        """取消所有排队中尚未开始的下载任务
+
+        Returns:
+            int: 实际取消的任务数量
+        """
+        cancelled_ids = [
+            manga_id
+            for manga_id in self.queued_tasks
+            if manga_id not in self.downloading_mangas
+        ]
+        for manga_id in cancelled_ids:
+            self.cancelled_downloads[manga_id] = True
+            del self.queued_tasks[manga_id]
+            self.logger.info(f"漫画ID {manga_id} 的下载任务已取消")
+        return len(cancelled_ids)
 
     def delete_manga(
         self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
@@ -379,6 +458,11 @@ class DownloadManager:
                     self.manga_repo.delete(manga_id)
                 except Exception as e:
                     self.logger.error(f"删除数据库漫画记录失败: {e}")
+            if self.tag_repo is not None:
+                try:
+                    self.tag_repo.delete_by_manga_id(manga_id)
+                except Exception as e:
+                    self.logger.error(f"删除漫画标签记录失败: {e}")
             if self.task_log_repo is not None:
                 try:
                     self.task_log_repo.add(

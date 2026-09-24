@@ -8,7 +8,7 @@
 import os
 import re
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import Any, List, Optional
 
 from src.database.repositories import MangaRepository
 from src.logging.logger_config import logger
@@ -25,6 +25,8 @@ class MangaScanEntry:
     manga_id: str
     title: str
     chapter_count: int = 0
+    author: str = ""
+    tags: str = ""
     files: List[tuple[str, float]] = field(default_factory=list)
 
     def add_file(self, file_path: str, file_size_mb: float) -> None:
@@ -146,19 +148,23 @@ def scan_download_dir(download_path: str) -> List[MangaScanEntry]:
     return entries
 
 
-def sync_scanned_to_db(
-    repo: MangaRepository, entries: List[MangaScanEntry], dry_run: bool = False
+def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
+    repo: MangaRepository,
+    entries: List[MangaScanEntry],
+    dry_run: bool = False,
+    tag_repo: Optional[Any] = None,
 ) -> ScanResult:
     """
     将扫描到的漫画条目同步到数据库
 
     对数据库已有记录仅更新可解析的标题与章节数，保留更完整的元数据；
-    对数据库中存在但文件已不存在的残留记录进行清理。
+    对数据库中存在但文件已不存在的残留记录进行清理（含对应的标签记录）。
 
     Args:
         repo: 漫画元数据仓储
         entries: 扫描到的漫画条目列表
         dry_run: 是否仅预览不写入数据库
+        tag_repo: 漫画标签仓储，存在时用于清理孤儿标签记录
 
     Returns:
         ScanResult: 同步结果统计
@@ -197,8 +203,8 @@ def sync_scanned_to_db(
         repo.upsert(
             manga_id=entry.manga_id,
             title=title,
-            author=existing.author if existing is not None else "",
-            tags=existing.tags if existing is not None else "",
+            author=entry.author or (existing.author if existing is not None else ""),
+            tags=entry.tags or (existing.tags if existing is not None else ""),
             chapter_count=chapter_count,
             page_count=existing.page_count if existing is not None else 0,
             status=status,
@@ -207,6 +213,15 @@ def sync_scanned_to_db(
         for file_path, file_size_mb in entry.files:
             repo.add_file(entry.manga_id, file_path, file_size_mb)
 
+        # 若本次扫描联网补全了标签，同步写入标签表
+        if not dry_run and tag_repo is not None and entry.tags:
+            for file_path, _ in entry.files:
+                pdf_name = os.path.basename(file_path)
+                for tag in entry.tags.split(","):
+                    tag = tag.strip()
+                    if tag:
+                        tag_repo.add(tag, entry.manga_id, pdf_name)
+
     # 清理数据库中文件已不存在的残留记录
     if not dry_run:
         db_ids = {manga.id for manga in repo.get_all()}
@@ -214,6 +229,8 @@ def sync_scanned_to_db(
         for manga_id in sorted(orphan_ids):
             logger.info(f"清理残留记录: 漫画ID {manga_id} 的PDF文件已不存在")
             repo.delete(manga_id)
+            if tag_repo is not None:
+                tag_repo.delete_by_manga_id(manga_id)
         result.deleted_count = len(orphan_ids)
     else:
         result.pending_cleanup_count = _count_pending_cleanup(repo, disk_ids)
@@ -230,3 +247,48 @@ def _count_pending_cleanup(repo: MangaRepository, disk_ids: set[str]) -> int:
     """统计数据库中存在但不在磁盘文件集合中的残留记录数量"""
     db_ids = {manga.id for manga in repo.get_all()}
     return len(db_ids - disk_ids)
+
+
+def enrich_metadata_from_jmcomic(
+    entries: List[MangaScanEntry],
+    option: Optional[Any] = None,
+    only_missing: bool = True,
+) -> int:
+    """联网补全扫描条目的作者与标签元数据
+
+    通过 jmcomic API 获取每个漫画的作者与标签，写入对应的 MangaScanEntry。
+    联网失败或目标不存在时跳过，不影响扫描结果。
+
+    Args:
+        entries: 扫描到的漫画条目列表（就地修改）
+        option: jmcomic 配置，缺省使用默认配置创建客户端
+        only_missing: 仅补全作者与标签均为空的条目，默认 True
+
+    Returns:
+        int: 成功补全的条目数量
+    """
+    # 延迟导入 jmcomic，避免基础扫描流程（无需联网）加载重量级依赖
+    import jmcomic  # pylint: disable=import-outside-toplevel
+
+    if option is None:
+        option = jmcomic.JmOption.default()
+    client = option.new_jm_client()
+
+    enriched_count = 0
+    for entry in entries:
+        if only_missing and entry.author and entry.tags:
+            continue
+
+        try:
+            album = client.get_album_detail(entry.manga_id)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            logger.warning(f"联网获取漫画 {entry.manga_id} 元数据失败，跳过: {e}")
+            continue
+
+        if not entry.title:
+            entry.title = album.name
+        entry.author = ",".join(getattr(album, "authors", []))
+        entry.tags = ",".join(getattr(album, "tags", []))
+        enriched_count += 1
+
+    return enriched_count

@@ -6,7 +6,7 @@ import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 from src.command.parser import CommandParser
-from src.database.repositories import MangaRepository
+from src.database.repositories import MangaRepository, MangaTagRepository
 from src.logging.logger_config import logger
 from src.utils.batch import (
     format_batch_response,
@@ -38,6 +38,7 @@ class CommandExecutor:
         send_status_provider: Optional[Callable[[], Dict[str, Any]]] = None,
         add_send_pending_count: Optional[Callable[[int], None]] = None,
         manga_repo: Optional[MangaRepository] = None,
+        tag_repo: Optional[MangaTagRepository] = None,
     ) -> None:
         """
         初始化命令执行器
@@ -53,6 +54,7 @@ class CommandExecutor:
             send_status_provider: 获取文件发送队列状态的函数，返回包含running等字段的字典
             add_send_pending_count: 增加/减少尚未入队的批次余量计数
             manga_repo: 漫画元数据仓储，用于数据库查询
+            tag_repo: 漫画标签仓储，用于按标签查询漫画
         """
         self.message_sender = message_sender
         self.file_sender = file_sender
@@ -64,9 +66,14 @@ class CommandExecutor:
         self.send_status_provider = send_status_provider
         self._add_send_pending_count = add_send_pending_count
         self.manga_repo = manga_repo
+        self.tag_repo = tag_repo
         self.command_parser = CommandParser()
         self.logger = logger
         self.SELF_ID: Optional[str] = None
+        # 发送取消标记：取消指定/全部发送任务（线程安全）
+        self._cancelled_sends: set = set()
+        self._cancel_send_all: bool = False
+        self._cancel_send_lock: threading.RLock = threading.RLock()
 
     def execute_command(
         self,
@@ -181,6 +188,12 @@ class CommandExecutor:
         help_text += "- 漫画下载 <漫画ID>：下载指定ID的漫画\n"
         help_text += "- 发送漫画 <漫画ID>：发送指定ID的已下载漫画\n"
         help_text += "- 查询漫画 <漫画ID>：查询指定ID的漫画是否已下载\n"
+        help_text += (
+            "- 查询漫画 -t <标签>：按标签查询已下载的漫画（多标签用逗号分隔，取交集）\n"
+        )
+        help_text += "- 查询漫画 -z <作者>：按作者查询已下载的漫画\n"
+        help_text += "- 漫画下载 -c <ID列表,可空>：取消下载（空表示取消全部）\n"
+        help_text += "- 发送漫画 -c <ID列表,可空>：取消发送（空表示取消全部）\n"
         help_text += "- 漫画列表：查询已下载的漫画（支持 -a 查看详情，-n 查看第n页）\n"
         help_text += "- 下载进度：查看当前漫画下载队列的状况\n"
         help_text += "- 发送进度：查看当前漫画发送队列的状况\n"
@@ -196,8 +209,14 @@ class CommandExecutor:
     def _handle_manga_download(
         self, user_id: str, params: str, group_id: Optional[str], private: bool
     ) -> None:
-        """处理漫画下载请求，支持批量下载"""
+        """处理漫画下载请求，支持批量下载；-c 参数用于取消下载"""
         try:
+            # 取消下载：-c（全部）/ -c id（单个）/ -c id1,id2（批量）
+            if params.strip().startswith("-c"):
+                cancel_params = params.strip()[2:].strip()
+                self._cancel_downloads(user_id, cancel_params, group_id, private)
+                return
+
             manga_ids, use_all = parse_batch_params(params)
 
             if use_all:
@@ -229,6 +248,41 @@ class CommandExecutor:
         except ValueError as e:
             self.logger.warning(f"下载参数解析失败: {e}")
             self.message_sender(user_id, str(e), group_id, private)
+
+    def _cancel_downloads(
+        self, user_id: str, cancel_params: str, group_id: Optional[str], private: bool
+    ) -> None:
+        """取消下载任务：空参数取消全部，否则取消指定漫画ID
+
+        Args:
+            user_id: 用户ID
+            cancel_params: -c 后的参数（空表示取消全部）
+            group_id: 群组ID
+            private: 是否为私聊
+        """
+        self.logger.info(f"取消下载请求 - 用户{user_id}, 参数: '{cancel_params}'")
+
+        if not cancel_params:
+            count = self.download_manager.cancel_all_downloads()
+            response = (
+                f"🛑 已取消全部下载任务（共 {count} 个）"
+                if count
+                else "✅ 当前没有待取消的下载任务"
+            )
+            self.message_sender(user_id, response, group_id, private)
+            return
+
+        manga_ids = validate_manga_ids(parse_batch_params(cancel_params)[0])
+        cancelled = []
+        for manga_id in manga_ids:
+            if self.download_manager.cancel_download(manga_id):
+                cancelled.append(manga_id)
+
+        if cancelled:
+            response = f"🛑 已取消 {len(cancelled)} 个下载任务：{', '.join(cancelled)}"
+        else:
+            response = "❌ 未找到待取消的下载任务（可能正在下载中或不在队列中）"
+        self.message_sender(user_id, response, group_id, private)
 
     def _download_manga_files(self, user_id, manga_ids, group_id, private):
         """漫画下载函数"""
@@ -287,8 +341,14 @@ class CommandExecutor:
     def _handle_manga_send(
         self, user_id: str, params: str, group_id: Optional[str], private: bool
     ) -> None:
-        """处理漫画发送请求，支持批量发送"""
+        """处理漫画发送请求，支持批量发送；-c 参数用于取消发送"""
         try:
+            # 取消发送：-c（全部）/ -c id（单个）/ -c id1,id2（批量）
+            if params.strip().startswith("-c"):
+                cancel_params = params.strip()[2:].strip()
+                self._cancel_sends(user_id, cancel_params, group_id, private)
+                return
+
             manga_ids, use_all = parse_batch_params(params)
 
             if use_all:
@@ -323,11 +383,55 @@ class CommandExecutor:
             self.logger.warning(f"发送参数解析失败: {e}")
             self.message_sender(user_id, str(e), group_id, private)
 
+    def _cancel_sends(
+        self, user_id: str, cancel_params: str, group_id: Optional[str], private: bool
+    ) -> None:
+        """取消发送任务：空参数取消全部，否则取消指定漫画ID
+
+        Args:
+            user_id: 用户ID
+            cancel_params: -c 后的参数（空表示取消全部）
+            group_id: 群组ID
+            private: 是否为私聊
+        """
+        self.logger.info(f"取消发送请求 - 用户{user_id}, 参数: '{cancel_params}'")
+
+        with self._cancel_send_lock:
+            if not cancel_params:
+                self._cancel_send_all = True
+                self._cancelled_sends.clear()
+                response = "🛑 已设置取消全部发送任务"
+                self.message_sender(user_id, response, group_id, private)
+                return
+
+            manga_ids = validate_manga_ids(parse_batch_params(cancel_params)[0])
+            self._cancelled_sends.update(manga_ids)
+            response = (
+                f"🛑 已设置取消 {len(manga_ids)} 个发送任务：{', '.join(manga_ids)}"
+            )
+            self.message_sender(user_id, response, group_id, private)
+
+    def _is_send_cancelled(self, manga_id: str) -> bool:
+        """检查指定漫画的发送是否被取消（线程安全）"""
+        with self._cancel_send_lock:
+            if self._cancel_send_all:
+                return True
+            return manga_id in self._cancelled_sends
+
+    def _reset_send_cancel(self) -> None:
+        """发送完成后重置取消标记（供单次发送流程复用）"""
+        with self._cancel_send_lock:
+            self._cancel_send_all = False
+            self._cancelled_sends.clear()
+
     def _send_manga_files(self, user_id, manga_ids, group_id, private):
         """发送漫画函数"""
         self.logger.info(
             f"处理批量漫画发送请求 - 用户{user_id}, 漫画ID数量: {len(manga_ids)}"
         )
+
+        # 开始新一批发送前重置取消标记，避免上一次的取消残留影响本次
+        self._reset_send_cancel()
 
         response = f"开始发送 {len(manga_ids)} 个漫画，请稍候...\n\n"
         response += "发送队列：\n"
@@ -356,6 +460,11 @@ class CommandExecutor:
 
         for manga_id in manga_ids:
             try:
+                # 发送被取消的漫画直接跳过
+                if self._is_send_cancelled(manga_id):
+                    results.append((manga_id, False, "已取消发送"))
+                    continue
+
                 if manga_id in self.download_manager.downloading_mangas:
                     results.append(
                         (
@@ -522,8 +631,57 @@ class CommandExecutor:
     def _handle_manga_query(
         self, user_id: str, params: str, group_id: Optional[str], private: bool
     ) -> None:
-        """查询指定漫画ID是否已下载，支持批量查询"""
+        """查询指定漫画ID是否已下载，或按标签/作者查询，支持批量查询"""
         try:
+            # 按标签查询（多标签用逗号分隔）
+            if params.strip().startswith("-t"):
+                tag_params = params.strip()[2:].strip()
+                tags = [
+                    tag.strip()
+                    for tag in tag_params.replace("，", ",").split(",")
+                    if tag.strip()
+                ]
+                if not tags:
+                    self.message_sender(
+                        user_id,
+                        "❌ 请提供要查询的标签，如：查询漫画 -t 萌系",
+                        group_id,
+                        private,
+                    )
+                    return
+                if self.tag_repo is None:
+                    self.message_sender(
+                        user_id,
+                        "❌ 标签查询功能未启用（未配置标签仓储）",
+                        group_id,
+                        private,
+                    )
+                    return
+                self._handle_manga_tag_query(user_id, tags, group_id, private)
+                return
+
+            # 按作者查询
+            if params.strip().startswith("-z"):
+                author = params.strip()[2:].strip()
+                if not author:
+                    self.message_sender(
+                        user_id,
+                        "❌ 请提供要查询的作者名，如：查询漫画 -z 作者名",
+                        group_id,
+                        private,
+                    )
+                    return
+                if self.manga_repo is None:
+                    self.message_sender(
+                        user_id,
+                        "❌ 作者查询功能未启用（未配置漫画仓储）",
+                        group_id,
+                        private,
+                    )
+                    return
+                self._handle_manga_author_query(user_id, author, group_id, private)
+                return
+
             manga_ids, use_all = parse_batch_params(params)
 
             if use_all:
@@ -594,6 +752,125 @@ class CommandExecutor:
                 manga_blocks.append(f"• {manga_id} — ❌ {str(e)}")
 
         pages = paginate_blocks(manga_blocks, "📊 查询结果")
+        for i, page in enumerate(pages):
+            self.message_sender(user_id, page, group_id, private)
+            if i < len(pages) - 1:
+                time.sleep(0.325)
+
+    def _handle_manga_tag_query(
+        self, user_id: str, tags: List[str], group_id: Optional[str], private: bool
+    ) -> None:
+        """按标签查询已下载的漫画，支持多标签联合查询（取交集）"""
+        self.logger.info(f"按标签查询漫画 - 用户{user_id}, 标签: {tags}")
+
+        if not tags:
+            self.message_sender(
+                user_id,
+                "❌ 参数错误！请提供要查询的标签，如：查询漫画 -t 萌系",
+                group_id,
+                private,
+            )
+            return
+
+        if self.tag_repo is None:
+            self.message_sender(
+                user_id,
+                "❌ 标签查询功能未启用（未配置标签仓储）",
+                group_id,
+                private,
+            )
+            return
+
+        try:
+            manga_ids = self.tag_repo.get_manga_ids_by_tags(tags)
+        except Exception as e:
+            self.logger.error(f"按标签查询漫画出错: {e}")
+            error_msg = f"❌ 标签查询失败：{str(e)}\n快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
+            self.message_sender(user_id, error_msg, group_id, private)
+            return
+
+        tag_desc = "、".join(tags)
+        if not manga_ids:
+            response = (
+                f"🏷️ 标签「{tag_desc}」下暂无已下载的漫画\n\n"
+                f"💡 提示：下载漫画时会自动记录其标签"
+            )
+            self.message_sender(user_id, response, group_id, private)
+            return
+
+        # 过滤数据库标签记录对应且真实存在于磁盘的 PDF
+        blocks: List[str] = []
+        download_path = str(self.config["MANGA_DOWNLOAD_PATH"])
+        for manga_id in sorted(manga_ids):
+            pdf_paths = find_manga_pdf(download_path, manga_id)
+            pdf_block = []
+            if pdf_paths:
+                for pdf_path in pdf_paths:
+                    file_size = get_file_size_mb(pdf_path)
+                    pdf_block.append(
+                        f"  - {os.path.basename(pdf_path)}（{file_size} MB）"
+                    )
+            else:
+                pdf_block.append("  - ❌ PDF文件不存在")
+
+            blocks.append(f"• {manga_id}\n" + "\n".join(pdf_block))
+
+        pages = paginate_blocks(blocks, f"🏷️ 标签「{tag_desc}」下的漫画")
+        for i, page in enumerate(pages):
+            self.message_sender(user_id, page, group_id, private)
+            if i < len(pages) - 1:
+                time.sleep(0.325)
+
+    def _handle_manga_author_query(
+        self, user_id: str, author: str, group_id: Optional[str], private: bool
+    ) -> None:
+        """按作者名查询已下载的漫画（作者字段为逗号分隔的多作者，模糊匹配）"""
+        self.logger.info(f"按作者查询漫画 - 用户{user_id}, 作者: {author}")
+
+        if self.manga_repo is None:
+            self.message_sender(
+                user_id,
+                "❌ 作者查询功能未启用（未配置漫画仓储）",
+                group_id,
+                private,
+            )
+            return
+
+        try:
+            mangas = self.manga_repo.find_by_author(author)
+        except Exception as e:
+            self.logger.error(f"按作者查询漫画出错: {e}")
+            error_msg = f"❌ 作者查询失败：{str(e)}\n快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
+            self.message_sender(user_id, error_msg, group_id, private)
+            return
+
+        if not mangas:
+            response = (
+                f"👤 作者「{author}」暂无已下载的漫画\n\n"
+                f"💡 提示：下载漫画时会自动记录其作者"
+            )
+            self.message_sender(user_id, response, group_id, private)
+            return
+
+        # 过滤数据库中记录对应且真实存在于磁盘的 PDF
+        blocks: List[str] = []
+        download_path = str(self.config["MANGA_DOWNLOAD_PATH"])
+        for manga in mangas:
+            pdf_paths = find_manga_pdf(download_path, manga.id)
+            pdf_block = []
+            if pdf_paths:
+                for pdf_path in pdf_paths:
+                    file_size = get_file_size_mb(pdf_path)
+                    pdf_block.append(
+                        f"  - {os.path.basename(pdf_path)}（{file_size} MB）"
+                    )
+            else:
+                pdf_block.append("  - ❌ PDF文件不存在")
+
+            title_part = f" {manga.title}" if manga.title else ""
+            blocks.append(f"• {manga.id}{title_part}\n" + "\n".join(pdf_block))
+
+        pages = paginate_blocks(blocks, f"👤 作者「{author}」的作品")
         for i, page in enumerate(pages):
             self.message_sender(user_id, page, group_id, private)
             if i < len(pages) - 1:

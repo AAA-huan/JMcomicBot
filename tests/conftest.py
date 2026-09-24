@@ -5,6 +5,7 @@ import pytest
 from src.database.database import DatabaseManager
 from src.database.repositories import (
     MangaRepository,
+    MangaTagRepository,
     PermissionRepository,
     SettingRepository,
     TaskLogRepository,
@@ -25,6 +26,12 @@ def db_manager(tmp_path) -> DatabaseManager:
 def manga_repo(db_manager: DatabaseManager) -> MangaRepository:
     """漫画元数据仓储实例"""
     return MangaRepository(db_manager)
+
+
+@pytest.fixture()
+def tag_repo(db_manager: DatabaseManager) -> MangaTagRepository:
+    """漫画标签仓储实例"""
+    return MangaTagRepository(db_manager)
 
 
 @pytest.fixture()

@@ -67,6 +67,23 @@ class MangaFile(Base):
     manga: Mapped["Manga"] = relationship(back_populates="files")
 
 
+class MangaTag(Base):
+    """漫画标签表，记录每个标签下对应的漫画PDF文件名"""
+
+    __tablename__ = "manga_tag"
+    __table_args__ = (
+        UniqueConstraint("tag", "manga_id", name="uq_manga_tag_tag_manga"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    tag: Mapped[str] = mapped_column(String(128), index=True, comment="标签名")
+    manga_id: Mapped[str] = mapped_column(String(32), index=True, comment="漫画ID")
+    pdf_name: Mapped[str] = mapped_column(String(512), comment="漫画PDF文件名")
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, default=datetime.now, comment="记录创建时间"
+    )
+
+
 class TaskLog(Base):
     """任务日志表，记录下载/发送/删除等任务的执行历史"""
 

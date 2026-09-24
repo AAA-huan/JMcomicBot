@@ -167,3 +167,54 @@ class TestSyncScannedToDb:
         assert result.pending_cleanup_count == 0
         assert manga_repo.get("350234") is None
         assert manga_repo.count() == 0
+
+
+class TestSyncScannedToDbTagCleanup:
+    """扫描同步时的标签表清理与写入测试"""
+
+    def test_cleanup_orphan_tags(
+        self, tmp_path, manga_repo: MangaRepository, tag_repo
+    ) -> None:
+        """清理残留漫画时，应同步删除对应的孤儿标签记录"""
+        os.makedirs(tmp_path, exist_ok=True)
+        pdf = tmp_path / "350234-漫画(3章).pdf"
+        pdf.write_bytes(b"%PDF")
+        entries = scan_download_dir(str(tmp_path))
+
+        # 预置残留漫画及其标签记录
+        manga_repo.upsert(
+            manga_id="999999",
+            title="残留漫画",
+            author="",
+            tags="萌系",
+            chapter_count=1,
+            page_count=0,
+        )
+        tag_repo.add("萌系", "999999", "999999-残留漫画(1章).pdf")
+
+        result = sync_scanned_to_db(manga_repo, entries, tag_repo=tag_repo)
+
+        assert result.deleted_count == 1
+        assert tag_repo.get_by_tag("萌系") == []
+
+    def test_enrich_entry_writes_tags(
+        self, tmp_path, manga_repo: MangaRepository, tag_repo
+    ) -> None:
+        """扫描条目联网补全了标签后，同步时应写入标签表"""
+        from src.utils.manga_scanner import MangaScanEntry
+
+        os.makedirs(tmp_path, exist_ok=True)
+        pdf = tmp_path / "350234-漫画(3章).pdf"
+        pdf.write_bytes(b"%PDF")
+        entries = scan_download_dir(str(tmp_path))
+
+        # 模拟联网补全：直接给 entry 填充作者与标签
+        for entry in entries:
+            entry.author = "しにま"
+            entry.tags = "萌系,纯爱"
+
+        sync_scanned_to_db(manga_repo, entries, tag_repo=tag_repo)
+
+        assert len(tag_repo.get_by_tag("萌系")) == 1
+        assert len(tag_repo.get_by_tag("纯爱")) == 1
+        assert tag_repo.get_by_tag("萌系")[0].pdf_name == "350234-漫画(3章).pdf"

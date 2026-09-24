@@ -155,6 +155,9 @@ env/
 *.temp
 jmbot待办.txt
 
+# kilo 工作树目录（工具本地数据）
+.kilo/
+
 # 配置文件（含本地敏感/个人配置）
 rule.txt
 option.yml

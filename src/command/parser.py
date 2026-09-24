@@ -127,6 +127,30 @@ class CommandParser:
                 return True
             return False
 
+        # query 命令支持按标签查询：-t 标签 或 -t 标签1,标签2（多标签联合查询）
+        if command == "query" and params.startswith("-t"):
+            tag_params = params[2:].strip()
+            if not tag_params:
+                return False
+            tags = [
+                tag.strip()
+                for tag in tag_params.replace("，", ",").replace(" ", ",").split(",")
+                if tag.strip()
+            ]
+            return bool(tags)
+
+        # query 命令支持按作者查询：-z 作者名
+        if command == "query" and params.startswith("-z"):
+            author_params = params[2:].strip()
+            return bool(author_params)
+
+        # download/send 命令支持取消：-c（全部）/ -c id（单个）/ -c id1,id2（批量）
+        if command in ("download", "send") and params.startswith("-c"):
+            cancel_params = params[2:].strip()
+            if not cancel_params:
+                return True
+            return self._validate_id_list(cancel_params)
+
         # 如果命令需要参数但没有提供参数，返回False
         if command not in no_param_commands and not params:
             return False
@@ -162,6 +186,20 @@ class CommandParser:
 
         return True
 
+    @staticmethod
+    def _validate_id_list(params: str) -> bool:
+        """校验逗号/句号/空格分隔的纯数字ID列表，与批量命令的解析规则保持一致"""
+        ids = [
+            id.strip()
+            for id in params.replace(",", " ")
+            .replace(".", " ")
+            .replace("，", " ")
+            .replace("。", " ")
+            .split()
+            if id.strip()
+        ]
+        return bool(ids) and all(id.isdigit() for id in ids)
+
     def get_error_message(self, command: str) -> str:
         """
         获取参数错误时的友好提示消息
@@ -176,17 +214,22 @@ class CommandParser:
             "download": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n"
             "支持格式：\n"
             "  - 单个ID：漫画下载 350234\n"
-            "  - 多个ID（逗句号分隔）：漫画下载 350234,350235,350236",
+            "  - 多个ID（逗句号分隔）：漫画下载 350234,350235,350236\n"
+            "  - 取消下载：漫画下载 -c <ID列表，可空>（空表示全部取消）",
             "send": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n"
             "支持格式：\n"
             "  - 单个ID：发送 350234\n"
             "  - 多个ID（逗句号分隔）：发送 350234,350235,350236\n"
-            "  - 所有已下载漫画：发送 --all",
+            "  - 所有已下载漫画：发送 --all\n"
+            "  - 取消发送：发送 -c <ID列表，可空>（空表示全部取消）",
             "query": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n"
             "支持格式：\n"
             "  - 单个ID：查询漫画 350234\n"
             "  - 多个ID（逗句号分隔）：查询漫画 350234,350235,350236\n"
-            "  - 所有已下载漫画：查询漫画 --all",
+            "  - 所有已下载漫画：查询漫画 --all\n"
+            "  - 按标签查询：查询漫画 -t 标签\n"
+            "  - 多标签联合查询：查询漫画 -t 标签1,标签2\n"
+            "  - 按作者查询：查询漫画 -z 作者名",
             "delete": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n"
             "支持格式：\n"
             "  - 单个ID：删除 350234\n"

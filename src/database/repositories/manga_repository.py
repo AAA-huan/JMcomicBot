@@ -65,6 +65,24 @@ class MangaRepository(BaseRepository):
             )
             return list(session.scalars(stmt).all())
 
+    def find_by_author(self, author: str) -> List[Manga]:
+        """按作者名模糊查询漫画（作者字段为逗号分隔的多作者）
+
+        Args:
+            author: 作者名
+
+        Returns:
+            List[Manga]: 该作者参与创作的漫画记录列表
+        """
+        with self._get_session() as session:
+            stmt = (
+                select(Manga)
+                .where(Manga.author.like(f"%{author}%"))
+                .options(selectinload(Manga.files))
+                .order_by(Manga.downloaded_at.desc())
+            )
+            return list(session.scalars(stmt).all())
+
     def upsert(  # pylint: disable=too-many-arguments
         self,
         manga_id: str,
