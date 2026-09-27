@@ -105,14 +105,38 @@ class TestSyncScannedToDb:
         assert new_manga.chapter_count == 3
         assert len(new_manga.files) == 1
 
-        # 已有记录仅更新标题/章节数，保留作者/标签/页数
+        # 已有记录：标题更新，但 DB 已有非零 chapter_count 不被文件名数值覆盖（P0-3 修复）
         existing_manga = manga_repo.get("350235")
         assert existing_manga is not None
         assert existing_manga.title == "新标题"
-        assert existing_manga.chapter_count == 5
+        assert existing_manga.chapter_count == 1  # 保留 DB 已有值，不被文件名"5章"覆盖
         assert existing_manga.author == "作者A"
         assert existing_manga.tags == "热血"
         assert existing_manga.page_count == 999
+
+    def test_db_chapter_count_preferred_over_filename(
+        self, tmp_path, manga_repo: MangaRepository
+    ) -> None:
+        """DB 已有非零 chapter_count 时，扫描不应用文件名数值覆盖（P0-3 修复）"""
+        os.makedirs(tmp_path, exist_ok=True)
+        # DB 有正确章节数 25，文件名数值（可能是页数）为 250
+        manga_repo.upsert(
+            manga_id="350236",
+            title="旧标题",
+            author="",
+            tags="",
+            chapter_count=25,
+            page_count=500,
+        )
+        (tmp_path / "350236-标题(250章).pdf").write_bytes(b"%PDF")
+
+        entries = scan_download_dir(str(tmp_path))
+        sync_scanned_to_db(manga_repo, entries)
+
+        manga = manga_repo.get("350236")
+        assert manga is not None
+        assert manga.chapter_count == 25  # 以 DB 为准
+        assert manga.page_count == 500  # 保留 DB 已有值，不被覆盖为 0
 
     def test_idempotent_rescan(self, tmp_path, manga_repo: MangaRepository) -> None:
         """重复扫描不应产生重复的文件记录"""

@@ -1,9 +1,12 @@
 """src.download.manager 中下载相关纯函数的测试"""
 
+from typing import Any, Dict, Optional
+
 from src.download.manager import (
     build_pdf_filename,
     build_pdf_plugin_config,
     build_progress_plugin_config,
+    inject_img2pdf_plugin,
 )
 
 
@@ -45,3 +48,50 @@ class TestBuildProgressPluginConfig:
         kwargs = config["kwargs"]
         assert kwargs["log_file"] == "logs/jm.log"
         assert kwargs["terminal_log_lines"] == 6
+
+
+class _FakeOption:
+    """仅暴露 plugins 字段的最小 option 替身，用于隔离测试插件注入逻辑"""
+
+    def __init__(self, plugins: Optional[Dict[str, Any]] = None) -> None:
+        self.plugins: Dict[str, Any] = plugins if plugins is not None else {}
+
+
+class TestInjectImg2pdfPlugin:
+    """inject_img2pdf_plugin 注入/覆盖逻辑测试（bug.md P0-2 根因回归）"""
+
+    def test_inject_when_absent(self) -> None:
+        """用户未配置 img2pdf 时，注入使用真实章节数的插件配置"""
+        option = _FakeOption()
+        inject_img2pdf_plugin(option, "123", "标题", 25, "/dl")
+
+        after_album = option.plugins["after_album"]
+        assert len(after_album) == 1
+        kwargs = after_album[0]["kwargs"]
+        assert kwargs["pdf_dir"] == "/dl"
+        assert kwargs["filename_rule"] == "123-标题(25章)"
+
+    def test_override_user_page_based_rule(self) -> None:
+        """用户已配置基于页数的 img2pdf 规则时，必须被真实章节数覆盖"""
+        option = _FakeOption(
+            {
+                "after_album": [
+                    {
+                        "plugin": "img2pdf",
+                        "kwargs": {
+                            "pdf_dir": "./downloads",
+                            "filename_rule": "{Aid}-{Aname}({Apage_count}章)",
+                            "delete_original_file": True,
+                        },
+                    }
+                ]
+            }
+        )
+        inject_img2pdf_plugin(option, "350234", "标题", 25, "/dl")
+
+        after_album = option.plugins["after_album"]
+        assert len(after_album) == 1  # 不重复注入
+        kwargs = after_album[0]["kwargs"]
+        assert kwargs["filename_rule"] == "350234-标题(25章)"  # 覆盖，不再是页数
+        assert kwargs["pdf_dir"] == "/dl"
+        assert kwargs["delete_original_file"] is True  # 保留用户其余配置

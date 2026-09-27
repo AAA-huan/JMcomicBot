@@ -184,10 +184,14 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
             continue
 
         if existing is not None:
-            # 计算本次要写入的值，保留数据库已有且当前无法解析的元数据
+            # 计算本次要写入的值，保留数据库已有且当前无法可靠解析的元数据。
+            # 注意：文件名中的数字可能是章节数也可能是页数（历史版本 bug 污染），
+            # 因此 DB 已有非零 chapter_count 时以 DB 为准，不覆盖。
             title = entry.title if entry.title else existing.title
             chapter_count = (
-                entry.chapter_count if entry.chapter_count else existing.chapter_count
+                existing.chapter_count
+                if existing.chapter_count
+                else entry.chapter_count
             )
             status = existing.status
             result.updated_count += 1
@@ -206,6 +210,7 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
             author=entry.author or (existing.author if existing is not None else ""),
             tags=entry.tags or (existing.tags if existing is not None else ""),
             chapter_count=chapter_count,
+            # 扫描无法从文件名获取真实页数，page_count 无法可靠得到，新记录保持 0
             page_count=existing.page_count if existing is not None else 0,
             status=status,
         )

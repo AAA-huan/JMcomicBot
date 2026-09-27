@@ -39,6 +39,40 @@ def build_pdf_plugin_config(
     }
 
 
+def inject_img2pdf_plugin(
+    option: Any, manga_id: str, safe_title: str, chapter_count: int, pdf_dir: str
+) -> None:
+    """向 jmcomic option 注入或覆盖 img2pdf 插件配置
+
+    无论用户是否已在 option.yml 自定义 img2pdf 插件，filename_rule 与 pdf_dir
+    始终由代码覆盖，确保 PDF 文件名使用真实章节数、输出到 pdf_dir 指定目录；
+    用户配置的 delete_original_file 等其余 kwargs 予以保留。
+
+    Args:
+        option: jmcomic 配置对象，其 plugins 会被就地修改
+        manga_id: 漫画ID
+        safe_title: 已清洗的安全标题
+        chapter_count: 真实章节数（来自 episode_list 长度）
+        pdf_dir: PDF 输出目录，始终覆盖为用户配置的下载目录
+    """
+    pdf_filename_rule = build_pdf_filename(manga_id, safe_title, chapter_count)
+    after_album = option.plugins.get("after_album") or []
+    img2pdf_plugin = next(
+        (p for p in after_album if p.get("plugin") == "img2pdf"), None
+    )
+    if img2pdf_plugin is None:
+        option.plugins["after_album"] = after_album + [
+            build_pdf_plugin_config(manga_id, safe_title, chapter_count, pdf_dir)
+        ]
+    else:
+        # 尊重用户对 delete_original_file 等的配置，但强制覆盖文件名规则与输出目录
+        img2pdf_plugin["kwargs"] = {
+            **img2pdf_plugin.get("kwargs", {}),
+            "pdf_dir": pdf_dir,
+            "filename_rule": pdf_filename_rule,
+        }
+
+
 def build_progress_plugin_config(log_file: str) -> Dict[str, Any]:
     """构造 download_progress 插件的 YAML 风格配置，供代码注入 option.plugins 使用"""
     return {
@@ -198,7 +232,12 @@ class DownloadManager:
             self.downloading_mangas[manga_id] = True
 
             self.logger.info(f"开始下载漫画ID: {manga_id}")
-            option = jmcomic.create_option_by_file("option.yml")
+            # option.yml 缺失时回退到 jmcomic 默认配置，避免下载全线失败
+            try:
+                option = jmcomic.create_option_by_file("option.yml")
+            except FileNotFoundError:
+                self.logger.warning("option.yml 不存在，使用 jmcomic 默认配置")
+                option = jmcomic.JmOption.default()
             download_path = str(self.config["MANGA_DOWNLOAD_PATH"])
             temp_download_dir = os.path.join(download_path, "temp")
             os.makedirs(temp_download_dir, exist_ok=True)
@@ -217,14 +256,11 @@ class DownloadManager:
             safe_title = sanitize_filename(album_name)
             option.dir_rule = DirRule("Bd/{Aid}/{Pindex}", base_dir=temp_download_dir)
 
-            # 注入插件（若用户已在 option.yml 自定义同名插件则尊重用户配置）
-            after_album = option.plugins.get("after_album") or []
-            if not any(p.get("plugin") == "img2pdf" for p in after_album):
-                option.plugins["after_album"] = after_album + [
-                    build_pdf_plugin_config(
-                        manga_id, safe_title, chapter_count, download_path
-                    )
-                ]
+            # 注入 img2pdf 插件：filename_rule 与 pdf_dir 始终由代码覆盖，
+            # 确保 PDF 文件名使用真实章节数、输出到 MANGA_DOWNLOAD_PATH 指定目录
+            inject_img2pdf_plugin(
+                option, manga_id, safe_title, chapter_count, download_path
+            )
 
             after_init = option.plugins.get("after_init") or []
             if not any(p.get("plugin") == "download_progress" for p in after_init):
