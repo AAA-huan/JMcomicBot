@@ -1,9 +1,10 @@
 """命令执行器，负责执行命令"""
 
-import os
-import time
-import threading
 from typing import Any, Callable, Dict, List, Optional, Tuple
+
+import os
+import threading
+import time
 
 from src.command.parser import CommandParser
 from src.database.repositories import MangaRepository, MangaTagRepository
@@ -173,6 +174,18 @@ class CommandExecutor:
             handler(user_id, args, group_id, private)
         else:
             self.logger.warning(f"未知命令: {cmd}")
+            error_msg = self.command_parser.get_error_message("unknown")
+            self.message_sender(user_id, error_msg, group_id, private)
+
+    def _get_chapter_count(self, manga_id: str, pdf_count: int) -> int:
+        """获取漫画章节数，数据库没有有效记录时回退为 PDF 文件数"""
+        if self.manga_repo is None:
+            return pdf_count
+
+        manga = self.manga_repo.get(manga_id)
+        if manga is None or manga.chapter_count <= 0:
+            return pdf_count
+        return manga.chapter_count
 
     def _send_help(
         self, user_id: str, args: str, group_id: Optional[str], private: bool
@@ -315,9 +328,8 @@ class CommandExecutor:
                     str(self.config["MANGA_DOWNLOAD_PATH"]), manga_id
                 )
                 if pdf_paths:
-                    chapter_info = (
-                        f"（共 {len(pdf_paths)} 个章节）" if len(pdf_paths) > 1 else ""
-                    )
+                    chapter_count = self._get_chapter_count(manga_id, len(pdf_paths))
+                    chapter_info = f"（共 {chapter_count} 个章节）"
                     manga_blocks.append(f"• {manga_id} — ✅ 已下载{chapter_info}")
                     continue
 
@@ -505,7 +517,8 @@ class CommandExecutor:
                     (
                         manga_id,
                         success_count > 0,
-                        f"发送成功 {success_count}/{len(pdf_paths)} 个章节",
+                        f"发送成功 {success_count}/{len(pdf_paths)} 个PDF文件"
+                        f"（共 {self._get_chapter_count(manga_id, len(pdf_paths))} 个章节）",
                     )
                 )
 
@@ -638,7 +651,9 @@ class CommandExecutor:
                 tag_params = params.strip()[2:].strip()
                 tags = [
                     tag.strip()
-                    for tag in tag_params.replace("，", ",").split(",")
+                    for tag in tag_params.replace("，", ",")
+                    .replace(" ", ",")
+                    .split(",")
                     if tag.strip()
                 ]
                 if not tags:
@@ -734,9 +749,10 @@ class CommandExecutor:
                 )
                 if pdf_paths:
                     total_size_mb = sum(get_file_size_mb(p) for p in pdf_paths)
+                    chapter_count = self._get_chapter_count(manga_id, len(pdf_paths))
                     block = (
                         f"• {manga_id} — ✅ 已下载"
-                        f"（{len(pdf_paths)} 个章节，共 {total_size_mb} MB）"
+                        f"（{chapter_count} 个章节，共 {total_size_mb} MB）"
                     )
                     for pdf_path in pdf_paths:
                         file_size = get_file_size_mb(pdf_path)
@@ -1144,6 +1160,9 @@ class CommandExecutor:
                 for pdf_path in pdf_paths:
                     os.remove(pdf_path)
                     self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")
+
+                # 与单个删除共用仓储清理逻辑，避免遗留漫画、文件及标签记录
+                self.download_manager.delete_manga_records(manga_id)
                 results.append((manga_id, True, f"删除成功（{len(pdf_paths)}个文件）"))
             except Exception as e:
                 self.logger.error(f"删除漫画 {manga_id} 出错: {e}")

@@ -488,17 +488,8 @@ class DownloadManager:
                 self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")
                 deleted_count += 1
 
-            # 同步删除数据库中的漫画元数据与PDF文件记录
-            if self.manga_repo is not None:
-                try:
-                    self.manga_repo.delete(manga_id)
-                except Exception as e:
-                    self.logger.error(f"删除数据库漫画记录失败: {e}")
-            if self.tag_repo is not None:
-                try:
-                    self.tag_repo.delete_by_manga_id(manga_id)
-                except Exception as e:
-                    self.logger.error(f"删除漫画标签记录失败: {e}")
+            # 同步删除数据库中的漫画元数据、PDF文件记录及标签记录
+            self.delete_manga_records(manga_id)
             if self.task_log_repo is not None:
                 try:
                     self.task_log_repo.add(
@@ -522,3 +513,17 @@ class DownloadManager:
             error_msg = f"❌ 删除失败：{str(e)}\n快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
             self.message_sender(user_id, error_msg, group_id, private)
             raise
+
+    def delete_manga_records(self, manga_id: str) -> None:
+        """删除指定漫画的元数据、PDF 文件记录及标签记录
+
+        漫画文件记录由 MangaRepository 的级联关系一并删除。该方法供单个删除
+        与批量删除共同调用，仓储异常会继续抛出，防止磁盘与数据库状态静默失配。
+
+        Args:
+            manga_id: 要清理数据库记录的漫画ID
+        """
+        if self.manga_repo is not None:
+            self.manga_repo.delete(manga_id)
+        if self.tag_repo is not None:
+            self.tag_repo.delete_by_manga_id(manga_id)
