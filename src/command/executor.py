@@ -37,7 +37,6 @@ class CommandExecutor:
         permission_manager: Any,
         resend_handler: Optional[Callable[[str, Optional[str], bool], int]] = None,
         send_status_provider: Optional[Callable[[], Dict[str, Any]]] = None,
-        add_send_pending_count: Optional[Callable[[int], None]] = None,
         manga_repo: Optional[MangaRepository] = None,
         tag_repo: Optional[MangaTagRepository] = None,
     ) -> None:
@@ -53,7 +52,6 @@ class CommandExecutor:
             permission_manager: 权限管理器实例
             resend_handler: 重发断线留存文件的处理函数，入参(user_id, group_id, private)，返回重发数量
             send_status_provider: 获取文件发送队列状态的函数，返回包含running等字段的字典
-            add_send_pending_count: 增加/减少尚未入队的批次余量计数
             manga_repo: 漫画元数据仓储，用于数据库查询
             tag_repo: 漫画标签仓储，用于按标签查询漫画
         """
@@ -65,7 +63,6 @@ class CommandExecutor:
         self.permission_manager = permission_manager
         self.resend_handler = resend_handler
         self.send_status_provider = send_status_provider
-        self._add_send_pending_count = add_send_pending_count
         self.manga_repo = manga_repo
         self.tag_repo = tag_repo
         self.command_parser = CommandParser()
@@ -207,7 +204,7 @@ class CommandExecutor:
         help_text += "- 查询漫画 -z <作者>：按作者查询已下载的漫画\n"
         help_text += "- 漫画下载 -c <ID列表,可空>：取消下载（空表示取消全部）\n"
         help_text += "- 发送漫画 -c <ID列表,可空>：取消发送（空表示取消全部）\n"
-        help_text += "- 漫画列表：查询已下载的漫画（支持 -a 查看详情，-n 查看第n页）\n"
+        help_text += "- 漫画列表：查询已下载漫画（-a 列出全部，-2 查看第2页）\n"
         help_text += "- 下载进度：查看当前漫画下载队列的状况\n"
         help_text += "- 发送进度：查看当前漫画发送队列的状况\n"
         help_text += "- 删除漫画 <漫画ID>：删除指定ID的已下载漫画（仅限特定用户）\n"
@@ -453,18 +450,16 @@ class CommandExecutor:
             response += f"  ... 还有 {len(manga_ids) - 10} 个\n"
         self.message_sender(user_id, response, group_id, private)
 
-        # 统计待发送文件总数，预登记到批次余量
-        if self._add_send_pending_count:
-            total_files = 0
-            for manga_id in manga_ids:
-                if manga_id in self.download_manager.downloading_mangas:
-                    continue
-                pdf_paths = find_manga_pdf(
-                    str(self.config["MANGA_DOWNLOAD_PATH"]), manga_id
-                )
-                if pdf_paths:
-                    total_files += len(pdf_paths)
-            self._add_send_pending_count(total_files)
+        # 发送进度按 PDF 文件计数，预先统计本批次实际存在的文件总数
+        total_files = 0
+        for manga_id in manga_ids:
+            if manga_id in self.download_manager.downloading_mangas:
+                continue
+            pdf_paths = find_manga_pdf(
+                str(self.config["MANGA_DOWNLOAD_PATH"]), manga_id
+            )
+            if pdf_paths:
+                total_files += len(pdf_paths)
 
         batch_size = int(self.config.get("FILE_SEND_BATCH_SIZE", 10))
         results: List[Tuple[str, bool, str]] = []
@@ -500,18 +495,16 @@ class CommandExecutor:
                         self.file_sender(user_id, pdf_path, group_id, private)
                         success_count += 1
                         file_count += 1
+
+                        if file_count % batch_size == 0 and file_count != total_files:
+                            progress = f"⏳ 发送进度：已发送 {file_count} 个文件，继续发送中..."
+                            self.message_sender(user_id, progress, group_id, private)
+                            batch_interval = float(
+                                self.config.get("FILE_SEND_BATCH_INTERVAL", 7)
+                            )
+                            time.sleep(batch_interval)
                     except Exception as e:
                         self.logger.error(f"发送章节文件失败: {pdf_path}, {e}")
-
-                    if file_count % batch_size == 0 and file_count != len(manga_ids):
-                        progress = (
-                            f"⏳ 发送进度：已发送 {file_count} 个文件，继续发送中..."
-                        )
-                        self.message_sender(user_id, progress, group_id, private)
-                        batch_interval = float(
-                            self.config.get("FILE_SEND_BATCH_INTERVAL", 7)
-                        )
-                        time.sleep(batch_interval)
 
                 results.append(
                     (
@@ -560,7 +553,7 @@ class CommandExecutor:
                 self.message_sender(user_id, response, group_id, private)
                 return
 
-            # 模式 2：-a / --all → 发送全部页面
+            # 模式 2：-a / --all → 发送全部条目
             manga_blocks = [
                 f"  {i + 1}. {name} ({size} MB)"
                 for i, (name, size) in enumerate(pdf_files)
@@ -579,7 +572,7 @@ class CommandExecutor:
                         time.sleep(0.325)
                 return
 
-            # 模式 3：-n → 发送第 n 页
+            # 模式 3：-<页码> → 发送指定页
             page_num = int(params[1:])
             page_size = 50
             total_pages = (pdf_count + page_size - 1) // page_size

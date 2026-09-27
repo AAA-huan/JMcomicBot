@@ -5,10 +5,11 @@
 同时支持清理数据库中存在但文件已不存在的残留记录。
 """
 
-import os
-import re
 from dataclasses import dataclass, field
 from typing import Any, List, Optional
+
+import os
+import re
 
 from src.database.repositories import MangaRepository
 from src.logging.logger_config import logger
@@ -37,11 +38,6 @@ class MangaScanEntry:
             file_size_mb: 文件大小(MB)
         """
         self.files.append((file_path, file_size_mb))
-
-    @property
-    def max_chapter_count(self) -> int:
-        """所有文件章节数的最大值"""
-        return self.chapter_count
 
 
 @dataclass
@@ -177,11 +173,8 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
 
     for entry in entries:
         disk_ids.add(entry.manga_id)
-        existing = repo.get(entry.manga_id) if not dry_run else None
-
-        if existing is None and dry_run:
-            result.new_count += 1
-            continue
+        # dry-run 同样查询数据库，以准确区分新增与更新，但不会执行任何写入。
+        existing = repo.get(entry.manga_id)
 
         if existing is not None:
             # 计算本次要写入的值，保留数据库已有且当前无法可靠解析的元数据。
@@ -267,7 +260,7 @@ def enrich_metadata_from_jmcomic(
     Args:
         entries: 扫描到的漫画条目列表（就地修改）
         option: jmcomic 配置，缺省使用默认配置创建客户端
-        only_missing: 仅补全作者与标签均为空的条目，默认 True
+        only_missing: 仅处理作者或标签存在空值的条目，成功后同时刷新两项，默认 True
 
     Returns:
         int: 成功补全的条目数量

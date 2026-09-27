@@ -1,8 +1,11 @@
+"""JMComic QQ 机器人的组件组装与运行入口"""
+
+from typing import Any, Dict, Optional
+
 import platform
 import signal
 import sys
 import time
-from typing import Any, Dict, Optional
 
 from src.command.executor import CommandExecutor
 from src.config.manager import ConfigManager
@@ -90,7 +93,6 @@ class MangaBot:
             permission_manager=self.permission_manager,
             resend_handler=self.message_manager.resend_pending_files,
             send_status_provider=self.message_manager.get_send_queue_status,
-            add_send_pending_count=self.message_manager.add_send_pending_count,
             manga_repo=self.manga_repo,
             tag_repo=self.tag_repo,
         )
@@ -127,11 +129,17 @@ class MangaBot:
 
         logger.info("命令解析器初始化完成")
 
-        cleanup_failed_downloads(
-            str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"])
-        )
+        self._cleanup_download_directory()
 
         self._backfill_manga_tags()
+
+    def _cleanup_download_directory(self) -> None:
+        """清理失败下载；目录意外缺失时记录原因并继续启动"""
+        download_path = str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"])
+        try:
+            cleanup_failed_downloads(download_path)
+        except FileNotFoundError as e:
+            logger.warning(f"启动清理已跳过: {e}")
 
     def _backfill_manga_tags(self) -> None:
         """回填已有漫画的标签到 tag 表（幂等，用于存量数据的标签查询兜底）"""

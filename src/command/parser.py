@@ -1,6 +1,6 @@
 """命令解析器，负责解析和验证用户的输入"""
 
-from typing import Dict, List, Optional, Pattern, Tuple
+from typing import Dict, List, Tuple
 
 
 class CommandParser:
@@ -117,7 +117,7 @@ class CommandParser:
         if command in no_param_commands:
             return True
 
-        # list 命令参数校验：无参数(概要) / -a(全部) / -n(第n页)
+        # list 命令参数校验：无参数(概要) / -a(全部) / -<页码>(指定页)
         if command == "list":
             if not params:
                 return True
@@ -239,8 +239,8 @@ class CommandParser:
             "list": "❌ 参数错误！'漫画列表'命令参数格式错误\n"
             "支持格式：\n"
             "  - 无参数：漫画列表（查看概要信息）\n"
-            "  - 查看详情：漫画列表 -a\n"
-            "  - 查看第n页：漫画列表 -n（n为页码）",
+            "  - 列出全部：漫画列表 -a\n"
+            "  - 查看第2页：漫画列表 -2",
             "version": "❌ 命令格式错误！'漫画版本'命令不需要额外参数\n直接输入：漫画版本",
             "progress": "❌ 命令格式错误！'下载进度'命令不需要额外参数\n直接输入：下载进度",
             "send_progress": "❌ 命令格式错误！'发送进度'命令不需要额外参数\n直接输入：发送进度",

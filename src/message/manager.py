@@ -1,12 +1,13 @@
 """消息管理器，负责发送文本消息和文件"""
 
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
 import json
 import os
 import queue
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
 
 from src.database.repositories import TaskLogRepository
 from src.logging.logger_config import logger
@@ -60,19 +61,7 @@ class MessageManager:
         # 未完成的任务总数（队列中等待 + 正在处理的），替代 qsize()
         self._queue_count: int = 0
         self._queue_count_lock: threading.Lock = threading.Lock()
-        # 尚未入队的批次余量（由 add_send_pending_count  +/- 管理）
-        self._batch_pending: int = 0
-        self._batch_pending_lock: threading.Lock = threading.Lock()
         self._start_file_queue_worker()
-
-    def add_send_pending_count(self, delta: int) -> None:
-        """增加/减少尚未入队的批次余量计数
-
-        Args:
-            delta: 增量（正数增加，负数减少）
-        """
-        with self._batch_pending_lock:
-            self._batch_pending = max(0, self._batch_pending + delta)
 
     def get_send_queue_status(self) -> Dict[str, Any]:
         """获取当前文件发送队列状态
@@ -82,11 +71,9 @@ class MessageManager:
         """
         with self._queue_count_lock:
             qc = self._queue_count
-        with self._batch_pending_lock:
-            bp = self._batch_pending
         return {
             "running": self._queue_running,
-            "queue_size": qc + bp,
+            "queue_size": qc,
             "current_file": self._current_sending_file,
         }
 
@@ -174,10 +161,14 @@ class MessageManager:
             self._current_sending_file = None
             with self._queue_count_lock:
                 self._queue_count -= 1
-            with self._batch_pending_lock:
-                self._batch_pending = max(0, self._batch_pending - 1)
             with self._result_cond:
                 self._result_cond.notify_all()
+
+    def _enqueue_file_task(self, task: SendTask) -> None:
+        """登记并加入文件发送队列，确保所有入队路径使用相同计数规则"""
+        with self._queue_count_lock:
+            self._queue_count += 1
+        self._file_queue.put(task)
 
     def _send_file_with_retry(self, task: SendTask) -> None:
         """尝试发送文件，连接断开时等待重连并重试，超时抛出异常"""
@@ -291,9 +282,7 @@ class MessageManager:
             group_id=group_id,
             private=private,
         )
-        with self._queue_count_lock:
-            self._queue_count += 1
-        self._file_queue.put(task)
+        self._enqueue_file_task(task)
 
         with self._result_cond:
             while task.status == "pending":
@@ -494,7 +483,7 @@ class MessageManager:
         count = 0
         for entry in resend_entries:
             self.logger.info(f"重发文件: {entry['content']}")
-            self._file_queue.put(
+            self._enqueue_file_task(
                 SendTask(
                     user_id=entry["user_id"],
                     file_path=entry["content"],

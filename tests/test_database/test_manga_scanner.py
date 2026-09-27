@@ -192,6 +192,33 @@ class TestSyncScannedToDb:
         assert manga_repo.get("350234") is None
         assert manga_repo.count() == 0
 
+    def test_dry_run_distinguishes_new_and_updated(
+        self, tmp_path, manga_repo: MangaRepository
+    ) -> None:
+        """预览模式应读取现有记录，准确统计新增与更新且不写入"""
+        existing_path = tmp_path / "350234-新标题(3章).pdf"
+        new_path = tmp_path / "350235-新漫画(2章).pdf"
+        existing_path.write_bytes(b"%PDF")
+        new_path.write_bytes(b"%PDF")
+        manga_repo.upsert(
+            manga_id="350234",
+            title="旧标题",
+            author="作者",
+            tags="纯爱",
+            chapter_count=3,
+            page_count=100,
+        )
+
+        entries = scan_download_dir(str(tmp_path))
+        result = sync_scanned_to_db(manga_repo, entries, dry_run=True)
+
+        assert result.new_count == 1
+        assert result.updated_count == 1
+        assert manga_repo.count() == 1
+        existing = manga_repo.get("350234")
+        assert existing is not None
+        assert existing.title == "旧标题"
+
 
 class TestSyncScannedToDbTagCleanup:
     """扫描同步时的标签表清理与写入测试"""

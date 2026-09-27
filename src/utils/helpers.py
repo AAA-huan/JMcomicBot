@@ -1,7 +1,10 @@
+"""文件名处理、下载目录清理与漫画文件查找工具"""
+
+from typing import List, Tuple
+
 import os
 import re
 import shutil
-from typing import List, Tuple
 
 from src.logging.logger_config import logger
 
@@ -73,7 +76,7 @@ def cleanup_failed_downloads(download_path: str) -> int:
     logger.info(f"开始清理下载目录: {download_path}")
 
     if not os.path.exists(download_path):
-        logger.info("下载目录不存在，跳过清理")
+        logger.warning("下载目录不存在，无法执行清理")
         raise FileNotFoundError(f"下载目录不存在: {download_path}")
 
     cleaned_count = 0

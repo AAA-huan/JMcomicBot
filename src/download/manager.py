@@ -1,11 +1,12 @@
 """下载管理器模块，负责漫画下载功能并对下载队列进行管理"""
 
+from typing import Any, Callable, Dict, List, Optional, Tuple
+
 import os
 import queue
 import shutil
 import threading
 import time
-from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import jmcomic
 from jmcomic.jm_option import DirRule
@@ -190,7 +191,7 @@ class DownloadManager:
 
         Args:
             file_path: 要删除的文件路径
-            delay_minutes: 延迟分钟数，默认3分钟
+            delay_minutes: 延迟分钟数，默认5分钟
         """
 
         def delete_after_delay() -> None:
