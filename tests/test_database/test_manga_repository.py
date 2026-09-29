@@ -183,6 +183,34 @@ class TestManga:
         with pytest.raises(ValueError, match="超出下载根目录"):
             repository.resolve_file_path(manga_file.id, str(download_root))
 
+    def test_backfill_relative_paths_marks_unsafe_files(
+        self, db_manager, tmp_path
+    ) -> None:
+        download_root = tmp_path / "downloads"
+        download_root.mkdir()
+        inside_file = download_root / "inside.pdf"
+        inside_file.write_bytes(b"%PDF")
+        outside_file = tmp_path / "outside.pdf"
+        outside_file.write_bytes(b"%PDF")
+        repository = MangaRepository(db_manager)
+        for manga_id, file_path in (("28", inside_file), ("29", outside_file)):
+            repository.upsert(
+                manga_id=manga_id,
+                title="标题",
+                author="",
+                tags="",
+                chapter_count=1,
+                page_count=1,
+            )
+            repository.add_file(manga_id, str(file_path), 0.1)
+
+        updated_count, invalid_count = repository.backfill_relative_paths(
+            str(download_root)
+        )
+        assert (updated_count, invalid_count) == (1, 1)
+        assert repository.list_files("28")[0].relative_path == "inside.pdf"
+        assert repository.list_files("29")[0].status == "invalid_path"
+
     def test_delete(self, manga_repo: MangaRepository) -> None:
         manga_repo.upsert(
             manga_id="16", title="A", author="", tags="", chapter_count=1, page_count=1

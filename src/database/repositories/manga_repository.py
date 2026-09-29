@@ -292,6 +292,36 @@ class MangaRepository(BaseRepository):
                 raise FileNotFoundError(f"文件不存在: {resolved_path}")
             return resolved_path
 
+    def backfill_relative_paths(self, download_root: str) -> tuple[int, int]:
+        """回填旧绝对路径并标记无法安全转换的文件。"""
+        root = Path(download_root).resolve()
+        updated_count = 0
+        invalid_count = 0
+        with self._get_session() as session:
+            files = list(session.scalars(select(MangaFile)).all())
+            for manga_file in files:
+                if manga_file.relative_path:
+                    continue
+                resolved_path = Path(manga_file.file_path).resolve()
+                try:
+                    relative_path = resolved_path.relative_to(root)
+                except ValueError:
+                    manga_file.status = "invalid_path"
+                    manga_file.updated_at = datetime.now()
+                    invalid_count += 1
+                    continue
+                if not resolved_path.is_file():
+                    manga_file.status = "invalid_path"
+                    manga_file.updated_at = datetime.now()
+                    invalid_count += 1
+                    continue
+                manga_file.relative_path = str(relative_path)
+                manga_file.status = "ready"
+                manga_file.updated_at = datetime.now()
+                updated_count += 1
+            session.commit()
+        return updated_count, invalid_count
+
     def delete_files(self, manga_id: str) -> int:
         """删除指定漫画的全部 PDF 文件记录
 
