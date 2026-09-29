@@ -11,7 +11,7 @@ from alembic import command
 from alembic.config import Config
 from sqlalchemy import Engine, text
 
-CURRENT_SCHEMA_VERSION = 1
+CURRENT_SCHEMA_VERSION = 16
 
 
 def backup_database(engine: Engine, destination: str) -> None:

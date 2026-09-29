@@ -114,7 +114,7 @@ class TestDatabaseManager:
             ).scalar()
 
         assert alembic_version == "0016_add_status_checks"
-        assert version == 1
+        assert version == 16
 
     def test_unknown_schema_version_is_rejected(self, tmp_path) -> None:
         """数据库版本高于代码支持范围时必须停止初始化"""
