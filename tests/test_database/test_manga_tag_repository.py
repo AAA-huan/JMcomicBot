@@ -15,6 +15,7 @@ class TestMangaTag:
         assert len(records) == 2
         assert {r.manga_id for r in records} == {"100", "101"}
         assert records[0].pdf_name.endswith(".pdf")
+        assert all(record.tag_id is not None for record in records)
 
     def test_add_idempotent(self, tag_repo: MangaTagRepository) -> None:
         tag_repo.add("萌系", "100", "100-萌漫画(1章).pdf")

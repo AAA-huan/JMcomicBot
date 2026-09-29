@@ -6,7 +6,7 @@ from typing import List, Optional, Set
 from sqlalchemy import delete, select
 
 from src.database.database import DatabaseManager
-from src.database.models import Manga, MangaTag
+from src.database.models import Manga, MangaTag, Tag
 from src.database.repositories._base import BaseRepository
 
 # pylint: disable=arguments-differ
@@ -58,14 +58,31 @@ class MangaTagRepository(BaseRepository):
             pdf_name: 漫画PDF文件名
         """
         with self._get_session() as session:
+            normalized_name = " ".join(tag.split()).casefold()
+            tag_definition = session.scalar(
+                select(Tag).where(Tag.normalized_name == normalized_name)
+            )
+            if tag_definition is None:
+                tag_definition = Tag(name=tag.strip(), normalized_name=normalized_name)
+                session.add(tag_definition)
+                session.flush()
             existing = session.scalar(
                 select(MangaTag).where(
                     MangaTag.tag == tag, MangaTag.manga_id == manga_id
                 )
             )
             if existing is None:
-                session.add(MangaTag(tag=tag, manga_id=manga_id, pdf_name=pdf_name))
-                session.commit()
+                session.add(
+                    MangaTag(
+                        tag=tag,
+                        tag_id=tag_definition.id,
+                        manga_id=manga_id,
+                        pdf_name=pdf_name,
+                    )
+                )
+            else:
+                existing.tag_id = tag_definition.id
+            session.commit()
 
     def get_by_tag(self, tag: str) -> List[MangaTag]:
         """按标签查询其下的漫画PDF记录
@@ -151,8 +168,26 @@ class MangaTagRepository(BaseRepository):
                         )
                     )
                     if existing is None:
+                        normalized_name = " ".join(tag.split()).casefold()
+                        tag_definition = session.scalar(
+                            select(Tag).where(
+                                Tag.normalized_name == normalized_name
+                            )
+                        )
+                        if tag_definition is None:
+                            tag_definition = Tag(
+                                name=tag,
+                                normalized_name=normalized_name,
+                            )
+                            session.add(tag_definition)
+                            session.flush()
                         session.add(
-                            MangaTag(tag=tag, manga_id=manga.id, pdf_name=pdf_name)
+                            MangaTag(
+                                tag=tag,
+                                tag_id=tag_definition.id,
+                                manga_id=manga.id,
+                                pdf_name=pdf_name,
+                            )
                         )
                         added_count += 1
             session.commit()
