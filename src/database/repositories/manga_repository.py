@@ -160,13 +160,22 @@ class MangaRepository(BaseRepository):
             session.commit()
             return True
 
-    def add_file(self, manga_id: str, file_path: str, file_size_mb: float) -> MangaFile:
+    def add_file(
+        self,
+        manga_id: str,
+        file_path: str,
+        file_size_mb: float,
+        page_count: Optional[int] = None,
+        sha256: Optional[str] = None,
+    ) -> MangaFile:
         """为指定漫画添加一条 PDF 文件记录
 
         Args:
             manga_id: 漫画ID
             file_path: PDF 文件绝对路径
             file_size_mb: 文件大小(MB)
+            page_count: PDF页数，未知时使用0
+            sha256: 已验证的文件摘要，未提供时清空旧摘要
 
         Returns:
             MangaFile: 已保存的文件记录
@@ -195,6 +204,9 @@ class MangaRepository(BaseRepository):
                 existing.display_name = os.path.basename(file_path)
                 existing.status = "ready"
                 existing.updated_at = datetime.now()
+                existing.last_verified_at = None
+                existing.sha256 = sha256
+                existing.page_count = page_count or 0
                 existing.relative_path = relative_path
                 session.commit()
                 session.refresh(existing)
@@ -211,6 +223,9 @@ class MangaRepository(BaseRepository):
                 existing_for_manga.file_size_bytes = file_size_bytes
                 existing_for_manga.status = "ready"
                 existing_for_manga.updated_at = datetime.now()
+                existing_for_manga.last_verified_at = None
+                existing_for_manga.sha256 = sha256
+                existing_for_manga.page_count = page_count or 0
                 existing_for_manga.relative_path = relative_path
                 session.commit()
                 session.refresh(existing_for_manga)
@@ -223,6 +238,8 @@ class MangaRepository(BaseRepository):
                 file_type="pdf",
                 mime_type="application/pdf",
                 file_size_bytes=file_size_bytes,
+                page_count=page_count or 0,
+                sha256=sha256,
                 status="ready",
                 updated_at=datetime.now(),
                 relative_path=relative_path,

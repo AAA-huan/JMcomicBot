@@ -69,7 +69,7 @@ class TestManga:
             chapter_count=3,
             page_count=100,
         )
-        manga_repo.add_file("11", str(pdf), 1.5)
+        manga_repo.add_file("11", str(pdf), 1.5, page_count=7)
 
         files = manga_repo.list_files("11")
         assert len(files) == 1
@@ -79,6 +79,7 @@ class TestManga:
         assert files[0].file_type == "pdf"
         assert files[0].mime_type == "application/pdf"
         assert files[0].file_size_bytes == pdf.stat().st_size
+        assert files[0].page_count == 7
         assert files[0].status == "ready"
 
     def test_get_all(self, manga_repo: MangaRepository) -> None:
@@ -110,13 +111,16 @@ class TestManga:
         manga_repo.upsert(
             manga_id="24", title="标题", author="", tags="", chapter_count=1, page_count=1
         )
-        manga_repo.add_file("24", str(pdf), 0.1)
+        manga_repo.add_file("24", str(pdf), 0.1, page_count=3, sha256="old-hash")
 
         pdf.write_bytes(b"new-content")
-        refreshed = manga_repo.add_file("24", str(pdf), 0.2)
+        refreshed = manga_repo.add_file("24", str(pdf), 0.2, page_count=4)
 
         assert refreshed.file_size_bytes == len(b"new-content")
         assert refreshed.file_size_mb == 0.2
+        assert refreshed.page_count == 4
+        assert refreshed.sha256 is None
+        assert refreshed.last_verified_at is None
         assert refreshed.status == "ready"
 
     def test_add_file_replaces_existing_manga_pdf(self, manga_repo: MangaRepository, tmp_path) -> None:

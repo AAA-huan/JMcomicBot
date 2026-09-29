@@ -344,6 +344,7 @@ class DownloadManager:
                         manga_id=manga_id,
                         file_path=pdf_path,
                         file_size_mb=file_size_mb,
+                        page_count=total_pages,
                     )
                 except Exception as e:
                     self.logger.error(f"持久化漫画元数据失败: {e}")
