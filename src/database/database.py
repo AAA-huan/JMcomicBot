@@ -13,7 +13,6 @@ from src.database.migrations import (
     prepare_legacy_file_paths,
     upgrade_schema,
 )
-from src.database.models import Base
 from src.logging.logger_config import logger
 
 
@@ -75,7 +74,6 @@ class DatabaseManager:
     def init_db(self) -> None:
         """创建数据库目录并初始化所有表结构"""
         os.makedirs(self.db_dir, exist_ok=True)
-        Base.metadata.create_all(self.engine)
         prepare_legacy_file_paths(self.engine, self.download_root)
         upgrade_schema(self.engine)
         ensure_schema_version(self.engine)
