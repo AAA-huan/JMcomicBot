@@ -110,8 +110,8 @@ class TestDatabaseManager:
                 text("SELECT MAX(version) FROM schema_version")
             ).scalar()
 
-        assert alembic_version == "0018_use_manga_tag_composite_key"
-        assert version == 18
+        assert alembic_version == "0019_formalize_task_audit_tables"
+        assert version == 19
 
     def test_outdated_schema_version_is_synchronized(self, tmp_path) -> None:
         """Alembic 已升级到最新版本时应同步过旧的辅助版本号。"""
@@ -133,7 +133,7 @@ class TestDatabaseManager:
                 version = session.execute(
                     text("SELECT MAX(version) FROM schema_version")
                 ).scalar_one()
-            assert version == 18
+            assert version == 19
         finally:
             db.close()
 
@@ -174,7 +174,7 @@ class TestDatabaseManager:
                     .all()
                 )
 
-            assert versions == ["0018_use_manga_tag_composite_key"]
+            assert versions == ["0019_formalize_task_audit_tables"]
             assert backup_path.stat().st_mtime_ns == initial_backup_mtime
         finally:
             db.close()

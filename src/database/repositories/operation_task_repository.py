@@ -1,0 +1,163 @@
+"""持久化操作任务与任务事件仓储。"""
+
+from typing import Any, Dict, List, Optional
+from uuid import uuid4
+
+import json
+
+from sqlalchemy import select, update
+from sqlalchemy.orm import selectinload
+
+from src.database.models import OperationTask, TaskEvent, utc_now
+from src.database.repositories._base import BaseRepository
+
+_TASK_TYPES = {"download", "scan", "repair", "delete", "backup"}
+_TASK_SOURCES = {"qq", "web", "system"}
+_TASK_EVENT_METADATA_KEYS = {
+    "duration_ms",
+    "file_count",
+    "page_count",
+    "retry_count",
+}
+
+
+def serialize_metadata(
+    metadata: Optional[Dict[str, Any]], allowed_keys: set[str]
+) -> Optional[str]:
+    """仅序列化白名单元数据字段。"""
+    if metadata is None:
+        return None
+    unexpected = set(metadata) - allowed_keys
+    if unexpected:
+        raise ValueError(f"元数据包含未允许字段: {sorted(unexpected)}")
+    return json.dumps(metadata, ensure_ascii=False, separators=(",", ":"))
+
+
+class OperationTaskRepository(BaseRepository):
+    """操作任务仓储。"""
+
+    def get(self, task_id: str) -> Optional[OperationTask]:
+        with self._get_session() as session:
+            statement = (
+                select(OperationTask)
+                .where(OperationTask.id == task_id)
+                .options(selectinload(OperationTask.events))
+            )
+            return session.scalar(statement)
+
+    def list(self, page: int = 1, page_size: int = 50) -> List[OperationTask]:
+        with self._get_session() as session:
+            statement = (
+                select(OperationTask)
+                .order_by(OperationTask.created_at.desc(), OperationTask.id)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+            return list(session.scalars(statement).all())
+
+    def create(
+        self,
+        task_type: str,
+        source: str,
+        requested_by: str = "",
+        manga_id: Optional[str] = None,
+    ) -> OperationTask:
+        """创建排队中的任务。"""
+        if task_type not in _TASK_TYPES:
+            raise ValueError(f"不支持的任务类型: {task_type}")
+        if source not in _TASK_SOURCES:
+            raise ValueError(f"不支持的任务来源: {source}")
+        now = utc_now()
+        task = OperationTask(
+            id=str(uuid4()),
+            task_type=task_type,
+            source=source,
+            status="queued",
+            stage="queued",
+            progress=None,
+            manga_id=manga_id,
+            requested_by=requested_by,
+            created_at=now,
+            updated_at=now,
+        )
+        with self._get_session() as session:
+            session.add(task)
+            session.commit()
+            session.refresh(task)
+            return task
+
+    def find_active_download(self, manga_id: str) -> Optional[OperationTask]:
+        """查找同漫画尚未结束的下载任务。"""
+        with self._get_session() as session:
+            statement = (
+                select(OperationTask)
+                .where(
+                    OperationTask.task_type == "download",
+                    OperationTask.manga_id == manga_id,
+                    OperationTask.status.in_(("queued", "running")),
+                )
+                .order_by(OperationTask.created_at, OperationTask.id)
+                .limit(1)
+            )
+            return session.scalar(statement)
+
+    def interrupt_running(self) -> int:
+        """将启动时遗留的运行中任务统一标记为中断。"""
+        now = utc_now()
+        with self._get_session() as session:
+            result = session.execute(
+                update(OperationTask)
+                .where(OperationTask.status == "running")
+                .values(status="interrupted", updated_at=now, finished_at=now)
+            )
+            session.commit()
+            return result.rowcount or 0
+
+
+class TaskEventRepository(BaseRepository):
+    """任务事件仓储。"""
+
+    def get(self, event_id: int) -> Optional[TaskEvent]:
+        with self._get_session() as session:
+            return session.get(TaskEvent, event_id)
+
+    def list(
+        self, task_id: str, page: int = 1, page_size: int = 100
+    ) -> List[TaskEvent]:
+        with self._get_session() as session:
+            statement = (
+                select(TaskEvent)
+                .where(TaskEvent.task_id == task_id)
+                .order_by(TaskEvent.created_at, TaskEvent.id)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+            return list(session.scalars(statement).all())
+
+    def append(
+        self,
+        task_id: str,
+        event_type: str,
+        stage: str,
+        progress: Optional[int] = None,
+        message: str = "",
+        metadata: Optional[Dict[str, Any]] = None,
+    ) -> TaskEvent:
+        """追加一条使用白名单元数据的任务事件。"""
+        if progress is not None and not 0 <= progress <= 100:
+            raise ValueError("任务事件进度必须位于 0 到 100 之间")
+        event = TaskEvent(
+            task_id=task_id,
+            event_type=event_type,
+            stage=stage,
+            progress=progress,
+            message=message,
+            metadata_json=serialize_metadata(metadata, _TASK_EVENT_METADATA_KEYS),
+        )
+        with self._get_session() as session:
+            if session.get(OperationTask, task_id) is None:
+                raise ValueError(f"任务不存在，无法追加事件: {task_id}")
+            session.add(event)
+            session.commit()
+            session.refresh(event)
+            return event
