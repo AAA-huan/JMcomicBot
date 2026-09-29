@@ -113,6 +113,7 @@ class MangaTag(Base):
     __tablename__ = "manga_tag"
     __table_args__ = (
         UniqueConstraint("tag", "manga_id", name="uq_manga_tag_tag_manga"),
+        UniqueConstraint("manga_id", "tag_id", name="uq_manga_tag_manga_tag"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
