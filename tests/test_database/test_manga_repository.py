@@ -69,7 +69,7 @@ class TestManga:
             chapter_count=3,
             page_count=100,
         )
-        manga_repo.add_file("11", str(pdf), 1.5, page_count=7)
+        manga_repo.add_file("11", str(pdf), page_count=7)
 
         files = manga_repo.list_files("11")
         assert len(files) == 1
@@ -100,7 +100,7 @@ class TestManga:
         outside_file.write_bytes(b"%PDF")
 
         with pytest.raises(ValueError, match="下载根目录内"):
-            repository.add_file("23", str(outside_file), 0.1)
+            repository.add_file("23", str(outside_file))
 
     def test_add_file_rejects_missing_file(
         self, manga_repo: MangaRepository, tmp_path
@@ -115,7 +115,7 @@ class TestManga:
         )
 
         with pytest.raises(FileNotFoundError, match="PDF文件不存在"):
-            manga_repo.add_file("231", str(tmp_path / "missing.pdf"), 0.1)
+            manga_repo.add_file("231", str(tmp_path / "missing.pdf"))
 
     def test_add_file_refreshes_existing_metadata(
         self, manga_repo: MangaRepository, tmp_path
@@ -125,10 +125,10 @@ class TestManga:
         manga_repo.upsert(
             manga_id="24", title="标题", author="", tags="", chapter_count=1, page_count=1
         )
-        manga_repo.add_file("24", str(pdf), 0.1, page_count=3, sha256="old-hash")
+        manga_repo.add_file("24", str(pdf), page_count=3, sha256="old-hash")
 
         pdf.write_bytes(b"new-content")
-        refreshed = manga_repo.add_file("24", str(pdf), 0.2, page_count=4)
+        refreshed = manga_repo.add_file("24", str(pdf), page_count=4)
 
         assert refreshed.file_size_bytes == len(b"new-content")
         assert refreshed.page_count == 4
@@ -145,8 +145,8 @@ class TestManga:
             manga_id="27", title="标题", author="", tags="", chapter_count=1, page_count=1
         )
 
-        first_record = manga_repo.add_file("27", str(first_pdf), 0.1)
-        second_record = manga_repo.add_file("27", str(second_pdf), 0.1)
+        first_record = manga_repo.add_file("27", str(first_pdf))
+        second_record = manga_repo.add_file("27", str(second_pdf))
 
         assert second_record.id == first_record.id
         assert manga_repo.list_files("27")[0].relative_path == second_pdf.name
@@ -169,7 +169,7 @@ class TestManga:
         manga_repo.upsert(
             manga_id="26", title="标题", author="", tags="", chapter_count=1, page_count=1
         )
-        manga_file = manga_repo.add_file("26", str(pdf), 0.1)
+        manga_file = manga_repo.add_file("26", str(pdf))
 
         assert manga_repo.update_file_status(manga_file.id, "missing") is True
         assert manga_repo.update_file_status(99999, "ready") is False
@@ -185,7 +185,7 @@ class TestManga:
         repository.upsert(
             manga_id="27", title="标题", author="", tags="", chapter_count=1, page_count=1
         )
-        manga_file = repository.add_file("27", str(pdf), 0.1)
+        manga_file = repository.add_file("27", str(pdf))
 
         assert repository.resolve_file_path(manga_file.id, str(download_root)) == pdf
 
@@ -217,7 +217,7 @@ class TestManga:
             chapter_count=1,
             page_count=1,
         )
-        manga_repo.add_file("17", str(pdf), 0.5)
+        manga_repo.add_file("17", str(pdf))
         assert manga_repo.delete_files("17") == 1
         assert manga_repo.list_files("17") == []
 

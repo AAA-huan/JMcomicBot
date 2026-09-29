@@ -209,8 +209,8 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
         )
 
         # 目标 schema 一漫画只保留一个最终 PDF；多文件旧数据取最后扫描到的候选。
-        for file_path, file_size_mb in entry.files[-1:]:
-            repo.add_file(entry.manga_id, file_path, file_size_mb)
+        for file_path, _file_size_mb in entry.files[-1:]:
+            repo.add_file(entry.manga_id, file_path)
 
         # 若本次扫描联网补全了标签，同步写入标签表
         if not dry_run and tag_repo is not None and entry.tags:

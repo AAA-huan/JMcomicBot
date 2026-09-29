@@ -174,7 +174,7 @@ def test_batch_delete_cleans_database(
         pdf_path = tmp_path / f"{manga_id}-标题(3章).pdf"
         pdf_path.write_bytes(b"%PDF")
         _add_manga(manga_repo, manga_id, chapter_count=3)
-        manga_repo.add_file(manga_id, str(pdf_path), 0.01)
+        manga_repo.add_file(manga_id, str(pdf_path))
         tag_repo.add("纯爱", manga_id, pdf_path.name)
 
     download_manager = object.__new__(DownloadManager)

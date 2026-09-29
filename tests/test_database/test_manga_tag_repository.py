@@ -110,7 +110,6 @@ class TestMangaTag:
         manga_repo.add_file(
             manga_id="110",
             file_path=os.path.join(str(tmp_path), pdf_path.name),
-            file_size_mb=5.0,
         )
         manga_repo.upsert(
             manga_id="111",

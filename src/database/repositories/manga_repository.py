@@ -164,7 +164,6 @@ class MangaRepository(BaseRepository):
         self,
         manga_id: str,
         file_path: str,
-        file_size_mb: float,
         page_count: Optional[int] = None,
         sha256: Optional[str] = None,
     ) -> MangaFile:
@@ -173,7 +172,6 @@ class MangaRepository(BaseRepository):
         Args:
             manga_id: 漫画ID
             file_path: PDF 文件绝对路径
-            file_size_mb: 文件大小(MB)
             page_count: PDF页数，未知时使用0
             sha256: 已验证的文件摘要，未提供时清空旧摘要
 

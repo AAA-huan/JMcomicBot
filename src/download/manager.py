@@ -339,11 +339,9 @@ class DownloadManager:
                         chapter_count=chapter_count,
                         page_count=total_pages,
                     )
-                    file_size_mb = round(os.path.getsize(pdf_path) / (1024 * 1024), 2)
                     self.manga_repo.add_file(
                         manga_id=manga_id,
                         file_path=pdf_path,
-                        file_size_mb=file_size_mb,
                         page_count=total_pages,
                     )
                 except Exception as e:
