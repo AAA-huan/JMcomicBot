@@ -51,6 +51,7 @@ class MangaBot:
         self.database_manager = DatabaseManager(
             db_path=str(self.config_manager.config_dict["DB_PATH"]),
             echo=bool(self.config_manager.config_dict["DB_ECHO"]),
+            download_root=str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]),
         )
         self.database_manager.init_db()
 
@@ -58,13 +59,6 @@ class MangaBot:
             self.database_manager,
             download_root=str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]),
         )
-        backfilled_count, invalid_path_count = self.manga_repo.backfill_relative_paths(
-            str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"])
-        )
-        if backfilled_count or invalid_path_count:
-            logger.info(
-                f"回填漫画文件相对路径: 成功{backfilled_count}条，非法路径{invalid_path_count}条"
-            )
         self.task_log_repo = TaskLogRepository(self.database_manager)
         self.user_group_repo = UserGroupRepository(self.database_manager)
         self.permission_repo = PermissionRepository(self.database_manager)

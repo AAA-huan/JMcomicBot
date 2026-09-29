@@ -14,6 +14,49 @@ from sqlalchemy import Engine, text
 CURRENT_SCHEMA_VERSION = 16
 
 
+def prepare_legacy_file_paths(engine: Engine, download_root: str | None) -> None:
+    """在删除旧绝对路径列前回填并验证所有文件相对路径。"""
+    if not download_root:
+        return
+    root = Path(download_root).resolve()
+    with engine.begin() as connection:
+        columns = {
+            column["name"]
+            for column in connection.exec_driver_sql("PRAGMA table_info(manga_file)")
+        }
+        if "file_path" not in columns or "relative_path" not in columns:
+            return
+        rows = connection.execute(
+            text(
+                "SELECT id, file_path, relative_path FROM manga_file "
+                "WHERE relative_path IS NULL"
+            )
+        ).all()
+        unresolved: list[int] = []
+        for file_id, file_path, _relative_path in rows:
+            resolved_path = Path(file_path).resolve()
+            try:
+                relative_path = str(resolved_path.relative_to(root))
+            except ValueError:
+                unresolved.append(file_id)
+                continue
+            if not resolved_path.is_file():
+                unresolved.append(file_id)
+                continue
+            connection.execute(
+                text(
+                    "UPDATE manga_file SET relative_path = :relative_path, "
+                    "status = 'ready', updated_at = CURRENT_TIMESTAMP WHERE id = :id"
+                ),
+                {"id": file_id, "relative_path": relative_path},
+            )
+        if unresolved:
+            raise RuntimeError(
+                "存在无法安全转换为相对路径的漫画文件记录，"
+                f"请先处理文件ID: {unresolved}"
+            )
+
+
 def backup_database(engine: Engine, destination: str) -> None:
     """使用 SQLite backup API 创建一致性数据库备份。"""
     source_path = engine.url.database

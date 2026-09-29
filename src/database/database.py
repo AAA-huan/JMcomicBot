@@ -8,7 +8,11 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
-from src.database.migrations import ensure_schema_version, upgrade_schema
+from src.database.migrations import (
+    ensure_schema_version,
+    prepare_legacy_file_paths,
+    upgrade_schema,
+)
 from src.database.models import Base
 from src.logging.logger_config import logger
 
@@ -38,6 +42,7 @@ class DatabaseManager:
         db_path: str = "./data",
         echo: bool = False,
         logger_instance: Any = None,
+        download_root: str | None = None,
     ) -> None:
         """
         初始化数据库管理器
@@ -50,6 +55,7 @@ class DatabaseManager:
         self.logger = logger_instance or logger
         self.db_dir = os.path.abspath(os.path.expanduser(db_path))
         self.db_file = os.path.join(self.db_dir, "main.db")
+        self.download_root = download_root
 
         os.makedirs(self.db_dir, exist_ok=True)
 
@@ -70,6 +76,7 @@ class DatabaseManager:
         """创建数据库目录并初始化所有表结构"""
         os.makedirs(self.db_dir, exist_ok=True)
         Base.metadata.create_all(self.engine)
+        prepare_legacy_file_paths(self.engine, self.download_root)
         upgrade_schema(self.engine)
         ensure_schema_version(self.engine)
         self.logger.info(f"SQLite数据库初始化完成: {self.db_file}")
