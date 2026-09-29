@@ -47,7 +47,11 @@ def _create_client(db_manager, host: str = "127.0.0.1") -> TestClient:
             send_queue_provider=lambda: {"running": True, "queue_size": 1},
         ),
     )
-    return TestClient(create_web_app(dependencies), client=(host, 50000))
+    return TestClient(
+        create_web_app(dependencies),
+        client=(host, 50000),
+        headers={"Host": "127.0.0.1"},
+    )
 
 
 def _setup_and_login(client: TestClient) -> None:
@@ -80,7 +84,10 @@ def test_authentication_flow_and_protected_status(db_manager) -> None:
         assert system_response.json()["version"] == "test-version"
         assert system_response.json()["napcat_connected"] is True
 
-        logout_response = client.post("/api/v1/auth/logout")
+        logout_response = client.post(
+            "/api/v1/auth/logout",
+            headers={"X-CSRF-Token": client.cookies["jmbot_csrf"]},
+        )
         assert logout_response.status_code == 200
         assert client.get("/api/v1/system/status").status_code == 401
 

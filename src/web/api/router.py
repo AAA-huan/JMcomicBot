@@ -2,6 +2,7 @@
 
 from dataclasses import asdict
 from ipaddress import ip_address
+from secrets import token_urlsafe
 from typing import Annotated, Optional
 
 from fastapi import (
@@ -18,6 +19,8 @@ from pydantic import BaseModel, Field
 
 from src.service.web_auth_service import AuthenticatedSession
 from src.web.dependencies import WebDependencies
+from src.web.errors import ApiError
+from src.web.security import CSRF_COOKIE_NAME, LoginRateLimiter
 
 SESSION_COOKIE_NAME = "jmbot_session"
 
@@ -40,8 +43,8 @@ def _is_loopback(request: Request) -> bool:
     return request.client is not None and ip_address(request.client.host).is_loopback
 
 
-def create_api_router(  # pylint: disable=too-many-locals
-    dependencies: WebDependencies,
+def create_api_router(  # pylint: disable=too-many-locals,too-many-statements
+    dependencies: WebDependencies, login_rate_limiter: LoginRateLimiter
 ) -> APIRouter:
     """创建绑定既有应用服务的 v1 API 路由。"""
     router = APIRouter(prefix="/api/v1")
@@ -80,17 +83,36 @@ def create_api_router(  # pylint: disable=too-many-locals
         return {"initialized": True}
 
     @router.post("/auth/login")
-    def login(body: PasswordRequest, response: Response) -> dict[str, object]:
+    def login(
+        request: Request, body: PasswordRequest, response: Response
+    ) -> dict[str, object]:
         """登录并写入 HttpOnly 会话 Cookie。"""
+        if request.client is None:
+            raise ApiError(400, "CLIENT_ADDRESS_MISSING", "无法识别客户端地址")
+        client_ip = request.client.host
+        if not login_rate_limiter.is_allowed(client_ip):
+            raise ApiError(429, "LOGIN_RATE_LIMITED", "登录尝试过于频繁，请稍后重试")
         try:
             created = auth_service.login(body.password)
         except ValueError as error:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, str(error)) from error
+            login_rate_limiter.record_failure(client_ip)
+            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "登录凭据无效") from error
+        login_rate_limiter.reset(client_ip)
+        csrf_token = token_urlsafe(32)
         response.set_cookie(
             SESSION_COOKIE_NAME,
             created.token,
             max_age=auth_service.session_hours * 3600,
             httponly=True,
+            secure=False,
+            samesite="strict",
+            path="/",
+        )
+        response.set_cookie(
+            CSRF_COOKIE_NAME,
+            csrf_token,
+            max_age=auth_service.session_hours * 3600,
+            httponly=False,
             secure=False,
             samesite="strict",
             path="/",
@@ -107,6 +129,7 @@ def create_api_router(  # pylint: disable=too-many-locals
         del authenticated
         auth_service.logout(token)
         response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+        response.delete_cookie(CSRF_COOKIE_NAME, path="/")
         return {"authenticated": False}
 
     @router.get("/auth/me")
@@ -132,6 +155,7 @@ def create_api_router(  # pylint: disable=too-many-locals
         except ValueError as error:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
         response.delete_cookie(SESSION_COOKIE_NAME, path="/")
+        response.delete_cookie(CSRF_COOKIE_NAME, path="/")
         return {"authenticated": False}
 
     @router.get("/system/status")
@@ -178,7 +202,7 @@ def create_api_router(  # pylint: disable=too-many-locals
     ) -> dict[str, object]:
         manga = dependencies.manga_query_service.get(manga_id)
         if manga is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "未找到指定漫画")
+            raise ApiError(404, "MANGA_NOT_FOUND", "未找到指定漫画")
         return asdict(manga)
 
     @router.get("/mangas/{manga_id}/files")
@@ -188,7 +212,7 @@ def create_api_router(  # pylint: disable=too-many-locals
     ) -> list[dict[str, object]]:
         manga = dependencies.manga_query_service.get(manga_id)
         if manga is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "未找到指定漫画")
+            raise ApiError(404, "MANGA_NOT_FOUND", "未找到指定漫画")
         return [asdict(item) for item in manga.files]
 
     @router.get("/tasks")
@@ -216,7 +240,7 @@ def create_api_router(  # pylint: disable=too-many-locals
     ) -> dict[str, object]:
         task = dependencies.task_query_service.get(task_id)
         if task is None:
-            raise HTTPException(status.HTTP_404_NOT_FOUND, "未找到指定任务")
+            raise ApiError(404, "TASK_NOT_FOUND", "未找到指定任务")
         return asdict(task)
 
     return router

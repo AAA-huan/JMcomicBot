@@ -198,7 +198,9 @@ class MangaBot:
                         manga_query_service=self.manga_query_service,
                         task_query_service=self.task_query_service,
                         system_service=self.system_service,
-                    )
+                    ),
+                    web_host=web_host,
+                    web_port=int(self.config_manager.config_dict["WEBUI_PORT"]),
                 ),
                 host=web_host,
                 port=int(self.config_manager.config_dict["WEBUI_PORT"]),
