@@ -85,6 +85,13 @@ class MangaTagRepository(BaseRepository):
                 existing.tag_id = tag_definition.id
             session.commit()
 
+    def add_for_existing_manga(self, tag: str, manga_id: str, pdf_name: str) -> None:
+        """仅为已存在的漫画写入标签关系。"""
+        with self._get_session() as session:
+            if session.get(Manga, manga_id) is None:
+                raise ValueError(f"漫画记录不存在，无法写入标签: {manga_id}")
+        self.add(tag, manga_id, pdf_name)
+
     def get_by_tag(self, tag: str) -> List[MangaTag]:
         """按标签查询其下的漫画PDF记录
 

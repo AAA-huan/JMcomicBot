@@ -219,7 +219,7 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
                 for tag in entry.tags.split(","):
                     tag = tag.strip()
                     if tag:
-                        tag_repo.add(tag, entry.manga_id, pdf_name)
+                        tag_repo.add_for_existing_manga(tag, entry.manga_id, pdf_name)
 
     # 清理数据库中文件已不存在的残留记录
     if not dry_run:

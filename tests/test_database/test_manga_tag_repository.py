@@ -1,5 +1,7 @@
 """漫画标签仓储的测试"""
 
+import pytest
+
 from src.database.repositories.manga_repository import MangaRepository
 from src.database.repositories.manga_tag_repository import MangaTagRepository
 
@@ -28,6 +30,12 @@ class TestMangaTag:
 
         assert len(tag_repo.get_by_tag("萌系")) == 1
         assert tag_repo.list_all_tags() == ["萌系"]
+
+    def test_strict_add_requires_existing_manga(
+        self, tag_repo: MangaTagRepository
+    ) -> None:
+        with pytest.raises(ValueError, match="漫画记录不存在"):
+            tag_repo.add_for_existing_manga("萌系", "404", "404.pdf")
 
     def test_list_all_tags(self, tag_repo: MangaTagRepository) -> None:
         tag_repo.add("萌系", "100", "100-萌漫画(1章).pdf")
