@@ -151,6 +151,25 @@ class TestManga:
         assert second_record.id == first_record.id
         assert manga_repo.list_files("27")[0].relative_path == second_pdf.name
 
+    def test_add_file_rejects_path_owned_by_another_manga(
+        self, manga_repo: MangaRepository, tmp_path
+    ) -> None:
+        pdf = tmp_path / "shared.pdf"
+        pdf.write_bytes(b"%PDF")
+        for manga_id in ("271", "272"):
+            manga_repo.upsert(
+                manga_id=manga_id,
+                title="标题",
+                author="",
+                tags="",
+                chapter_count=1,
+                page_count=1,
+            )
+        manga_repo.add_file("271", str(pdf))
+
+        with pytest.raises(ValueError, match="已属于漫画 271"):
+            manga_repo.add_file("272", str(pdf))
+
     def test_upsert_rejects_unknown_status(self, manga_repo: MangaRepository) -> None:
         with pytest.raises(ValueError, match="不支持的漫画状态"):
             manga_repo.upsert(

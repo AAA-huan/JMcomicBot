@@ -195,6 +195,10 @@ class MangaRepository(BaseRepository):
                 select(MangaFile).where(MangaFile.relative_path == relative_path)
             ).first()
             if existing is not None:
+                if existing.manga_id != manga_id:
+                    raise ValueError(
+                        f"PDF相对路径已属于漫画 {existing.manga_id}: {relative_path}"
+                    )
                 existing.file_size_bytes = file_size_bytes
                 existing.display_name = os.path.basename(file_path)
                 existing.status = "ready"
