@@ -43,7 +43,7 @@ class MangaTagRepository(BaseRepository):
         with self._get_session() as session:
             stmt = (
                 select(MangaTag)
-                .order_by(MangaTag.tag, MangaTag.manga_id)
+                .order_by(MangaTag.tag_id, MangaTag.manga_id)
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )
@@ -77,7 +77,6 @@ class MangaTagRepository(BaseRepository):
             if existing is None:
                 session.add(
                     MangaTag(
-                        tag=tag,
                         tag_id=tag_definition.id,
                         manga_id=manga_id,
                     )

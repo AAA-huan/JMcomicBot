@@ -15,19 +15,20 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """回填 tag 定义并建立漫画标签外键，保留旧列供过渡读取。"""
     connection = op.get_bind()
-    connection.execute(
-        sa.text(
-            """
-            INSERT INTO tag(name, normalized_name, created_at)
-            SELECT DISTINCT tag, trim(tag), CURRENT_TIMESTAMP
-            FROM manga_tag
-            WHERE trim(tag) <> ''
-              AND trim(tag) NOT IN (SELECT normalized_name FROM tag)
-            """
-        )
-    )
     inspector = sa.inspect(connection)
     columns = {column["name"] for column in inspector.get_columns("manga_tag")}
+    if "tag" in columns:
+        connection.execute(
+            sa.text(
+                """
+                INSERT INTO tag(name, normalized_name, created_at)
+                SELECT DISTINCT tag, trim(tag), CURRENT_TIMESTAMP
+                FROM manga_tag
+                WHERE trim(tag) <> ''
+                  AND trim(tag) NOT IN (SELECT normalized_name FROM tag)
+                """
+            )
+        )
     foreign_keys = inspector.get_foreign_keys("manga_tag")
     has_tag_foreign_key = any(
         foreign_key.get("referred_table") == "tag"
@@ -41,18 +42,19 @@ def upgrade() -> None:
             batch_op.create_foreign_key(
                 "fk_manga_tag_tag_id", "tag", ["tag_id"], ["id"], ondelete="CASCADE"
             )
-    connection.execute(
-        sa.text(
-            """
-            UPDATE manga_tag
-            SET tag_id = (
-                SELECT id FROM tag
-                WHERE tag.normalized_name = trim(manga_tag.tag)
+    if "tag" in columns:
+        connection.execute(
+            sa.text(
+                """
+                UPDATE manga_tag
+                SET tag_id = (
+                    SELECT id FROM tag
+                    WHERE tag.normalized_name = trim(manga_tag.tag)
+                )
+                WHERE tag_id IS NULL
+                """
             )
-            WHERE tag_id IS NULL
-            """
         )
-    )
     op.create_index("ix_manga_tag_tag_id_manga_id", "manga_tag", ["tag_id", "manga_id"])
 
 

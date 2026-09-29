@@ -105,7 +105,7 @@ class Tag(Base):
 
 
 class MangaTag(Base):
-    """漫画标签表，记录每个标签下对应的漫画PDF文件名"""
+    """漫画与规范化标签的关系表。"""
 
     __tablename__ = "manga_tag"
     __table_args__ = (
@@ -113,7 +113,6 @@ class MangaTag(Base):
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    tag: Mapped[str] = mapped_column(String(128), comment="兼容显示名")
     manga_id: Mapped[str] = mapped_column(
         ForeignKey("manga.id", ondelete="CASCADE"), index=True, comment="漫画ID"
     )

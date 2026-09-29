@@ -93,7 +93,7 @@ class TestMangaTag:
         assert tag_repo.get_manga_ids_by_tags([]) == set()
 
     def test_sync_from_manga(
-        self, tag_repo: MangaTagRepository, manga_repo: MangaRepository
+        self, tmp_path, tag_repo: MangaTagRepository, manga_repo: MangaRepository
     ) -> None:
         import os
 
@@ -107,7 +107,7 @@ class TestMangaTag:
         )
         manga_repo.add_file(
             manga_id="110",
-            file_path=os.path.join("/tmp", "110-萌漫画(1章).pdf"),
+            file_path=os.path.join(str(tmp_path), "110-萌漫画(1章).pdf"),
             file_size_mb=5.0,
         )
         manga_repo.upsert(
