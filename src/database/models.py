@@ -93,6 +93,20 @@ class MangaFile(Base):
     manga: Mapped["Manga"] = relationship(back_populates="files")
 
 
+class Tag(Base):
+    """规范化标签定义表。"""
+
+    __tablename__ = "tag"
+    __table_args__ = (
+        UniqueConstraint("normalized_name", name="uq_tag_normalized_name"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(128), nullable=False)
+    normalized_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+
+
 class MangaTag(Base):
     """漫画标签表，记录每个标签下对应的漫画PDF文件名"""
 
@@ -104,6 +118,9 @@ class MangaTag(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     tag: Mapped[str] = mapped_column(String(128), index=True, comment="标签名")
     manga_id: Mapped[str] = mapped_column(String(32), index=True, comment="漫画ID")
+    tag_id: Mapped[Optional[int]] = mapped_column(
+        ForeignKey("tag.id", ondelete="CASCADE"), nullable=True
+    )
     pdf_name: Mapped[str] = mapped_column(String(512), comment="漫画PDF文件名")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, comment="记录创建时间"

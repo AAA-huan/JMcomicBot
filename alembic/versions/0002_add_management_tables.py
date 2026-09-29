@@ -14,14 +14,15 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """创建阶段 0 所需的独立管理表。"""
-    op.create_table(
-        "tag",
-        sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
-        sa.Column("name", sa.String(128), nullable=False),
-        sa.Column("normalized_name", sa.String(128), nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False),
-        sa.UniqueConstraint("normalized_name", name="uq_tag_normalized_name"),
-    )
+    if not sa.inspect(op.get_bind()).has_table("tag"):
+        op.create_table(
+            "tag",
+            sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
+            sa.Column("name", sa.String(128), nullable=False),
+            sa.Column("normalized_name", sa.String(128), nullable=False),
+            sa.Column("created_at", sa.DateTime(), nullable=False),
+            sa.UniqueConstraint("normalized_name", name="uq_tag_normalized_name"),
+        )
     op.create_table(
         "operation_task",
         sa.Column("id", sa.String(36), primary_key=True),
