@@ -5,13 +5,12 @@ from typing import Optional
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     DateTime,
-    Float,
     ForeignKey,
     Integer,
     String,
     Text,
-    CheckConstraint,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
