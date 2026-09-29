@@ -132,6 +132,19 @@ class TestManga:
                 status="unknown",
             )
 
+    def test_update_file_status_validates_state(self, manga_repo: MangaRepository, tmp_path) -> None:
+        pdf = tmp_path / "26-标题(1章).pdf"
+        pdf.write_bytes(b"%PDF")
+        manga_repo.upsert(
+            manga_id="26", title="标题", author="", tags="", chapter_count=1, page_count=1
+        )
+        manga_file = manga_repo.add_file("26", str(pdf), 0.1)
+
+        assert manga_repo.update_file_status(manga_file.id, "missing") is True
+        assert manga_repo.update_file_status(99999, "ready") is False
+        with pytest.raises(ValueError, match="不支持的文件状态"):
+            manga_repo.update_file_status(manga_file.id, "unknown")
+
     def test_delete(self, manga_repo: MangaRepository) -> None:
         manga_repo.upsert(
             manga_id="16", title="A", author="", tags="", chapter_count=1, page_count=1

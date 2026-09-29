@@ -16,6 +16,14 @@ from src.database.models import Manga, MangaFile
 from src.database.repositories._base import BaseRepository
 
 _VALID_MANGA_STATUSES = {"downloaded", "missing_file", "invalid", "deleted"}
+_VALID_FILE_STATUSES = {
+    "ready",
+    "missing",
+    "corrupted",
+    "deleting",
+    "deleted",
+    "invalid_path",
+}
 
 
 class MangaRepository(BaseRepository):
@@ -223,6 +231,20 @@ class MangaRepository(BaseRepository):
                 .order_by(MangaFile.created_at)
             )
             return list(session.scalars(stmt).all())
+
+    def update_file_status(self, file_id: int, status: str) -> bool:
+        """更新 PDF 文件状态并返回是否找到目标文件。"""
+        if status not in _VALID_FILE_STATUSES:
+            raise ValueError(f"不支持的文件状态: {status}")
+
+        with self._get_session() as session:
+            manga_file = session.get(MangaFile, file_id)
+            if manga_file is None:
+                return False
+            manga_file.status = status
+            manga_file.updated_at = datetime.now()
+            session.commit()
+            return True
 
     def delete_files(self, manga_id: str) -> int:
         """删除指定漫画的全部 PDF 文件记录
