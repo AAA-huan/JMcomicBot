@@ -3,6 +3,7 @@
 # pylint: disable=arguments-differ, too-many-positional-arguments
 
 from datetime import datetime
+from pathlib import Path
 from typing import List, Optional
 
 import os
@@ -18,8 +19,11 @@ from src.database.repositories._base import BaseRepository
 class MangaRepository(BaseRepository):
     """漫画元数据仓储，提供已下载漫画及相关 PDF 文件的增删改查"""
 
-    def __init__(self, db_manager: DatabaseManager) -> None:
+    def __init__(
+        self, db_manager: DatabaseManager, download_root: Optional[str] = None
+    ) -> None:
         super().__init__(db_manager)
+        self.download_root = Path(download_root).resolve() if download_root else None
 
     def get(self, manga_id: str) -> Optional[Manga]:
         """按漫画ID查询漫画记录
@@ -166,6 +170,13 @@ class MangaRepository(BaseRepository):
                 if os.path.isfile(file_path)
                 else int(file_size_mb * 1024 * 1024)
             )
+            relative_path = None
+            if self.download_root is not None:
+                resolved_path = Path(file_path).resolve()
+                try:
+                    relative_path = str(resolved_path.relative_to(self.download_root))
+                except ValueError as error:
+                    raise ValueError("PDF文件路径必须位于下载根目录内") from error
             manga_file = MangaFile(
                 manga_id=manga_id,
                 file_path=file_path,
@@ -176,6 +187,7 @@ class MangaRepository(BaseRepository):
                 file_size_bytes=file_size_bytes,
                 status="ready",
                 updated_at=datetime.now(),
+                relative_path=relative_path,
             )
             session.add(manga_file)
             session.commit()

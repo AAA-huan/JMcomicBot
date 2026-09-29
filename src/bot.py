@@ -54,7 +54,10 @@ class MangaBot:
         )
         self.database_manager.init_db()
 
-        self.manga_repo = MangaRepository(self.database_manager)
+        self.manga_repo = MangaRepository(
+            self.database_manager,
+            download_root=str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]),
+        )
         self.task_log_repo = TaskLogRepository(self.database_manager)
         self.user_group_repo = UserGroupRepository(self.database_manager)
         self.permission_repo = PermissionRepository(self.database_manager)

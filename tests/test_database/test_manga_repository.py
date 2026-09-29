@@ -1,5 +1,7 @@
 """漫画元数据仓储的测试"""
 
+import pytest
+
 from src.database.repositories.manga_repository import MangaRepository
 from src.database.models import Manga
 
@@ -87,6 +89,19 @@ class TestManga:
         result = manga_repo.get_all()
         assert len(result) == 1
         assert isinstance(result[0], Manga)
+
+    def test_add_file_rejects_path_outside_download_root(
+        self, db_manager, tmp_path
+    ) -> None:
+        repository = MangaRepository(db_manager, download_root=str(tmp_path / "downloads"))
+        repository.upsert(
+            manga_id="23", title="A", author="", tags="", chapter_count=1, page_count=1
+        )
+        outside_file = tmp_path / "outside.pdf"
+        outside_file.write_bytes(b"%PDF")
+
+        with pytest.raises(ValueError, match="下载根目录内"):
+            repository.add_file("23", str(outside_file), 0.1)
 
     def test_delete(self, manga_repo: MangaRepository) -> None:
         manga_repo.upsert(
