@@ -9,7 +9,7 @@ import time
 from src.command.parser import CommandParser
 from src.database.repositories import MangaRepository, MangaTagRepository
 from src.logging.logger_config import logger
-from src.service import OperationTaskService
+from src.service import OperationContext, OperationTaskService
 from src.utils.batch import (
     format_batch_response,
     paginate_blocks,
@@ -1149,9 +1149,7 @@ class CommandExecutor:
         if self.operation_task_service is not None:
             operation_task = self.operation_task_service.create(
                 "delete",
-                "qq",
-                requested_by=user_id,
-                actor_group_id=group_id,
+                OperationContext.qq(user_id, group_id),
             )
             operation_task_id = operation_task.id
             self.operation_task_service.start(operation_task_id, "deleting")

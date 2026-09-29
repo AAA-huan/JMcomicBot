@@ -10,7 +10,11 @@ from src.database.repositories import (
     OperationTaskRepository,
     TaskEventRepository,
 )
-from src.service import DatabaseMaintenanceService, OperationTaskService
+from src.service import (
+    DatabaseMaintenanceService,
+    OperationContext,
+    OperationTaskService,
+)
 
 
 @pytest.fixture()
@@ -157,10 +161,14 @@ def test_task_service_records_lifecycle_without_existing_manga(
 ) -> None:
     """下载请求应能先于漫画资料入库，并完整记录生命周期。"""
     task = operation_task_service.create(
-        "download", "qq", requested_by="10001", manga_id="404"
+        "download", OperationContext.qq("10001", "20001"), manga_id="404"
     )
     operation_task_service.start(task.id, "downloading")
-    operation_task_service.succeed(task.id, metadata={"page_count": 12})
+    operation_task_service.succeed(
+        task.id,
+        metadata={"page_count": 12},
+        context=OperationContext.qq("10001", "20001"),
+    )
 
     stored = operation_task_repo.get(task.id)
     assert stored is not None
@@ -185,10 +193,34 @@ def test_database_backup_uses_task_service(
     service = DatabaseMaintenanceService(db_manager, operation_task_service)
     destination = tmp_path / "backup" / "main.db"
 
-    result = service.create_backup(str(destination), requested_by="system")
+    result = service.create_backup(str(destination))
 
     assert result == destination
     assert destination.read_bytes().startswith(b"SQLite format 3\x00")
     tasks = operation_task_repo.list()
     assert tasks[0].task_type == "backup"
     assert tasks[0].status == "succeeded"
+
+
+def test_web_context_records_source_actor_and_client_ip(
+    operation_task_service, operation_task_repo, audit_event_repo
+) -> None:
+    """Web 调用应通过同一服务记录管理员身份和客户端 IP。"""
+    context = OperationContext.web("admin", "203.0.113.10")
+    task = operation_task_service.create("backup", context)
+    operation_task_service.start(task.id, "backing_up")
+    operation_task_service.succeed(task.id, context=context)
+
+    stored = operation_task_repo.get(task.id)
+    assert stored is not None
+    assert stored.source == "web"
+    assert stored.requested_by == "admin"
+    audit_events = audit_event_repo.list()
+    assert {event.source for event in audit_events} == {"web"}
+    assert {event.client_ip for event in audit_events} == {"203.0.113.10"}
+    assert all(event.metadata_json is None for event in audit_events)
+
+
+def test_web_context_requires_client_ip() -> None:
+    with pytest.raises(ValueError, match="客户端 IP"):
+        OperationContext.web("admin", " ")

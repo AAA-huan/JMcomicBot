@@ -8,6 +8,7 @@ from src.database.repositories import (
     OperationTaskRepository,
     TaskEventRepository,
 )
+from src.service.operation_context import OperationContext
 
 
 class OperationTaskService:
@@ -26,24 +27,28 @@ class OperationTaskService:
     def create(
         self,
         task_type: str,
-        source: str,
-        requested_by: str = "",
+        context: OperationContext,
         manga_id: Optional[str] = None,
-        actor_group_id: Optional[str] = None,
     ) -> OperationTask:
         """创建任务，并记录请求事件和审计。"""
         if task_type == "download" and manga_id is not None:
             active = self.task_repo.find_active_download(manga_id)
             if active is not None:
                 return active
-        task = self.task_repo.create(task_type, source, requested_by, manga_id)
+        task = self.task_repo.create(
+            task_type,
+            context.source,
+            context.actor_user_id or "",
+            manga_id,
+        )
         self.event_repo.append(task.id, f"{task_type}.requested", "queued")
         self.audit_repo.record(
             event_type=f"{task_type}.requested",
-            source=source,
+            source=context.source,
             result="accepted",
-            actor_user_id=requested_by or None,
-            actor_group_id=actor_group_id,
+            actor_user_id=context.actor_user_id,
+            actor_group_id=context.actor_group_id,
+            client_ip=context.client_ip,
             target_type="manga" if manga_id else task_type,
             target_id=manga_id or task.id,
         )
@@ -77,6 +82,7 @@ class OperationTaskService:
         self,
         task_id: str,
         metadata: Optional[Dict[str, Any]] = None,
+        context: Optional[OperationContext] = None,
     ) -> OperationTask:
         """完成任务并记录成功审计。"""
         task = self.task_repo.update_state(task_id, "succeeded", "completed", 100)
@@ -91,14 +97,24 @@ class OperationTaskService:
             event_type=f"{task.task_type}.completed",
             source=task.source,
             result="succeeded",
-            actor_user_id=task.requested_by or None,
+            actor_user_id=(
+                context.actor_user_id if context else task.requested_by or None
+            ),
+            actor_group_id=context.actor_group_id if context else None,
+            client_ip=context.client_ip if context else None,
             target_type="manga" if task.manga_id else task.task_type,
             target_id=task.manga_id or task.id,
             metadata=metadata,
         )
         return task
 
-    def fail(self, task_id: str, error_code: str, error_message: str) -> OperationTask:
+    def fail(
+        self,
+        task_id: str,
+        error_code: str,
+        error_message: str,
+        context: Optional[OperationContext] = None,
+    ) -> OperationTask:
         """以脱敏错误摘要结束任务。"""
         task = self.task_repo.update_state(
             task_id,
@@ -112,7 +128,11 @@ class OperationTaskService:
             event_type=f"{task.task_type}.failed",
             source=task.source,
             result="failed",
-            actor_user_id=task.requested_by or None,
+            actor_user_id=(
+                context.actor_user_id if context else task.requested_by or None
+            ),
+            actor_group_id=context.actor_group_id if context else None,
+            client_ip=context.client_ip if context else None,
             target_type="manga" if task.manga_id else task.task_type,
             target_id=task.manga_id or task.id,
             error_code=error_code,

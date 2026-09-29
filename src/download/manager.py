@@ -16,7 +16,7 @@ from src.database.repositories import (
     MangaTagRepository,
     TaskLogRepository,
 )
-from src.service import OperationTaskService
+from src.service import OperationContext, OperationTaskService
 from src.utils.helpers import sanitize_filename
 
 
@@ -155,9 +155,21 @@ class DownloadManager:
                     if task is None or self._stop_event.is_set():
                         self.download_queue.task_done()
                         return
-                    user_id, manga_id, group_id, private, operation_task_id = task
+                    (
+                        user_id,
+                        manga_id,
+                        group_id,
+                        private,
+                        operation_task_id,
+                        operation_context,
+                    ) = task
                     self._process_download_task(
-                        user_id, manga_id, group_id, private, operation_task_id
+                        user_id,
+                        manga_id,
+                        group_id,
+                        private,
+                        operation_task_id,
+                        operation_context,
                     )
                     self.download_queue.task_done()
                 except queue.Empty:
@@ -263,6 +275,7 @@ class DownloadManager:
         group_id: Optional[str],
         private: bool,
         operation_task_id: Optional[str] = None,
+        operation_context: Optional[OperationContext] = None,
     ) -> None:
         """
         处理队列中的下载任务
@@ -408,7 +421,9 @@ class DownloadManager:
             self.message_sender(user_id, response, group_id, private)
             if self.operation_task_service is not None and operation_task_id:
                 self.operation_task_service.succeed(
-                    operation_task_id, metadata={"page_count": total_pages}
+                    operation_task_id,
+                    metadata={"page_count": total_pages},
+                    context=operation_context,
                 )
 
         except Exception as e:
@@ -418,6 +433,7 @@ class DownloadManager:
                     operation_task_id,
                     error_code="download_failed",
                     error_message=type(e).__name__,
+                    context=operation_context,
                 )
             if self.task_log_repo is not None:
                 try:
@@ -458,7 +474,12 @@ class DownloadManager:
                 self.tag_repo.add_for_existing_manga(tag, manga_id)
 
     def download_manga(
-        self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
+        self,
+        user_id: str,
+        manga_id: str,
+        group_id: Optional[str],
+        private: bool,
+        operation_context: Optional[OperationContext] = None,
     ) -> None:
         """
         下载漫画的兼容方法
@@ -481,19 +502,25 @@ class DownloadManager:
                 self.logger.info(f"漫画ID {manga_id} 已存在活动下载任务")
                 return
             operation_task_id = None
+            context = operation_context or OperationContext.qq(user_id, group_id)
             if self.operation_task_service is not None:
                 operation_task = self.operation_task_service.create(
                     task_type="download",
-                    source="qq",
-                    requested_by=user_id,
+                    context=context,
                     manga_id=manga_id,
-                    actor_group_id=group_id,
                 )
                 operation_task_id = operation_task.id
                 self.operation_task_ids[manga_id] = operation_task.id
             self.queued_tasks[manga_id] = (user_id, group_id, private)
             self.download_queue.put(
-                (user_id, manga_id, group_id, private, operation_task_id)
+                (
+                    user_id,
+                    manga_id,
+                    group_id,
+                    private,
+                    operation_task_id,
+                    context,
+                )
             )
         self.logger.info(f"漫画ID {manga_id} 的下载任务已添加到队列")
 
@@ -543,7 +570,12 @@ class DownloadManager:
         return len(cancelled_ids)
 
     def delete_manga(
-        self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
+        self,
+        user_id: str,
+        manga_id: str,
+        group_id: Optional[str],
+        private: bool,
+        operation_context: Optional[OperationContext] = None,
     ) -> None:
         """
         删除指定ID的漫画PDF文件
@@ -558,13 +590,12 @@ class DownloadManager:
             FileNotFoundError: 当下载目录不存在时
         """
         operation_task_id = None
+        context = operation_context or OperationContext.qq(user_id, group_id)
         if self.operation_task_service is not None:
             operation_task = self.operation_task_service.create(
                 task_type="delete",
-                source="qq",
-                requested_by=user_id,
+                context=context,
                 manga_id=manga_id,
-                actor_group_id=group_id,
             )
             operation_task_id = operation_task.id
             self.operation_task_service.start(operation_task_id, "deleting")
@@ -574,7 +605,10 @@ class DownloadManager:
         if not os.path.exists(download_path):
             if self.operation_task_service is not None and operation_task_id:
                 self.operation_task_service.fail(
-                    operation_task_id, "delete_directory_missing", "FileNotFoundError"
+                    operation_task_id,
+                    "delete_directory_missing",
+                    "FileNotFoundError",
+                    context=context,
                 )
             error_msg = "❌ 下载目录不存在！\n快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
             self.message_sender(user_id, error_msg, group_id, private)
@@ -590,7 +624,10 @@ class DownloadManager:
         if not pdf_paths:
             if self.operation_task_service is not None and operation_task_id:
                 self.operation_task_service.fail(
-                    operation_task_id, "file_not_found", "FileNotFoundError"
+                    operation_task_id,
+                    "file_not_found",
+                    "FileNotFoundError",
+                    context=context,
                 )
             response = f"❌（｀Δ´）！ 未找到漫画ID {manga_id} 的PDF文件"
             self.message_sender(user_id, response, group_id, private)
@@ -625,13 +662,18 @@ class DownloadManager:
             self.message_sender(user_id, response, group_id, private)
             if self.operation_task_service is not None and operation_task_id:
                 self.operation_task_service.succeed(
-                    operation_task_id, metadata={"file_count": deleted_count}
+                    operation_task_id,
+                    metadata={"file_count": deleted_count},
+                    context=context,
                 )
         except Exception as e:
             self.logger.error(f"删除漫画PDF文件失败: {e}")
             if self.operation_task_service is not None and operation_task_id:
                 self.operation_task_service.fail(
-                    operation_task_id, "delete_failed", type(e).__name__
+                    operation_task_id,
+                    "delete_failed",
+                    type(e).__name__,
+                    context=context,
                 )
             error_msg = f"❌ 删除失败：{str(e)}\n快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
             self.message_sender(user_id, error_msg, group_id, private)
