@@ -102,6 +102,21 @@ class TestManga:
         with pytest.raises(ValueError, match="下载根目录内"):
             repository.add_file("23", str(outside_file), 0.1)
 
+    def test_add_file_rejects_missing_file(
+        self, manga_repo: MangaRepository, tmp_path
+    ) -> None:
+        manga_repo.upsert(
+            manga_id="231",
+            title="A",
+            author="",
+            tags="",
+            chapter_count=1,
+            page_count=1,
+        )
+
+        with pytest.raises(FileNotFoundError, match="PDF文件不存在"):
+            manga_repo.add_file("231", str(tmp_path / "missing.pdf"), 0.1)
+
     def test_add_file_refreshes_existing_metadata(
         self, manga_repo: MangaRepository, tmp_path
     ) -> None:

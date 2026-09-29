@@ -105,9 +105,11 @@ class TestMangaTag:
             chapter_count=1,
             page_count=10,
         )
+        pdf_path = tmp_path / "110-萌漫画(1章).pdf"
+        pdf_path.write_bytes(b"%PDF")
         manga_repo.add_file(
             manga_id="110",
-            file_path=os.path.join(str(tmp_path), "110-萌漫画(1章).pdf"),
+            file_path=os.path.join(str(tmp_path), pdf_path.name),
             file_size_mb=5.0,
         )
         manga_repo.upsert(
