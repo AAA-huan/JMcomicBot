@@ -169,3 +169,79 @@ class TestDatabaseManager:
         for table_name, index_names in expected.items():
             actual = {index["name"] for index in inspector.get_indexes(table_name)}
             assert index_names <= actual
+
+    def test_stage_one_schema_has_no_legacy_columns(
+        self, db_manager: DatabaseManager
+    ) -> None:
+        """漫画、文件和标签表应只保留正式 schema 字段。"""
+        inspector = inspect(db_manager.engine)
+        manga_columns = {
+            column["name"]: column for column in inspector.get_columns("manga")
+        }
+        file_columns = {
+            column["name"]: column for column in inspector.get_columns("manga_file")
+        }
+        relation_columns = {
+            column["name"]: column for column in inspector.get_columns("manga_tag")
+        }
+
+        assert "tags" not in manga_columns
+        assert {"file_path", "file_size_mb"}.isdisjoint(file_columns)
+        assert {"tag", "pdf_name"}.isdisjoint(relation_columns)
+        for name in (
+            "relative_path",
+            "display_name",
+            "file_type",
+            "mime_type",
+            "file_size_bytes",
+            "page_count",
+            "status",
+            "updated_at",
+        ):
+            assert file_columns[name]["nullable"] is False
+
+    def test_stage_one_relations_and_uniqueness(
+        self, db_manager: DatabaseManager
+    ) -> None:
+        """一漫画一PDF及标签双向级联关系应由数据库保证。"""
+        inspector = inspect(db_manager.engine)
+        file_indexes = {
+            index["name"]: index for index in inspector.get_indexes("manga_file")
+        }
+        relation_foreign_keys = {
+            tuple(item["constrained_columns"]): item
+            for item in inspector.get_foreign_keys("manga_tag")
+        }
+
+        assert file_indexes["uq_manga_file_manga_id"]["unique"] == 1
+        assert file_indexes["uq_manga_file_relative_path"]["unique"] == 1
+        assert relation_foreign_keys[("manga_id",)]["referred_table"] == "manga"
+        assert relation_foreign_keys[("manga_id",)]["options"]["ondelete"] == "CASCADE"
+        assert relation_foreign_keys[("tag_id",)]["referred_table"] == "tag"
+        assert relation_foreign_keys[("tag_id",)]["options"]["ondelete"] == "CASCADE"
+
+    def test_key_queries_use_expected_indexes(
+        self, db_manager: DatabaseManager
+    ) -> None:
+        """漫画列表和标签筛选查询应命中阶段 0 规定的索引。"""
+        with db_manager.get_session() as session:
+            manga_plan = session.execute(
+                text(
+                    "EXPLAIN QUERY PLAN SELECT id FROM manga "
+                    "WHERE status = 'downloaded' "
+                    "ORDER BY downloaded_at DESC, id LIMIT 50"
+                )
+            ).all()
+            tag_plan = session.execute(
+                text(
+                    "EXPLAIN QUERY PLAN SELECT manga_tag.manga_id "
+                    "FROM manga_tag JOIN tag ON manga_tag.tag_id = tag.id "
+                    "WHERE tag.normalized_name = 'test'"
+                )
+            ).all()
+
+        manga_details = " ".join(str(row[-1]) for row in manga_plan)
+        tag_details = " ".join(str(row[-1]) for row in tag_plan)
+        assert "ix_manga_status_downloaded" in manga_details
+        assert "normalized_name=?" in tag_details
+        assert "ix_manga_tag_tag_id_manga_id" in tag_details
