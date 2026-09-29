@@ -11,6 +11,10 @@ from src.database.repositories.permission_repository import PermissionRepository
 from src.database.repositories.setting_repository import SettingRepository
 from src.database.repositories.task_log_repository import TaskLogRepository
 from src.database.repositories.user_group_repository import UserGroupRepository
+from src.database.repositories.web_auth_repository import (
+    WebAdminRepository,
+    WebSessionRepository,
+)
 
 __all__ = [
     "AuditEventRepository",
@@ -22,4 +26,6 @@ __all__ = [
     "TaskLogRepository",
     "TaskEventRepository",
     "UserGroupRepository",
+    "WebAdminRepository",
+    "WebSessionRepository",
 ]

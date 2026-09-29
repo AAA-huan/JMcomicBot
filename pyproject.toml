@@ -4,7 +4,9 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.20.0",
+    "argon2-cffi>=25.1.0",
     "colorama>=0.4.6",
+    "fastapi>=0.118.0",
     "img2pdf>=0.6.3",
     "jmcomic>=2.7.7",
     "pillow>=12.3.0",
@@ -14,6 +16,7 @@ dependencies = [
     "requests>=2.34.2",
     "rich>=15.0.0",
     "sqlalchemy>=2.0.54",
+    "uvicorn>=0.37.0",
     "websocket-client>=1.9.2",
 ]
 

@@ -136,6 +136,51 @@ class MangaTag(Base):
     )
 
 
+class WebAdmin(Base):
+    """WebUI 单管理员账户，只保存 Argon2 密码哈希。"""
+
+    __tablename__ = "web_admin"
+    __table_args__ = (CheckConstraint("id = 1", name="ck_web_admin_singleton"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    password_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utc_now
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utc_now
+    )
+    last_login_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+
+    sessions: Mapped[list["WebSession"]] = relationship(
+        back_populates="admin", cascade="all, delete-orphan"
+    )
+
+
+class WebSession(Base):
+    """WebUI 登录会话，数据库仅保存随机令牌的 SHA-256 摘要。"""
+
+    __tablename__ = "web_session"
+    __table_args__ = (Index("ix_web_session_expires_at", "expires_at"),)
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    token_hash: Mapped[str] = mapped_column(String(128), nullable=False, unique=True)
+    admin_id: Mapped[int] = mapped_column(
+        ForeignKey("web_admin.id", ondelete="CASCADE"), nullable=False
+    )
+    password_version: Mapped[int] = mapped_column(Integer, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utc_now
+    )
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    last_seen_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utc_now
+    )
+
+    admin: Mapped["WebAdmin"] = relationship(back_populates="sessions")
+
+
 class OperationTask(Base):
     """持久化操作任务，记录任务当前状态和执行结果。"""
 

@@ -1,11 +1,37 @@
 """配置管理器模块，负责加载和管理应用程序配置"""
 
+from typing import Dict, List, Union
+
 import os
-from typing import Dict, Union, List
 
 from dotenv import load_dotenv
 
 from src.logging.logger_config import logger
+
+
+def _parse_bool_config(name: str, default: bool) -> bool:
+    """解析布尔环境变量，非法值直接暴露配置错误。"""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in ("true", "1", "yes", "on"):
+        return True
+    if normalized in ("false", "0", "no", "off"):
+        return False
+    raise ValueError(f"{name} 必须是布尔值")
+
+
+def _parse_int_config(name: str, default: int, minimum: int, maximum: int) -> int:
+    """解析有明确范围的整数环境变量。"""
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except ValueError as error:
+        raise ValueError(f"{name} 必须是整数") from error
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} 必须位于 {minimum} 到 {maximum} 之间")
+    return value
 
 
 class ConfigManager:
@@ -115,6 +141,13 @@ class ConfigManager:
         db_echo_str = os.getenv("DB_ECHO", "false").lower()
         db_echo = db_echo_str in ("true", "1", "yes", "on")
 
+        webui_enabled = _parse_bool_config("WEBUI_ENABLED", True)
+        webui_host = os.getenv("WEBUI_HOST", "127.0.0.1").strip()
+        if not webui_host:
+            raise ValueError("WEBUI_HOST 不能为空")
+        webui_port = _parse_int_config("WEBUI_PORT", 8000, 1, 65535)
+        webui_session_hours = _parse_int_config("WEBUI_SESSION_HOURS", 24, 1, 24 * 30)
+
         self.config_dict: Dict[str, Union[str, int, float, bool]] = {
             "MANGA_DOWNLOAD_PATH": absolute_download_path,
             "NAPCAT_WS_URL": ws_url,
@@ -128,6 +161,10 @@ class ConfigManager:
             "RESEND_CONFIRM_TIMEOUT": resend_confirm_timeout,
             "DB_PATH": absolute_db_path,
             "DB_ECHO": db_echo,
+            "WEBUI_ENABLED": webui_enabled,
+            "WEBUI_HOST": webui_host,
+            "WEBUI_PORT": webui_port,
+            "WEBUI_SESSION_HOURS": webui_session_hours,
         }
 
         # 初始化黑白名单配置
