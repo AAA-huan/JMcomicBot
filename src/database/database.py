@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from src.database.migrations import (
     ensure_schema_version,
-    prepare_legacy_file_paths,
     upgrade_schema,
 )
 from src.logging.logger_config import logger
@@ -74,8 +73,7 @@ class DatabaseManager:
     def init_db(self) -> None:
         """创建数据库目录并初始化所有表结构"""
         os.makedirs(self.db_dir, exist_ok=True)
-        prepare_legacy_file_paths(self.engine, self.download_root)
-        upgrade_schema(self.engine)
+        upgrade_schema(self.engine, self.download_root)
         ensure_schema_version(self.engine)
         self.logger.info(f"SQLite数据库初始化完成: {self.db_file}")
 
