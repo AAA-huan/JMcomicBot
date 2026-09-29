@@ -23,6 +23,27 @@ class TestDatabaseManager:
         }
         assert expected.issubset(tables)
 
+    def test_management_schema_constraints_exist(
+        self, db_manager: DatabaseManager
+    ) -> None:
+        """管理表应包含关键外键、唯一约束和复合索引"""
+        inspector = inspect(db_manager.engine)
+
+        assert "uq_tag_normalized_name" in {
+            constraint["name"]
+            for constraint in inspector.get_unique_constraints("tag")
+        }
+        assert {
+            tuple(foreign_key["constrained_columns"])
+            for foreign_key in inspector.get_foreign_keys("task_event")
+        } == {("task_id",)}
+        assert {
+            index["name"] for index in inspector.get_indexes("operation_task")
+        } >= {
+            "ix_operation_task_status_created",
+            "ix_operation_task_manga_created",
+        }
+
     def test_session_can_write(self, db_manager: DatabaseManager) -> None:
         """会话应能执行插入操作"""
         from src.database.models import Setting
