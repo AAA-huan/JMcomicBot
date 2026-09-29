@@ -103,6 +103,23 @@ class TestManga:
         with pytest.raises(ValueError, match="下载根目录内"):
             repository.add_file("23", str(outside_file), 0.1)
 
+    def test_add_file_refreshes_existing_metadata(
+        self, manga_repo: MangaRepository, tmp_path
+    ) -> None:
+        pdf = tmp_path / "24-标题(1章).pdf"
+        pdf.write_bytes(b"old")
+        manga_repo.upsert(
+            manga_id="24", title="标题", author="", tags="", chapter_count=1, page_count=1
+        )
+        manga_repo.add_file("24", str(pdf), 0.1)
+
+        pdf.write_bytes(b"new-content")
+        refreshed = manga_repo.add_file("24", str(pdf), 0.2)
+
+        assert refreshed.file_size_bytes == len(b"new-content")
+        assert refreshed.file_size_mb == 0.2
+        assert refreshed.status == "ready"
+
     def test_delete(self, manga_repo: MangaRepository) -> None:
         manga_repo.upsert(
             manga_id="16", title="A", author="", tags="", chapter_count=1, page_count=1

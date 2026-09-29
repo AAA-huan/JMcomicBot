@@ -163,8 +163,6 @@ class MangaRepository(BaseRepository):
             existing = session.scalars(
                 select(MangaFile).where(MangaFile.file_path == file_path)
             ).first()
-            if existing is not None:
-                return existing
             file_size_bytes = (
                 os.path.getsize(file_path)
                 if os.path.isfile(file_path)
@@ -177,6 +175,16 @@ class MangaRepository(BaseRepository):
                     relative_path = str(resolved_path.relative_to(self.download_root))
                 except ValueError as error:
                     raise ValueError("PDF文件路径必须位于下载根目录内") from error
+            if existing is not None:
+                existing.file_size_mb = file_size_mb
+                existing.file_size_bytes = file_size_bytes
+                existing.display_name = os.path.basename(file_path)
+                existing.status = "ready"
+                existing.updated_at = datetime.now()
+                existing.relative_path = relative_path
+                session.commit()
+                session.refresh(existing)
+                return existing
             manga_file = MangaFile(
                 manga_id=manga_id,
                 file_path=file_path,
