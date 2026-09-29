@@ -198,6 +198,22 @@ class MangaRepository(BaseRepository):
                 session.commit()
                 session.refresh(existing)
                 return existing
+            existing_for_manga = session.scalars(
+                select(MangaFile).where(MangaFile.manga_id == manga_id)
+            ).first()
+            if existing_for_manga is not None:
+                existing_for_manga.file_path = file_path
+                existing_for_manga.file_size_mb = file_size_mb
+                existing_for_manga.display_name = os.path.basename(file_path)
+                existing_for_manga.file_type = "pdf"
+                existing_for_manga.mime_type = "application/pdf"
+                existing_for_manga.file_size_bytes = file_size_bytes
+                existing_for_manga.status = "ready"
+                existing_for_manga.updated_at = datetime.now()
+                existing_for_manga.relative_path = relative_path
+                session.commit()
+                session.refresh(existing_for_manga)
+                return existing_for_manga
             manga_file = MangaFile(
                 manga_id=manga_id,
                 file_path=file_path,

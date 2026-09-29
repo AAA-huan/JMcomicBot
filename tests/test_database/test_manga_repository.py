@@ -121,6 +121,21 @@ class TestManga:
         assert refreshed.file_size_mb == 0.2
         assert refreshed.status == "ready"
 
+    def test_add_file_replaces_existing_manga_pdf(self, manga_repo: MangaRepository, tmp_path) -> None:
+        first_pdf = tmp_path / "27-old.pdf"
+        second_pdf = tmp_path / "27-new.pdf"
+        first_pdf.write_bytes(b"old")
+        second_pdf.write_bytes(b"new")
+        manga_repo.upsert(
+            manga_id="27", title="标题", author="", tags="", chapter_count=1, page_count=1
+        )
+
+        first_record = manga_repo.add_file("27", str(first_pdf), 0.1)
+        second_record = manga_repo.add_file("27", str(second_pdf), 0.1)
+
+        assert second_record.id == first_record.id
+        assert manga_repo.list_files("27")[0].file_path == str(second_pdf)
+
     def test_upsert_rejects_unknown_status(self, manga_repo: MangaRepository) -> None:
         with pytest.raises(ValueError, match="不支持的漫画状态"):
             manga_repo.upsert(
