@@ -23,6 +23,12 @@ class TestMangaTag:
 
         assert len(tag_repo.get_by_tag("萌系")) == 1
 
+    def test_tag_query_uses_normalized_name(self, tag_repo: MangaTagRepository) -> None:
+        tag_repo.add(" 萌系 ", "100", "100-a.pdf")
+
+        assert len(tag_repo.get_by_tag("萌系")) == 1
+        assert tag_repo.list_all_tags() == ["萌系"]
+
     def test_list_all_tags(self, tag_repo: MangaTagRepository) -> None:
         tag_repo.add("萌系", "100", "100-萌漫画(1章).pdf")
         tag_repo.add("热血", "200", "200-热血漫画(1章).pdf")

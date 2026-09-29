@@ -68,7 +68,8 @@ class MangaTagRepository(BaseRepository):
                 session.flush()
             existing = session.scalar(
                 select(MangaTag).where(
-                    MangaTag.tag == tag, MangaTag.manga_id == manga_id
+                    MangaTag.tag_id == tag_definition.id,
+                    MangaTag.manga_id == manga_id,
                 )
             )
             if existing is None:
@@ -94,16 +95,20 @@ class MangaTagRepository(BaseRepository):
             List[MangaTag]: 标签对应的漫画记录列表
         """
         with self._get_session() as session:
+            normalized_name = " ".join(tag.split()).casefold()
             stmt = (
-                select(MangaTag).where(MangaTag.tag == tag).order_by(MangaTag.pdf_name)
+                select(MangaTag)
+                .join(Tag, MangaTag.tag_id == Tag.id)
+                .where(Tag.normalized_name == normalized_name)
+                .order_by(MangaTag.pdf_name)
             )
             return list(session.scalars(stmt).all())
 
     def list_all_tags(self) -> List[str]:
         """列出数据库中所有标签名（去重）"""
         with self._get_session() as session:
-            rows = session.execute(select(MangaTag.tag).distinct()).all()
-            return sorted(tag for (tag,) in rows)
+            rows = session.execute(select(Tag.name).order_by(Tag.normalized_name)).all()
+            return [tag for (tag,) in rows]
 
     def delete_by_manga_id(self, manga_id: str) -> int:
         """删除指定漫画的全部标签记录
