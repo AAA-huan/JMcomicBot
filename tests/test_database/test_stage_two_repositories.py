@@ -195,6 +195,73 @@ def test_task_service_records_lifecycle_without_existing_manga(
     ]
 
 
+def test_duplicate_download_request_returns_existing_task(
+    operation_task_service, operation_task_repo, task_event_repo, audit_event_repo
+) -> None:
+    """同一漫画存在活动下载时应返回原任务且不重复记录请求。"""
+    context = OperationContext.qq("10001", "20001")
+
+    first = operation_task_service.create("download", context, manga_id="404")
+    duplicate = operation_task_service.create("download", context, manga_id="404")
+
+    assert duplicate == first
+    assert len(operation_task_repo.list()) == 1
+    assert [event.event_type for event in task_event_repo.list(first.id)] == [
+        "download.requested"
+    ]
+    assert [event.event_type for event in audit_event_repo.list()] == [
+        "download.requested"
+    ]
+
+
+def test_task_state_machine_rejects_invalid_transitions(
+    operation_task_service,
+) -> None:
+    """排队、运行和终态之间只能按明确状态机推进。"""
+    context = OperationContext.qq("10001")
+    cancelled = operation_task_service.create("download", context, manga_id="101")
+    operation_task_service.cancel(cancelled.id)
+    with pytest.raises(ValueError, match="cancelled 转换为 running"):
+        operation_task_service.start(cancelled.id, "downloading")
+
+    running = operation_task_service.create("download", context, manga_id="102")
+    operation_task_service.start(running.id, "downloading")
+    with pytest.raises(ValueError, match="running 转换为 cancelled"):
+        operation_task_service.cancel(running.id)
+
+    queued = operation_task_service.create("download", context, manga_id="103")
+    with pytest.raises(ValueError, match="queued 转换为 succeeded"):
+        operation_task_service.succeed(queued.id)
+
+
+def test_failed_download_returns_persisted_result(
+    operation_task_service, operation_task_repo, task_event_repo
+) -> None:
+    """下载失败应持久化稳定错误码，并返回渠道无关结果。"""
+    context = OperationContext.web("admin", "127.0.0.1")
+    task = operation_task_service.create("download", context, manga_id="500")
+    operation_task_service.start(task.id, "downloading")
+
+    result = operation_task_service.fail(
+        task.id,
+        error_code="download_failed",
+        error_message="TimeoutError",
+        context=context,
+    )
+
+    stored = operation_task_repo.get(task.id)
+    assert result.status == "failed"
+    assert result.error_code == "download_failed"
+    assert result.error_message == "TimeoutError"
+    assert stored is not None
+    assert stored.finished_at is not None
+    assert [event.event_type for event in task_event_repo.list(task.id)] == [
+        "download.requested",
+        "download.started",
+        "download.failed",
+    ]
+
+
 def test_database_backup_uses_task_service(
     tmp_path, db_manager, operation_task_service, operation_task_repo
 ) -> None:

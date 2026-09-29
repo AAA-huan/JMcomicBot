@@ -21,6 +21,14 @@ _TASK_STATUSES = {
     "cancelled",
     "interrupted",
 }
+_TASK_STATUS_TRANSITIONS = {
+    "queued": {"running", "cancelled"},
+    "running": {"running", "succeeded", "failed", "interrupted"},
+    "succeeded": set(),
+    "failed": set(),
+    "cancelled": set(),
+    "interrupted": set(),
+}
 _TASK_EVENT_METADATA_KEYS = {
     "duration_ms",
     "file_count",
@@ -139,6 +147,8 @@ class OperationTaskRepository(BaseRepository):
             task = session.get(OperationTask, task_id)
             if task is None:
                 raise ValueError(f"任务不存在: {task_id}")
+            if status not in _TASK_STATUS_TRANSITIONS[task.status]:
+                raise ValueError(f"不允许任务状态从 {task.status} 转换为 {status}")
             task.status = status
             task.stage = stage
             task.progress = progress
