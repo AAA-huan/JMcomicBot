@@ -109,15 +109,16 @@ class MangaTag(Base):
 
     __tablename__ = "manga_tag"
     __table_args__ = (
-        UniqueConstraint("tag", "manga_id", name="uq_manga_tag_tag_manga"),
         UniqueConstraint("manga_id", "tag_id", name="uq_manga_tag_manga_tag"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    tag: Mapped[str] = mapped_column(String(128), index=True, comment="标签名")
-    manga_id: Mapped[str] = mapped_column(String(32), index=True, comment="漫画ID")
-    tag_id: Mapped[Optional[int]] = mapped_column(
-        ForeignKey("tag.id", ondelete="CASCADE"), nullable=True
+    tag: Mapped[str] = mapped_column(String(128), comment="兼容显示名")
+    manga_id: Mapped[str] = mapped_column(
+        ForeignKey("manga.id", ondelete="CASCADE"), index=True, comment="漫画ID"
+    )
+    tag_id: Mapped[int] = mapped_column(
+        ForeignKey("tag.id", ondelete="CASCADE"), nullable=False
     )
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, comment="记录创建时间"

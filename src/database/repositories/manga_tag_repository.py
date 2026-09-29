@@ -50,7 +50,7 @@ class MangaTagRepository(BaseRepository):
             return list(session.scalars(stmt).all())
 
     def add(self, tag: str, manga_id: str, pdf_name: str) -> None:
-        """添加一条标签-漫画关系记录（已存在时忽略）
+        """为已存在漫画添加一条标签关系（已存在时忽略）。
 
         Args:
             tag: 标签名
@@ -58,6 +58,8 @@ class MangaTagRepository(BaseRepository):
             pdf_name: 漫画PDF文件名
         """
         with self._get_session() as session:
+            if session.get(Manga, manga_id) is None:
+                raise ValueError(f"漫画记录不存在，无法写入标签: {manga_id}")
             normalized_name = " ".join(tag.split()).casefold()
             tag_definition = session.scalar(
                 select(Tag).where(Tag.normalized_name == normalized_name)
@@ -86,9 +88,6 @@ class MangaTagRepository(BaseRepository):
 
     def add_for_existing_manga(self, tag: str, manga_id: str, pdf_name: str) -> None:
         """仅为已存在的漫画写入标签关系。"""
-        with self._get_session() as session:
-            if session.get(Manga, manga_id) is None:
-                raise ValueError(f"漫画记录不存在，无法写入标签: {manga_id}")
         self.add(tag, manga_id, pdf_name)
 
     def get_by_tag(self, tag: str) -> List[MangaTag]:

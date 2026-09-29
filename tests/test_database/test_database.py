@@ -113,7 +113,7 @@ class TestDatabaseManager:
                 text("SELECT MAX(version) FROM schema_version")
             ).scalar()
 
-        assert alembic_version == "0010_remove_legacy_tag_columns"
+        assert alembic_version == "0011_require_manga_tag_foreign_keys"
         assert version == 1
 
     def test_unknown_schema_version_is_rejected(self, tmp_path) -> None:
@@ -149,6 +149,6 @@ class TestDatabaseManager:
                     text("SELECT version_num FROM alembic_version")
                 ).scalars().all()
 
-            assert versions == ["0010_remove_legacy_tag_columns"]
+            assert versions == ["0011_require_manga_tag_foreign_keys"]
         finally:
             db.close()

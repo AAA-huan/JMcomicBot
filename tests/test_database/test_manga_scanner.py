@@ -242,7 +242,9 @@ class TestSyncScannedToDbTagCleanup:
             chapter_count=1,
             page_count=0,
         )
-        tag_repo.add("萌系", "999999", "999999-残留漫画(1章).pdf")
+        tag_repo.add_for_existing_manga(
+            "萌系", "999999", "999999-残留漫画(1章).pdf"
+        )
 
         result = sync_scanned_to_db(manga_repo, entries, tag_repo=tag_repo)
 

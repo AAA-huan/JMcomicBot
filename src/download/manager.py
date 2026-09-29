@@ -432,7 +432,7 @@ class DownloadManager:
         for tag in tags.split(","):
             tag = tag.strip()
             if tag:
-                self.tag_repo.add(tag, manga_id, "")
+                self.tag_repo.add_for_existing_manga(tag, manga_id, "")
 
     def download_manga(
         self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
