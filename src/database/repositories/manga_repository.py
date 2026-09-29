@@ -15,6 +15,8 @@ from src.database.database import DatabaseManager
 from src.database.models import Manga, MangaFile
 from src.database.repositories._base import BaseRepository
 
+_VALID_MANGA_STATUSES = {"downloaded", "missing_file", "invalid", "deleted"}
+
 
 class MangaRepository(BaseRepository):
     """漫画元数据仓储，提供已下载漫画及相关 PDF 文件的增删改查"""
@@ -114,6 +116,9 @@ class MangaRepository(BaseRepository):
         Returns:
             Manga: 已保存的漫画记录
         """
+        if status not in _VALID_MANGA_STATUSES:
+            raise ValueError(f"不支持的漫画状态: {status}")
+
         with self._get_session() as session:
             manga = session.get(Manga, manga_id)
             if manga is None:

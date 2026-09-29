@@ -120,6 +120,18 @@ class TestManga:
         assert refreshed.file_size_mb == 0.2
         assert refreshed.status == "ready"
 
+    def test_upsert_rejects_unknown_status(self, manga_repo: MangaRepository) -> None:
+        with pytest.raises(ValueError, match="不支持的漫画状态"):
+            manga_repo.upsert(
+                manga_id="25",
+                title="标题",
+                author="",
+                tags="",
+                chapter_count=1,
+                page_count=1,
+                status="unknown",
+            )
+
     def test_delete(self, manga_repo: MangaRepository) -> None:
         manga_repo.upsert(
             manga_id="16", title="A", author="", tags="", chapter_count=1, page_count=1
