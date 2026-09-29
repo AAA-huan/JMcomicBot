@@ -253,6 +253,8 @@ class CommandExecutor:
             threading.Thread(
                 target=self._download_manga_files,
                 args=(user_id, manga_ids, group_id, private),
+                daemon=True,
+                name="command-download",
             ).start()
 
         except ValueError as e:
@@ -386,6 +388,8 @@ class CommandExecutor:
             threading.Thread(
                 target=self._send_manga_files,
                 args=(user_id, manga_ids, group_id, private),
+                daemon=True,
+                name="command-send",
             ).start()
 
         except ValueError as e:
@@ -718,6 +722,8 @@ class CommandExecutor:
             threading.Thread(
                 target=self._query_manga_files,
                 args=(user_id, manga_ids, group_id, private),
+                daemon=True,
+                name="command-query",
             ).start()
 
         except ValueError as e:

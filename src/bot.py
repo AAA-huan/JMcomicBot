@@ -5,7 +5,7 @@ from typing import Any, Dict, Optional
 import platform
 import signal
 import sys
-import time
+import threading
 
 from src.command.executor import CommandExecutor
 from src.config.manager import ConfigManager
@@ -36,6 +36,10 @@ class MangaBot:
     def __init__(self) -> None:
         """初始化MangaBot机器人"""
         logger.info(f"JMComic QQ机器人 版本 {self.VERSION} 启动中...")
+
+        self._shutdown_event: threading.Event = threading.Event()
+        self._close_lock: threading.Lock = threading.Lock()
+        self._resources_closed: bool = False
 
         self._check_platform_compatibility()
 
@@ -175,12 +179,13 @@ class MangaBot:
         self.connect_websocket()
         self.start_reconnect_manager()
 
-        while True:
-            time.sleep(1)
+        self._shutdown_event.wait()
 
     def handle_safe_close(self) -> None:
         """安全关闭机器人，确保所有资源都被正确释放"""
         signal.signal(signal.SIGINT, self._safe_sigint_handler)
+        if hasattr(signal, "SIGTERM"):
+            signal.signal(signal.SIGTERM, self._safe_sigterm_handler)
 
     def _get_one_char(self) -> str | None:
         """跨平台获取单个字符输入"""
@@ -204,65 +209,73 @@ class MangaBot:
 
     def _confirm_close(self) -> bool:
         """询问用户是否确认关闭机器人"""
+        if not sys.stdin.isatty():
+            logger.info("当前无交互式终端，直接执行关闭")
+            return True
         print("是否确认关闭JMComic下载机器人？(y/n)")
-        ch = self._get_one_char()
+        try:
+            ch = self._get_one_char()
+        except (EOFError, OSError) as e:
+            logger.warning(f"无法读取关闭确认，直接执行关闭: {e}")
+            return True
         return ch is not None and ch.lower() == "y"
 
-    def _safe_sigint_handler(self, signum, frame) -> None:
-        """安全处理SIGINT信号"""
+    def _safe_sigint_handler(self, _signum: int, _frame: Any) -> None:
+        """处理 SIGINT：确认后仅请求关闭，由主流程统一释放资源"""
         if self._confirm_close():
-            try:
-                self._close_resources()
-            except Exception as e:
-                logger.error(f"关闭资源时发生严重错误: {e}")
-                print(f"关闭过程中发生严重错误，但仍将强制退出: {e}")
-            finally:
-                signal.signal(signal.SIGINT, signal.SIG_DFL)
-                signal.raise_signal(signal.SIGINT)
-                return
+            signal.signal(signal.SIGINT, signal.SIG_DFL)
+            self.request_shutdown("收到用户中断信号")
         else:
             print("关闭操作被取消，程序继续运行")
 
-    def _close_resources(self) -> None:
+    def _safe_sigterm_handler(self, _signum: int, _frame: Any) -> None:
+        """处理服务管理器发送的 SIGTERM，不进行交互确认"""
+        signal.signal(signal.SIGTERM, signal.SIG_DFL)
+        self.request_shutdown("收到终止信号")
+
+    def request_shutdown(self, reason: str = "") -> None:
+        """请求主循环退出，重复调用不会产生额外副作用"""
+        if reason:
+            logger.info(f"请求关闭机器人: {reason}")
+        self._shutdown_event.set()
+
+    def close(self) -> None:
         """
         关闭所有资源，确保程序安全退出
 
-        Raises:
-            RuntimeError: 当关闭资源失败时
+        单个组件关闭失败不会阻断其他资源释放；重复调用不会重复关闭。
         """
+        with self._close_lock:
+            if self._resources_closed:
+                return
+            self._resources_closed = True
+
+        self._shutdown_event.set()
         logger.info("开始关闭JMComic下载机器人资源...")
 
-        if self.ws_client.ws is not None:
+        close_steps = (
+            ("WebSocket", self.ws_client.close),
+            ("文件发送队列", self.message_manager.stop),
+            ("下载队列", self.download_manager.stop),
+            ("SQLite数据库", self.database_manager.close),
+        )
+        close_errors = []
+        for name, close_step in close_steps:
             try:
-                if self.ws_client.is_connected():
-                    logger.info("关闭WebSocket连接...")
-                    self.ws_client.close()
-                    logger.info("WebSocket连接已成功关闭")
-                else:
-                    logger.info("WebSocket连接已断开，无需关闭")
-            except Exception as ws_error:
-                logger.error(f"关闭WebSocket连接时出错: {ws_error}")
-                raise RuntimeError(ws_error)
+                result = close_step()
+                if result is False:
+                    logger.warning(f"{name} 未在限定时间内完全停止")
+            except Exception as e:  # pylint: disable=broad-exception-caught
+                close_errors.append(f"{name}: {e}")
+                logger.error(f"关闭{name}时出错: {e}")
 
-        logger.info("停止下载队列处理线程...")
-        self.download_manager.queue_running = False
-        logger.info("下载队列线程已设置为停止状态")
+        if close_errors:
+            logger.error(f"机器人关闭完成，但存在异常: {'; '.join(close_errors)}")
+            print("JMComic下载机器人已关闭，但部分资源清理失败，请查看日志")
+        else:
+            logger.info("JMComic下载机器人资源关闭完成")
+            print("JMComic下载机器人已关闭")
 
-        logger.info("停止文件发送队列进程...")
-        self.message_manager.stop()
-        logger.info("文件发送队列进程已停止")
-
-        if self.download_manager.downloading_mangas:
-            logger.info(
-                f"清理正在下载的漫画任务: {list(self.download_manager.downloading_mangas.keys())}"
-            )
-            self.download_manager.downloading_mangas.clear()
-
-        self.ws_client.stop_reconnect_manager()
-
-        logger.info("关闭SQLite数据库连接...")
-        self.database_manager.close()
-        logger.info("SQLite数据库连接已关闭")
-
-        print("JMComic下载机器人已安全关闭")
-        logger.info("JMComic下载机器人资源关闭完成")
+    def _close_resources(self) -> None:
+        """兼容旧调用入口，实际关闭逻辑由 close 统一处理"""
+        self.close()

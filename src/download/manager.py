@@ -119,6 +119,9 @@ class DownloadManager:
         self.tag_repo = tag_repo
         self.download_queue: queue.Queue = queue.Queue()
         self.queue_running: bool = True
+        self._stop_event: threading.Event = threading.Event()
+        self._queue_state_lock: threading.Lock = threading.Lock()
+        self._queue_thread: Optional[threading.Thread] = None
         self.queued_tasks: Dict[str, Tuple[str, Optional[str], bool]] = {}
         self.downloading_mangas: Dict[str, bool] = {}
         self._start_download_queue_processor()
@@ -141,9 +144,12 @@ class DownloadManager:
 
         def process_queue() -> None:
             """下载队列处理函数，顺序执行队列中的下载任务"""
-            while self.queue_running:
+            while not self._stop_event.is_set():
                 try:
                     task = self.download_queue.get(timeout=1)
+                    if task is None or self._stop_event.is_set():
+                        self.download_queue.task_done()
+                        return
                     user_id, manga_id, group_id, private = task
                     self._process_download_task(user_id, manga_id, group_id, private)
                     self.download_queue.task_done()
@@ -156,9 +162,41 @@ class DownloadManager:
                     except Exception:
                         pass
 
-        queue_thread = threading.Thread(target=process_queue, daemon=True)
-        queue_thread.start()
+        self._queue_thread = threading.Thread(
+            target=process_queue,
+            daemon=True,
+            name="download-queue",
+        )
+        self._queue_thread.start()
         self.logger.info("下载队列处理线程已启动")
+
+    def stop(self, timeout: float = 1.0) -> bool:
+        """停止接收下载任务，并有限等待当前下载线程退出
+
+        jmcomic 的进行中下载无法从外部安全中断，因此只做有界等待；未完成的
+        临时文件会由下次启动清理。
+
+        Args:
+            timeout: 等待下载线程退出的最长秒数
+
+        Returns:
+            bool: 下载线程是否已退出
+        """
+        with self._queue_state_lock:
+            self.queue_running = False
+            self._stop_event.set()
+            self.queued_tasks.clear()
+            self.download_queue.put(None)
+        if self._queue_thread is not None:
+            self._queue_thread.join(timeout=timeout)
+            if self._queue_thread.is_alive():
+                active_ids = list(self.downloading_mangas.keys())
+                self.logger.warning(
+                    f"下载线程未在限定时间内停止，进行中的任务将随进程退出: {active_ids}"
+                )
+                return False
+        self.logger.info("下载队列线程已停止")
+        return True
 
     def _clear_download_folder(self) -> None:
         """
@@ -276,6 +314,12 @@ class DownloadManager:
             result = jmcomic.download_album(manga_id, option=option)
             if isinstance(result, set):
                 raise RuntimeError(f"漫画 {manga_id} 批量下载返回了集合，不符合预期")
+
+            if self._stop_event.is_set():
+                self.logger.info(
+                    f"程序正在关闭，漫画 {manga_id} 下载结果不再入库或发送"
+                )
+                return
 
             # 从下载清单获取实际生成的 PDF 路径与实际成功下载的图片数
             pdf_paths = result.manifest.get_export_filepath_list("pdf")
@@ -404,9 +448,15 @@ class DownloadManager:
             manga_id: 漫画ID，指定要下载的漫画
             group_id: 群ID，用于在群聊中发送消息
             private: 是否为私聊，决定消息发送的目标
+
+        Raises:
+            RuntimeError: 下载队列已经停止时
         """
-        self.queued_tasks[manga_id] = (user_id, group_id, private)
-        self.download_queue.put((user_id, manga_id, group_id, private))
+        with self._queue_state_lock:
+            if not self.queue_running:
+                raise RuntimeError("下载队列已停止")
+            self.queued_tasks[manga_id] = (user_id, group_id, private)
+            self.download_queue.put((user_id, manga_id, group_id, private))
         self.logger.info(f"漫画ID {manga_id} 的下载任务已添加到队列")
 
     def cancel_download(self, manga_id: str) -> bool:

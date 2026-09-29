@@ -1,9 +1,9 @@
 """WebSocket客户端管理器，负责WebSocket连接和重连管理"""
 
+from typing import Any, Callable, Dict, List, Optional
+
 import json
 import threading
-import time
-from typing import Any, Callable, Dict, List, Optional
 
 import websocket
 
@@ -36,6 +36,7 @@ class WebSocketClient:
         self.logger = logger
         self.watchdog_running: bool = False
         self.watchdog_thread: Optional[threading.Thread] = None
+        self._watchdog_stop_event: threading.Event = threading.Event()
         self.message_handler: Optional[Callable[[Dict[str, Any]], None]] = None
 
         # run_forever所在的线程，用于区分"库内部重连中"与"连接彻底退出"
@@ -114,6 +115,7 @@ class WebSocketClient:
             return
 
         self.watchdog_running = True
+        self._watchdog_stop_event.clear()
         self.watchdog_thread = threading.Thread(
             target=self._watchdog,
             daemon=True,
@@ -122,17 +124,28 @@ class WebSocketClient:
         self.watchdog_thread.start()
         self.logger.info("WebSocket看门狗线程已启动")
 
-    def stop_reconnect_manager(self) -> None:
-        """停止看门狗线程"""
+    def stop_reconnect_manager(self, timeout: float = 1.0) -> bool:
+        """停止看门狗线程并立即唤醒其等待
+
+        Args:
+            timeout: 等待线程退出的最长秒数
+
+        Returns:
+            bool: 看门狗线程是否已退出
+        """
         self.watchdog_running = False
+        self._watchdog_stop_event.set()
         if self.watchdog_thread is not None:
-            self.watchdog_thread.join(timeout=2)
-            self.logger.info("WebSocket看门狗线程已停止")
+            self.watchdog_thread.join(timeout=timeout)
+            if self.watchdog_thread.is_alive():
+                self.logger.warning("WebSocket看门狗线程未在限定时间内停止")
+                return False
+        self.logger.info("WebSocket看门狗线程已停止")
+        return True
 
     def _watchdog(self) -> None:
         """看门狗线程：仅在run_forever线程退出且非主动关闭时重建连接"""
-        while self.watchdog_running:
-            time.sleep(WATCHDOG_INTERVAL)
+        while not self._watchdog_stop_event.wait(WATCHDOG_INTERVAL):
 
             if self._closing:
                 continue
@@ -193,12 +206,29 @@ class WebSocketClient:
             self.ws is not None and self.ws.sock is not None and self.ws.sock.connected
         )
 
-    def close(self) -> None:
-        """关闭WebSocket连接，并标记主动关闭以阻止看门狗重建"""
+    def close(self, timeout: float = 1.0) -> bool:
+        """关闭连接、看门狗和 run_forever 线程
+
+        Args:
+            timeout: 等待 run_forever 线程退出的最长秒数
+
+        Returns:
+            bool: 所有 WebSocket 后台线程是否已退出
+        """
         self._closing = True
+        watchdog_stopped = self.stop_reconnect_manager(timeout=timeout)
         if self.ws is not None:
             self.ws.close()
-            self.logger.info("WebSocket连接已关闭")
+        if (
+            self.run_thread is not None
+            and self.run_thread is not threading.current_thread()
+        ):
+            self.run_thread.join(timeout=timeout)
+            if self.run_thread.is_alive():
+                self.logger.warning("WebSocket运行线程未在限定时间内停止")
+                return False
+        self.logger.info("WebSocket连接与后台线程已关闭")
+        return watchdog_stopped
 
     def set_message_handler(self, handler: Callable[[Dict[str, Any]], None]) -> None:
         """

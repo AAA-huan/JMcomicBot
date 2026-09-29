@@ -48,6 +48,7 @@ class MessageManager:
         self.logger = logger
         self._file_queue: queue.Queue = queue.Queue()
         self._queue_running: bool = True
+        self._stop_event: threading.Event = threading.Event()
         self._file_thread: Optional[threading.Thread] = None
         # 保护所有ws.send，避免多线程并发写入连接
         self._ws_lock: threading.RLock = threading.RLock()
@@ -86,20 +87,37 @@ class MessageManager:
         """
         self.ws_client = ws_client
 
-    def stop(self) -> None:
-        """停止文件发送队列进程，释放资源"""
-        self._queue_running = False
+    def stop(self, timeout: float = 1.0) -> bool:
+        """停止文件发送队列并等待工作线程退出
+
+        Args:
+            timeout: 等待工作线程退出的最长秒数
+
+        Returns:
+            bool: 工作线程是否已退出
+        """
+        with self._queue_count_lock:
+            self._queue_running = False
+            self._stop_event.set()
+            # 与入队共用锁，避免停止哨兵之后又插入新任务。
+            self._file_queue.put(None)
         with self._result_cond:
             self._result_cond.notify_all()
         if self._file_thread is not None:
-            self._file_thread.join(timeout=2)
-            self.logger.info("文件发送队列进程已停止")
+            self._file_thread.join(timeout=timeout)
+            if self._file_thread.is_alive():
+                self.logger.warning("文件发送队列未在限定时间内停止")
+                return False
+        with self._queue_count_lock:
+            self._queue_count = 0
+        self.logger.info("文件发送队列线程已停止")
+        return True
 
     def _start_file_queue_worker(self) -> None:
         """启动文件发送队列后台线程，串行执行文件发送任务"""
 
         def process_queue() -> None:
-            while self._queue_running:
+            while not self._stop_event.is_set():
                 try:
                     task = self._file_queue.get(timeout=1)
                 except queue.Empty:
@@ -107,8 +125,12 @@ class MessageManager:
                     self._cleanup_expired_resends()
                     continue
 
-                self._process_send_task(task)
-                self._file_queue.task_done()
+                try:
+                    if task is None or self._stop_event.is_set():
+                        return
+                    self._process_send_task(task)
+                finally:
+                    self._file_queue.task_done()
 
         self._file_thread = threading.Thread(target=process_queue, daemon=True)
         self._file_thread.start()
@@ -150,13 +172,14 @@ class MessageManager:
             task.status = "failed"
             task.error = str(e)
             self._log_send_task(task, "failed", str(e))
-            self._store_pending_error(
-                user_id=task.user_id,
-                content_type="file",
-                content=task.file_path,
-                group_id=task.group_id,
-                private=task.private,
-            )
+            if not self._stop_event.is_set():
+                self._store_pending_error(
+                    user_id=task.user_id,
+                    content_type="file",
+                    content=task.file_path,
+                    group_id=task.group_id,
+                    private=task.private,
+                )
         finally:
             self._current_sending_file = None
             with self._queue_count_lock:
@@ -167,8 +190,10 @@ class MessageManager:
     def _enqueue_file_task(self, task: SendTask) -> None:
         """登记并加入文件发送队列，确保所有入队路径使用相同计数规则"""
         with self._queue_count_lock:
+            if self._stop_event.is_set():
+                raise RuntimeError("文件发送队列已停止")
             self._queue_count += 1
-        self._file_queue.put(task)
+            self._file_queue.put(task)
 
     def _send_file_with_retry(self, task: SendTask) -> None:
         """尝试发送文件，连接断开时等待重连并重试，超时抛出异常"""
@@ -178,9 +203,9 @@ class MessageManager:
         retry_timeout = int(self.config.get("SEND_RETRY_TIMEOUT", 30))
         deadline = time.time() + retry_timeout
 
-        while time.time() < deadline:
+        while time.time() < deadline and not self._stop_event.is_set():
             if self.ws_client is None or not self._is_websocket_connected():
-                time.sleep(0.5)
+                self._stop_event.wait(0.5)
                 continue
             try:
                 with self._ws_lock:
@@ -191,12 +216,14 @@ class MessageManager:
                     f"用户: {task.user_id}"
                 )
                 send_interval = float(self.config.get("FILE_SEND_INTERVAL", 1.8))
-                time.sleep(send_interval)
+                self._stop_event.wait(send_interval)
                 return
             except Exception as e:
                 self.logger.warning(f"发送文件时连接异常，重试中: {e}")
-                time.sleep(0.5)
+                self._stop_event.wait(0.5)
 
+        if self._stop_event.is_set():
+            raise RuntimeError("文件发送队列已停止")
         raise RuntimeError(
             f"WebSocket连接未建立，文件发送失败: {os.path.basename(task.file_path)}"
         )
