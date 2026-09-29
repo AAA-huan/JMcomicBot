@@ -16,6 +16,7 @@ class TaskResult:  # pylint: disable=too-many-instance-attributes
     stage: str
     progress: Optional[int]
     manga_id: Optional[str]
+    summary: str
     error_code: Optional[str]
     error_message: Optional[str]
 

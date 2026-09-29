@@ -177,6 +177,7 @@ class OperationTask(Base):
     progress: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     manga_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     requested_by: Mapped[str] = mapped_column(String(64), nullable=False, default="")
+    summary: Mapped[str] = mapped_column(String(255), nullable=False, default="")
     error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     attempt_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)

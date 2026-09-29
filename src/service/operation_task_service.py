@@ -36,6 +36,7 @@ class OperationTaskService:
             stage=task.stage,
             progress=task.progress,
             manga_id=task.manga_id,
+            summary=task.summary,
             error_code=task.error_code,
             error_message=task.error_message,
         )

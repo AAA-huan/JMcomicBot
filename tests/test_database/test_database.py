@@ -1,7 +1,11 @@
 """数据库管理器初始化与表结构创建测试"""
 
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
+from sqlalchemy import create_engine, inspect, text
 import pytest
-from sqlalchemy import inspect, text
 
 from src.database.database import DatabaseManager
 from src.database.migrations import backup_database
@@ -110,8 +114,42 @@ class TestDatabaseManager:
                 text("SELECT MAX(version) FROM schema_version")
             ).scalar()
 
-        assert alembic_version == "0020_allow_pending_download_task"
-        assert version == 20
+        assert alembic_version == "0021_add_operation_task_summary"
+        assert version == 21
+
+    def test_task_summary_migration_backfills_existing_tasks(self, tmp_path) -> None:
+        """0021 应为旧任务回填摘要，且保留原有任务状态。"""
+        project_root = Path(__file__).resolve().parents[2]
+        database_path = tmp_path / "task-summary.db"
+        config = Config(str(project_root / "alembic.ini"))
+        config.set_main_option("script_location", str(project_root / "alembic"))
+        config.set_main_option("sqlalchemy.url", f"sqlite:///{database_path}")
+        command.upgrade(config, "0020_allow_pending_download_task")
+
+        engine = create_engine(f"sqlite:///{database_path}")
+        try:
+            with engine.begin() as connection:
+                connection.execute(text("""
+                        INSERT INTO operation_task (
+                            id, task_type, source, status, stage, progress,
+                            manga_id, requested_by, attempt_count, created_at, updated_at
+                        ) VALUES (
+                            'task-1', 'download', 'qq', 'queued', 'queued', NULL,
+                            '350234', '10001', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP
+                        )
+                    """))
+
+            command.upgrade(config, "head")
+
+            with engine.connect() as connection:
+                row = connection.execute(
+                    text(
+                        "SELECT summary, status FROM operation_task WHERE id = 'task-1'"
+                    )
+                ).one()
+            assert row == ("下载漫画 350234", "queued")
+        finally:
+            engine.dispose()
 
     def test_outdated_schema_version_is_synchronized(self, tmp_path) -> None:
         """Alembic 已升级到最新版本时应同步过旧的辅助版本号。"""
@@ -133,7 +171,7 @@ class TestDatabaseManager:
                 version = session.execute(
                     text("SELECT MAX(version) FROM schema_version")
                 ).scalar_one()
-            assert version == 20
+            assert version == 21
         finally:
             db.close()
 
@@ -174,7 +212,7 @@ class TestDatabaseManager:
                     .all()
                 )
 
-            assert versions == ["0020_allow_pending_download_task"]
+            assert versions == ["0021_add_operation_task_summary"]
             assert backup_path.stat().st_mtime_ns == initial_backup_mtime
         finally:
             db.close()

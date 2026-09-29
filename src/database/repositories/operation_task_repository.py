@@ -27,6 +27,13 @@ _TASK_EVENT_METADATA_KEYS = {
     "page_count",
     "retry_count",
 }
+_TASK_SUMMARIES = {
+    "download": "下载漫画",
+    "scan": "扫描漫画目录",
+    "repair": "修复漫画资料",
+    "delete": "删除漫画",
+    "backup": "备份数据库",
+}
 
 
 def serialize_metadata(
@@ -76,6 +83,9 @@ class OperationTaskRepository(BaseRepository):
         if source not in _TASK_SOURCES:
             raise ValueError(f"不支持的任务来源: {source}")
         now = utc_now()
+        summary = _TASK_SUMMARIES[task_type]
+        if manga_id is not None and task_type in {"download", "delete"}:
+            summary = f"{summary} {manga_id}"
         task = OperationTask(
             id=str(uuid4()),
             task_type=task_type,
@@ -85,6 +95,7 @@ class OperationTaskRepository(BaseRepository):
             progress=None,
             manga_id=manga_id,
             requested_by=requested_by,
+            summary=summary,
             created_at=now,
             updated_at=now,
         )

@@ -54,6 +54,9 @@ def test_stage_two_constraints_and_indexes_exist(db_manager) -> None:
         item["name"] for item in inspector.get_check_constraints("audit_event")
     }
     audit_indexes = {item["name"] for item in inspector.get_indexes("audit_event")}
+    task_columns = {
+        item["name"]: item for item in inspector.get_columns("operation_task")
+    }
 
     assert {
         "ck_operation_task_type",
@@ -66,6 +69,7 @@ def test_stage_two_constraints_and_indexes_exist(db_manager) -> None:
     assert "ck_audit_event_source" in audit_checks
     assert "ix_audit_event_actor_created" in audit_indexes
     assert inspect(db_manager.engine).get_foreign_keys("operation_task") == []
+    assert task_columns["summary"]["nullable"] is False
 
 
 def test_create_task_and_find_active_download(operation_task_repo, manga_repo) -> None:
@@ -78,6 +82,7 @@ def test_create_task_and_find_active_download(operation_task_repo, manga_repo) -
 
     assert task.status == "queued"
     assert task.progress is None
+    assert task.summary == "下载漫画 123"
     active = operation_task_repo.find_active_download("123")
     assert active is not None
     assert active.id == task.id
@@ -166,6 +171,7 @@ def test_task_service_records_lifecycle_without_existing_manga(
         "download", OperationContext.qq("10001", "20001"), manga_id="404"
     )
     assert isinstance(task, TaskResult)
+    assert task.summary == "下载漫画 404"
     operation_task_service.start(task.id, "downloading")
     operation_task_service.succeed(
         task.id,
