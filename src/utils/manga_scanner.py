@@ -28,16 +28,15 @@ class MangaScanEntry:
     chapter_count: int = 0
     author: str = ""
     tags: str = ""
-    files: List[tuple[str, float]] = field(default_factory=list)
+    files: List[str] = field(default_factory=list)
 
-    def add_file(self, file_path: str, file_size_mb: float) -> None:
+    def add_file(self, file_path: str) -> None:
         """添加该漫画的一个PDF文件记录
 
         Args:
             file_path: PDF文件绝对路径
-            file_size_mb: 文件大小(MB)
         """
-        self.files.append((file_path, file_size_mb))
+        self.files.append(file_path)
 
 
 @dataclass
@@ -118,8 +117,6 @@ def scan_download_dir(download_path: str) -> List[MangaScanEntry]:
         if entry is None:
             continue
 
-        file_size_mb = round(os.path.getsize(file_path) / (1024 * 1024), 2)
-
         if entry.manga_id in manga_map:
             existing = manga_map[entry.manga_id]
             # 同ID聚合：章节数取所有文件中的最大值
@@ -129,7 +126,7 @@ def scan_download_dir(download_path: str) -> List[MangaScanEntry]:
         else:
             manga_map[entry.manga_id] = entry
 
-        manga_map[entry.manga_id].add_file(file_path, file_size_mb)
+        manga_map[entry.manga_id].add_file(file_path)
 
     entries = list(manga_map.values())
     entries.sort(key=lambda e: int(e.manga_id))
@@ -209,12 +206,12 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
         )
 
         # 目标 schema 一漫画只保留一个最终 PDF；多文件旧数据取最后扫描到的候选。
-        for file_path, _file_size_mb in entry.files[-1:]:
+        for file_path in entry.files[-1:]:
             repo.add_file(entry.manga_id, file_path)
 
         # 若本次扫描联网补全了标签，同步写入标签表
         if not dry_run and tag_repo is not None and entry.tags:
-            for file_path, _ in entry.files[-1:]:
+            for file_path in entry.files[-1:]:
                 pdf_name = os.path.basename(file_path)
                 for tag in entry.tags.split(","):
                     tag = tag.strip()
