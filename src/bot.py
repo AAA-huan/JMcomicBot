@@ -10,6 +10,7 @@ import threading
 from src.command.executor import CommandExecutor
 from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
+from src.database.models import utc_now
 from src.database.repositories import (
     AuditEventRepository,
     MangaRepository,
@@ -20,6 +21,7 @@ from src.database.repositories import (
     TaskLogRepository,
     UserGroupRepository,
     WebAdminRepository,
+    WebSessionRepository,
 )
 from src.download.manager import DownloadManager
 from src.event.handler import EventHandler
@@ -28,9 +30,13 @@ from src.message.manager import MessageManager
 from src.permission.manager import PermissionManager
 from src.platform.compatibility import PlatformChecker
 from src.service import DownloadQueueService, OperationTaskService
+from src.service.query_service import MangaQueryService, TaskQueryService
+from src.service.system_service import SystemService
+from src.service.web_auth_service import WebAuthService
 from src.utils.helpers import cleanup_failed_downloads
 from src.utils.name_cache import NameCache
 from src.web import WebServer, create_web_app
+from src.web.dependencies import WebDependencies
 from src.websocket.client import WebSocketClient
 
 
@@ -46,6 +52,7 @@ class MangaBot:
         self._shutdown_event: threading.Event = threading.Event()
         self._close_lock: threading.Lock = threading.Lock()
         self._resources_closed: bool = False
+        self._started_at = utc_now()
 
         self._check_platform_compatibility()
 
@@ -73,6 +80,7 @@ class MangaBot:
         self.task_event_repo = TaskEventRepository(self.database_manager)
         self.audit_event_repo = AuditEventRepository(self.database_manager)
         self.web_admin_repo = WebAdminRepository(self.database_manager)
+        self.web_session_repo = WebSessionRepository(self.database_manager)
         self.operation_task_service = OperationTaskService(
             self.operation_task_repo,
             self.task_event_repo,
@@ -111,6 +119,23 @@ class MangaBot:
             operation_task_service=self.operation_task_service,
         )
         self.download_service = DownloadQueueService(self.download_manager)
+        self.web_auth_service = WebAuthService(
+            self.web_admin_repo,
+            self.web_session_repo,
+            int(self.config_manager.config_dict["WEBUI_SESSION_HOURS"]),
+        )
+        self.manga_query_service = MangaQueryService(self.manga_repo, self.tag_repo)
+        self.task_query_service = TaskQueryService(self.operation_task_repo)
+        self.system_service = SystemService(
+            version=self.VERSION,
+            started_at=self._started_at,
+            manga_repository=self.manga_repo,
+            connection_provider=self.ws_client.is_connected,
+            download_queue_provider=self.download_manager.get_queue_status,
+            send_queue_provider=lambda: dict(
+                self.message_manager.get_send_queue_status()
+            ),
+        )
 
         self.command_executor = CommandExecutor(
             message_sender=self.message_manager.send_message,
@@ -167,7 +192,14 @@ class MangaBot:
                 logger.warning("WebUI 管理员尚未初始化，监听地址已强制退回 127.0.0.1")
                 web_host = "127.0.0.1"
             self.web_server = WebServer(
-                app=create_web_app(),
+                app=create_web_app(
+                    WebDependencies(
+                        auth_service=self.web_auth_service,
+                        manga_query_service=self.manga_query_service,
+                        task_query_service=self.task_query_service,
+                        system_service=self.system_service,
+                    )
+                ),
                 host=web_host,
                 port=int(self.config_manager.config_dict["WEBUI_PORT"]),
             )

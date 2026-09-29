@@ -5,7 +5,7 @@ from uuid import uuid4
 
 import json
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import selectinload
 
 from src.database.models import OperationTask, TaskEvent, utc_now
@@ -77,6 +77,37 @@ class OperationTaskRepository(BaseRepository):
                 .limit(page_size)
             )
             return list(session.scalars(statement).all())
+
+    def search(
+        self,
+        page: int,
+        page_size: int,
+        task_type: Optional[str] = None,
+        status: Optional[str] = None,
+        manga_id: Optional[str] = None,
+    ) -> tuple[List[OperationTask], int]:
+        """按受控字段分页查询操作任务并返回总数。"""
+        if task_type is not None and task_type not in _TASK_TYPES:
+            raise ValueError(f"不支持的任务类型: {task_type}")
+        if status is not None and status not in _TASK_STATUSES:
+            raise ValueError(f"不支持的任务状态: {status}")
+        statement = select(OperationTask)
+        if task_type is not None:
+            statement = statement.where(OperationTask.task_type == task_type)
+        if status is not None:
+            statement = statement.where(OperationTask.status == status)
+        if manga_id is not None:
+            statement = statement.where(OperationTask.manga_id == manga_id)
+        with self._get_session() as session:
+            total = session.scalar(
+                select(func.count()).select_from(statement.subquery())
+            )
+            paged = (
+                statement.order_by(OperationTask.created_at.desc(), OperationTask.id)
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+            return list(session.scalars(paged).all()), int(total or 0)
 
     def create(
         self,

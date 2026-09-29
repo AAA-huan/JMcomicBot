@@ -34,6 +34,16 @@ class CreatedSession(AuthenticatedSession):
     token: str
 
 
+@dataclass(frozen=True)
+class AdminStatus:
+    """不包含密码哈希的管理员公开状态。"""
+
+    id: int
+    created_at: datetime
+    updated_at: datetime
+    last_login_at: datetime | None
+
+
 class WebAuthService:
     """提供管理员初始化、登录、会话验证和密码修改。"""
 
@@ -63,6 +73,18 @@ class WebAuthService:
     def is_initialized(self) -> bool:
         """返回单管理员是否已经初始化。"""
         return self.admin_repository.get() is not None
+
+    def get_admin_status(self) -> AdminStatus | None:
+        """返回不包含密码哈希的管理员状态。"""
+        admin = self.admin_repository.get()
+        if admin is None:
+            return None
+        return AdminStatus(
+            id=admin.id,
+            created_at=admin.created_at,
+            updated_at=admin.updated_at,
+            last_login_at=admin.last_login_at,
+        )
 
     def setup(self, password: str) -> None:
         """创建唯一管理员；调用方负责限制请求来源为回环地址。"""

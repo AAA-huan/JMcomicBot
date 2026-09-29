@@ -111,6 +111,17 @@ class MangaTagRepository(BaseRepository):
             rows = session.execute(select(Tag.name).order_by(Tag.normalized_name)).all()
             return [tag for (tag,) in rows]
 
+    def list_for_manga(self, manga_id: str) -> List[str]:
+        """按规范化名称顺序返回漫画的全部标签。"""
+        with self._get_session() as session:
+            statement = (
+                select(Tag.name)
+                .join(MangaTag, MangaTag.tag_id == Tag.id)
+                .where(MangaTag.manga_id == manga_id)
+                .order_by(Tag.normalized_name)
+            )
+            return list(session.scalars(statement).all())
+
     def delete_by_manga_id(self, manga_id: str) -> int:
         """删除指定漫画的全部标签记录
 

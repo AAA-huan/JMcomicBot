@@ -141,6 +141,13 @@ class DownloadManager:
         if self.low_memory_mode:
             self._clear_download_folder()
 
+    def get_queue_status(self) -> Dict[str, object]:
+        """返回不包含用户信息和本地路径的下载队列状态。"""
+        return {
+            "running": self.queue_running,
+            "queue_size": self.download_queue.qsize(),
+        }
+
     def _start_download_queue_processor(self) -> None:
         """
         启动下载队列处理线程

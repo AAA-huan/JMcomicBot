@@ -34,3 +34,4 @@ psutil>=7.2.2           # 系统监控，跨平台兼容
 # black>=26.5.1          # 代码格式化
 # pylint>=4.0.8          # 代码质量检查
 # pyright>=1.1.414       # 类型检查
+# httpx2>=2.13.1         # Starlette TestClient HTTP 客户端

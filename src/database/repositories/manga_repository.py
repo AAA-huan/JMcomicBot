@@ -7,11 +7,11 @@ from typing import List, Optional
 
 import os
 
-from sqlalchemy import delete, select
+from sqlalchemy import Select, delete, func, or_, select
 from sqlalchemy.orm import selectinload
 
 from src.database.database import DatabaseManager
-from src.database.models import Manga, MangaFile, utc_now
+from src.database.models import Manga, MangaFile, MangaTag, Tag, utc_now
 from src.database.repositories._base import BaseRepository
 
 _VALID_MANGA_STATUSES = {"downloaded", "missing_file", "invalid", "deleted"}
@@ -80,6 +80,68 @@ class MangaRepository(BaseRepository):
                 .order_by(Manga.downloaded_at.desc(), Manga.id)
             )
             return list(session.scalars(stmt).all())
+
+    @staticmethod
+    def _build_query(
+        search: Optional[str], status: Optional[str], tag: Optional[str]
+    ) -> Select[tuple[Manga]]:
+        """构造仅使用固定字段的漫画筛选语句。"""
+        statement = select(Manga)
+        if search:
+            pattern = f"%{search}%"
+            statement = statement.where(
+                or_(
+                    Manga.id.like(pattern),
+                    Manga.title.like(pattern),
+                    Manga.author.like(pattern),
+                )
+            )
+        if status:
+            if status not in _VALID_MANGA_STATUSES:
+                raise ValueError(f"不支持的漫画状态: {status}")
+            statement = statement.where(Manga.status == status)
+        if tag:
+            normalized_tag = " ".join(tag.split()).casefold()
+            tagged_mangas = (
+                select(MangaTag.manga_id)
+                .join(Tag, MangaTag.tag_id == Tag.id)
+                .where(Tag.normalized_name == normalized_tag)
+            )
+            statement = statement.where(Manga.id.in_(tagged_mangas))
+        return statement
+
+    def search(
+        self,
+        page: int,
+        page_size: int,
+        search: Optional[str] = None,
+        status: Optional[str] = None,
+        tag: Optional[str] = None,
+        sort: str = "downloaded_at_desc",
+    ) -> tuple[List[Manga], int]:
+        """按白名单条件分页查询漫画并返回总数。"""
+        sort_columns = {
+            "downloaded_at_desc": (Manga.downloaded_at.desc(), Manga.id),
+            "downloaded_at_asc": (Manga.downloaded_at, Manga.id),
+            "title_asc": (Manga.title, Manga.id),
+            "title_desc": (Manga.title.desc(), Manga.id),
+            "id_asc": (Manga.id,),
+            "id_desc": (Manga.id.desc(),),
+        }
+        if sort not in sort_columns:
+            raise ValueError(f"不支持的漫画排序方式: {sort}")
+        base_statement = self._build_query(search, status, tag)
+        with self._get_session() as session:
+            total = session.scalar(
+                select(func.count()).select_from(base_statement.subquery())
+            )
+            statement = (
+                base_statement.options(selectinload(Manga.files))
+                .order_by(*sort_columns[sort])
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            )
+            return list(session.scalars(statement).all()), int(total or 0)
 
     def find_by_author(self, author: str) -> List[Manga]:
         """按作者名模糊查询漫画（作者字段为逗号分隔的多作者）
