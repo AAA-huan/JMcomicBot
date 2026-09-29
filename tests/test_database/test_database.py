@@ -4,6 +4,7 @@ import pytest
 from sqlalchemy import inspect, text
 
 from src.database.database import DatabaseManager
+from src.database.migrations import backup_database
 
 
 class TestDatabaseManager:
@@ -43,6 +44,18 @@ class TestDatabaseManager:
             "ix_operation_task_status_created",
             "ix_operation_task_manga_created",
         }
+
+    def test_database_backup_uses_consistent_sqlite_copy(self, tmp_path) -> None:
+        """迁移前备份应可被 SQLite 正常打开并读取。"""
+        db = DatabaseManager(db_path=str(tmp_path / "data"))
+        db.init_db()
+        backup_path = tmp_path / "backup" / "main.db.bak"
+        backup_database(db.engine, str(backup_path))
+        db.close()
+
+        assert backup_path.exists()
+        with backup_path.open("rb") as backup_file:
+            assert backup_file.read(16) == b"SQLite format 3\x00"
 
     def test_session_can_write(self, db_manager: DatabaseManager) -> None:
         """会话应能执行插入操作"""

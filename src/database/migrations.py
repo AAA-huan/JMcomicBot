@@ -4,6 +4,8 @@
 """
 
 from pathlib import Path
+import os
+import sqlite3
 
 from alembic import command
 from alembic.config import Config
@@ -12,9 +14,29 @@ from sqlalchemy import Engine, text
 CURRENT_SCHEMA_VERSION = 1
 
 
+def backup_database(engine: Engine, destination: str) -> None:
+    """使用 SQLite backup API 创建一致性数据库备份。"""
+    source_path = engine.url.database
+    if not source_path or source_path == ":memory:":
+        raise ValueError("只有文件型 SQLite 数据库支持迁移前备份")
+
+    os.makedirs(os.path.dirname(os.path.abspath(destination)), exist_ok=True)
+    source = sqlite3.connect(source_path)
+    target = sqlite3.connect(destination)
+    try:
+        source.backup(target)
+        target.commit()
+    finally:
+        target.close()
+        source.close()
+
+
 def upgrade_schema(engine: Engine) -> None:
     """将数据库升级到迁移目录中的最新版本。"""
     project_root = Path(__file__).resolve().parents[2]
+    database_path = engine.url.database
+    if database_path and database_path != ":memory:":
+        backup_database(engine, f"{database_path}.pre-migration.bak")
     config = Config(str(project_root / "alembic.ini"))
     config.set_main_option("script_location", str(project_root / "alembic"))
     config.set_main_option("sqlalchemy.url", engine.url.render_as_string())
