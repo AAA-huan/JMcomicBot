@@ -9,6 +9,8 @@ import sqlite3
 
 from alembic import command
 from alembic.config import Config
+from alembic.runtime.migration import MigrationContext
+from alembic.script import ScriptDirectory
 from sqlalchemy import Engine, text
 
 CURRENT_SCHEMA_VERSION = 17
@@ -77,13 +79,19 @@ def backup_database(engine: Engine, destination: str) -> None:
 def upgrade_schema(engine: Engine, download_root: str | None = None) -> None:
     """将数据库升级到迁移目录中的最新版本。"""
     project_root = Path(__file__).resolve().parents[2]
+    config = Config(str(project_root / "alembic.ini"))
+    config.set_main_option("script_location", str(project_root / "alembic"))
+    config.set_main_option("sqlalchemy.url", engine.url.render_as_string())
+    expected_revision = ScriptDirectory.from_config(config).get_current_head()
+    with engine.connect() as connection:
+        current_revision = MigrationContext.configure(connection).get_current_revision()
+    if current_revision == expected_revision:
+        return
+
     database_path = engine.url.database
     if database_path and database_path != ":memory:":
         backup_database(engine, f"{database_path}.pre-migration.bak")
     prepare_legacy_file_paths(engine, download_root)
-    config = Config(str(project_root / "alembic.ini"))
-    config.set_main_option("script_location", str(project_root / "alembic"))
-    config.set_main_option("sqlalchemy.url", engine.url.render_as_string())
     command.upgrade(config, "head")
 
 

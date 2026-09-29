@@ -142,6 +142,8 @@ class TestDatabaseManager:
         db = DatabaseManager(db_path=str(tmp_path / "data"))
         try:
             db.init_db()
+            backup_path = tmp_path / "data" / "main.db.pre-migration.bak"
+            initial_backup_mtime = backup_path.stat().st_mtime_ns
             db.init_db()
 
             with db.get_session() as session:
@@ -150,6 +152,7 @@ class TestDatabaseManager:
                 ).scalars().all()
 
             assert versions == ["0017_remove_legacy_file_columns"]
+            assert backup_path.stat().st_mtime_ns == initial_backup_mtime
         finally:
             db.close()
 
