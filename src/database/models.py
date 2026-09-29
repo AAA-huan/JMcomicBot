@@ -32,9 +32,6 @@ class Manga(Base):
     title: Mapped[str] = mapped_column(String(255), default="", comment="漫画标题")
     author: Mapped[str] = mapped_column(String(255), default="", comment="漫画作者")
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="简介")
-    tags: Mapped[str] = mapped_column(
-        String(1024), default="", comment="漫画类型标签(逗号分隔)"
-    )
     chapter_count: Mapped[int] = mapped_column(Integer, default=0, comment="章节数")
     page_count: Mapped[int] = mapped_column(Integer, default=0, comment="总页数")
     status: Mapped[str] = mapped_column(
@@ -122,7 +119,6 @@ class MangaTag(Base):
     tag_id: Mapped[Optional[int]] = mapped_column(
         ForeignKey("tag.id", ondelete="CASCADE"), nullable=True
     )
-    pdf_name: Mapped[str] = mapped_column(String(512), comment="漫画PDF文件名")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, comment="记录创建时间"
     )

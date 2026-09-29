@@ -21,7 +21,6 @@ class TestManga:
         )
         assert manga.id == "11"
         assert manga.title == "标题"
-        assert manga.tags == "热血,格斗"
 
         loaded = manga_repo.get("11")
         assert loaded is not None
@@ -48,7 +47,6 @@ class TestManga:
         loaded = manga_repo.get("12")
         assert loaded is not None
         assert loaded.title == "新标题"
-        assert loaded.tags == "新标签"
 
     def test_count(self, manga_repo: MangaRepository) -> None:
         assert manga_repo.count() == 0

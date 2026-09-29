@@ -429,11 +429,10 @@ class DownloadManager:
         if self.tag_repo is None or not tags:
             return
 
-        pdf_name = os.path.basename(pdf_path)
         for tag in tags.split(","):
             tag = tag.strip()
             if tag:
-                self.tag_repo.add(tag, manga_id, pdf_name)
+                self.tag_repo.add(tag, manga_id, "")
 
     def download_manga(
         self, user_id: str, manga_id: str, group_id: Optional[str], private: bool

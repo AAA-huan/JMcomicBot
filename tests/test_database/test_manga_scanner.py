@@ -111,7 +111,6 @@ class TestSyncScannedToDb:
         assert existing_manga.title == "新标题"
         assert existing_manga.chapter_count == 1  # 保留 DB 已有值，不被文件名"5章"覆盖
         assert existing_manga.author == "作者A"
-        assert existing_manga.tags == "热血"
         assert existing_manga.page_count == 999
 
     def test_db_chapter_count_preferred_over_filename(
@@ -270,4 +269,3 @@ class TestSyncScannedToDbTagCleanup:
 
         assert len(tag_repo.get_by_tag("萌系")) == 1
         assert len(tag_repo.get_by_tag("纯爱")) == 1
-        assert tag_repo.get_by_tag("萌系")[0].pdf_name == "350234-漫画(3章).pdf"

@@ -78,7 +78,6 @@ class MangaTagRepository(BaseRepository):
                         tag=tag,
                         tag_id=tag_definition.id,
                         manga_id=manga_id,
-                        pdf_name=pdf_name,
                     )
                 )
             else:
@@ -107,7 +106,7 @@ class MangaTagRepository(BaseRepository):
                 select(MangaTag)
                 .join(Tag, MangaTag.tag_id == Tag.id)
                 .where(Tag.normalized_name == normalized_name)
-                .order_by(MangaTag.pdf_name)
+                .order_by(MangaTag.manga_id)
             )
             return list(session.scalars(stmt).all())
 
@@ -164,43 +163,5 @@ class MangaTagRepository(BaseRepository):
         """
         added_count = 0
         with self._get_session() as session:
-            mangas = list(session.scalars(select(Manga)).all())
-            for manga in mangas:
-                tags = [tag.strip() for tag in manga.tags.split(",") if tag.strip()]
-                if not tags:
-                    continue
-                pdf_names = [
-                    os.path.basename(file_entry.file_path) for file_entry in manga.files
-                ]
-                pdf_name = pdf_names[0] if pdf_names else ""
-                for tag in tags:
-                    existing = session.scalar(
-                        select(MangaTag).where(
-                            MangaTag.tag == tag, MangaTag.manga_id == manga.id
-                        )
-                    )
-                    if existing is None:
-                        normalized_name = " ".join(tag.split()).casefold()
-                        tag_definition = session.scalar(
-                            select(Tag).where(
-                                Tag.normalized_name == normalized_name
-                            )
-                        )
-                        if tag_definition is None:
-                            tag_definition = Tag(
-                                name=tag,
-                                normalized_name=normalized_name,
-                            )
-                            session.add(tag_definition)
-                            session.flush()
-                        session.add(
-                            MangaTag(
-                                tag=tag,
-                                tag_id=tag_definition.id,
-                                manga_id=manga.id,
-                                pdf_name=pdf_name,
-                            )
-                        )
-                        added_count += 1
             session.commit()
         return added_count

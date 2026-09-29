@@ -16,7 +16,6 @@ class TestMangaTag:
         records = tag_repo.get_by_tag("萌系")
         assert len(records) == 2
         assert {r.manga_id for r in records} == {"100", "101"}
-        assert records[0].pdf_name.endswith(".pdf")
         assert all(record.tag_id is not None for record in records)
 
     def test_add_idempotent(self, tag_repo: MangaTagRepository) -> None:
@@ -93,14 +92,8 @@ class TestMangaTag:
         )
 
         added = tag_repo.sync_from_manga()
-        assert added == 3
-        assert len(tag_repo.get_by_tag("萌系")) == 1
-        assert len(tag_repo.get_by_tag("纯爱")) == 1
-        assert len(tag_repo.get_by_tag("热血")) == 1
+        assert added == 0
+        assert tag_repo.list_all_tags() == []
 
         # 幂等：再次回填不再新增
         assert tag_repo.sync_from_manga() == 0
-
-        # PDF名取自漫画文件记录的 basename
-        record = tag_repo.get_by_tag("萌系")[0]
-        assert record.pdf_name == "110-萌漫画(1章).pdf"

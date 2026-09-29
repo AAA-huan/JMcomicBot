@@ -135,7 +135,6 @@ class MangaRepository(BaseRepository):
                 manga.created_at = datetime.now()
             manga.title = title
             manga.author = author
-            manga.tags = tags
             manga.chapter_count = chapter_count
             manga.page_count = page_count
             manga.status = status

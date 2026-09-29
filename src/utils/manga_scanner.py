@@ -201,7 +201,7 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
             manga_id=entry.manga_id,
             title=title,
             author=entry.author or (existing.author if existing is not None else ""),
-            tags=entry.tags or (existing.tags if existing is not None else ""),
+            tags="",
             chapter_count=chapter_count,
             # 扫描无法从文件名获取真实页数，page_count 无法可靠得到，新记录保持 0
             page_count=existing.page_count if existing is not None else 0,
