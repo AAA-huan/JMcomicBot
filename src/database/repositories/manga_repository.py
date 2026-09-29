@@ -260,6 +260,22 @@ class MangaRepository(BaseRepository):
             session.commit()
             return True
 
+    def resolve_file_path(self, file_id: int, download_root: str) -> Path:
+        """解析登记文件路径并校验其位于下载根目录内。"""
+        root = Path(download_root).resolve()
+        with self._get_session() as session:
+            manga_file = session.get(MangaFile, file_id)
+            if manga_file is None or not manga_file.relative_path:
+                raise ValueError("文件未登记相对路径")
+            resolved_path = (root / manga_file.relative_path).resolve()
+            try:
+                resolved_path.relative_to(root)
+            except ValueError as error:
+                raise ValueError("文件路径超出下载根目录") from error
+            if not resolved_path.is_file():
+                raise FileNotFoundError(f"文件不存在: {resolved_path}")
+            return resolved_path
+
     def delete_files(self, manga_id: str) -> int:
         """删除指定漫画的全部 PDF 文件记录
 

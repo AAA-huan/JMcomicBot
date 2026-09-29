@@ -1,6 +1,7 @@
 """漫画元数据仓储的测试"""
 
 import pytest
+from sqlalchemy import text
 
 from src.database.repositories.manga_repository import MangaRepository
 from src.database.models import Manga
@@ -144,6 +145,28 @@ class TestManga:
         assert manga_repo.update_file_status(99999, "ready") is False
         with pytest.raises(ValueError, match="不支持的文件状态"):
             manga_repo.update_file_status(manga_file.id, "unknown")
+
+    def test_resolve_file_path_rejects_path_escape(self, db_manager, tmp_path) -> None:
+        download_root = tmp_path / "downloads"
+        download_root.mkdir()
+        pdf = download_root / "26.pdf"
+        pdf.write_bytes(b"%PDF")
+        repository = MangaRepository(db_manager, download_root=str(download_root))
+        repository.upsert(
+            manga_id="27", title="标题", author="", tags="", chapter_count=1, page_count=1
+        )
+        manga_file = repository.add_file("27", str(pdf), 0.1)
+
+        assert repository.resolve_file_path(manga_file.id, str(download_root)) == pdf
+
+        with db_manager.get_session() as session:
+            session.execute(
+                text("UPDATE manga_file SET relative_path = '../outside.pdf' WHERE id = :id"),
+                {"id": manga_file.id},
+            )
+            session.commit()
+        with pytest.raises(ValueError, match="超出下载根目录"):
+            repository.resolve_file_path(manga_file.id, str(download_root))
 
     def test_delete(self, manga_repo: MangaRepository) -> None:
         manga_repo.upsert(
