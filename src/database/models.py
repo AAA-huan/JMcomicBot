@@ -11,6 +11,7 @@ from sqlalchemy import (
     Integer,
     String,
     Text,
+    CheckConstraint,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -24,6 +25,12 @@ class Manga(Base):
     """漫画元数据表，记录已下载漫画的标题、作者、标签等信息"""
 
     __tablename__ = "manga"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('downloaded', 'missing_file', 'invalid', 'deleted')",
+            name="ck_manga_status",
+        ),
+    )
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, comment="漫画ID")
     source_site: Mapped[str] = mapped_column(
@@ -59,6 +66,12 @@ class MangaFile(Base):
     """漫画PDF文件表，记录漫画对应的一个或多个PDF文件"""
 
     __tablename__ = "manga_file"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('ready', 'missing', 'corrupted', 'deleting', 'deleted', 'invalid_path')",
+            name="ck_manga_file_status",
+        ),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     manga_id: Mapped[str] = mapped_column(
