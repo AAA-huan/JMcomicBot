@@ -113,7 +113,7 @@ class TestDatabaseManager:
                 text("SELECT MAX(version) FROM schema_version")
             ).scalar()
 
-        assert alembic_version == "0012_require_manga_timestamps"
+        assert alembic_version == "0013_add_management_query_indexes"
         assert version == 1
 
     def test_unknown_schema_version_is_rejected(self, tmp_path) -> None:
@@ -149,6 +149,23 @@ class TestDatabaseManager:
                     text("SELECT version_num FROM alembic_version")
                 ).scalars().all()
 
-            assert versions == ["0012_require_manga_timestamps"]
+            assert versions == ["0013_add_management_query_indexes"]
         finally:
             db.close()
+
+    def test_management_query_indexes_exist(self, db_manager: DatabaseManager) -> None:
+        """管理列表的筛选和稳定排序应有对应索引。"""
+        inspector = inspect(db_manager.engine)
+        expected = {
+            "operation_task": {
+                "ix_operation_task_type_status_created",
+                "ix_operation_task_source_created",
+            },
+            "audit_event": {"ix_audit_event_source_created"},
+            "reading_progress": {"ix_reading_progress_updated"},
+            "user_info": {"ix_user_info_last_seen"},
+            "group_info": {"ix_group_info_last_seen"},
+        }
+        for table_name, index_names in expected.items():
+            actual = {index["name"] for index in inspector.get_indexes(table_name)}
+            assert index_names <= actual
