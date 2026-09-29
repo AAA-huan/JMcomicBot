@@ -43,8 +43,8 @@ class Manga(Base):
     downloaded_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, comment="下载完成时间"
     )
-    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     last_verified_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )
@@ -81,7 +81,7 @@ class MangaFile(Base):
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, comment="记录创建时间"
     )
-    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
     last_verified_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )
