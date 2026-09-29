@@ -80,6 +80,7 @@ def test_shutdown_request_unblocks_main_loop() -> None:
     """关闭请求应立即唤醒主循环，不再依赖一秒轮询"""
     bot = object.__new__(MangaBot)
     bot._shutdown_event = threading.Event()
+    bot.web_server = None
     bot.connect_websocket = lambda: None
     bot.start_reconnect_manager = lambda: None
     runner = threading.Thread(target=bot.run)
@@ -122,6 +123,7 @@ def test_bot_close_is_idempotent_and_continues_after_error() -> None:
     bot._shutdown_event = threading.Event()
     bot._close_lock = threading.Lock()
     bot._resources_closed = False
+    bot.web_server = SimpleNamespace(stop=lambda: calls.append("web") or True)
     bot.ws_client = SimpleNamespace(close=fail_websocket)
     bot.message_manager = SimpleNamespace(stop=lambda: calls.append("message") or True)
     bot.download_manager = SimpleNamespace(
@@ -132,5 +134,5 @@ def test_bot_close_is_idempotent_and_continues_after_error() -> None:
     bot.close()
     bot.close()
 
-    assert calls == ["websocket", "message", "download", "database"]
+    assert calls == ["web", "websocket", "message", "download", "database"]
     assert bot._shutdown_event.is_set()

@@ -19,6 +19,7 @@ from src.database.repositories import (
     TaskEventRepository,
     TaskLogRepository,
     UserGroupRepository,
+    WebAdminRepository,
 )
 from src.download.manager import DownloadManager
 from src.event.handler import EventHandler
@@ -29,6 +30,7 @@ from src.platform.compatibility import PlatformChecker
 from src.service import DownloadQueueService, OperationTaskService
 from src.utils.helpers import cleanup_failed_downloads
 from src.utils.name_cache import NameCache
+from src.web import WebServer, create_web_app
 from src.websocket.client import WebSocketClient
 
 
@@ -70,6 +72,7 @@ class MangaBot:
         self.operation_task_repo = OperationTaskRepository(self.database_manager)
         self.task_event_repo = TaskEventRepository(self.database_manager)
         self.audit_event_repo = AuditEventRepository(self.database_manager)
+        self.web_admin_repo = WebAdminRepository(self.database_manager)
         self.operation_task_service = OperationTaskService(
             self.operation_task_repo,
             self.task_event_repo,
@@ -154,6 +157,21 @@ class MangaBot:
         self.ws_client.set_message_handler(handle_event)
         self.message_manager.set_websocket_client(self.ws_client)
 
+        self.web_server: Optional[WebServer] = None
+        if bool(self.config_manager.config_dict["WEBUI_ENABLED"]):
+            web_host = str(self.config_manager.config_dict["WEBUI_HOST"])
+            if (
+                web_host not in {"127.0.0.1", "::1", "localhost"}
+                and not self.web_admin_repo.get()
+            ):
+                logger.warning("WebUI 管理员尚未初始化，监听地址已强制退回 127.0.0.1")
+                web_host = "127.0.0.1"
+            self.web_server = WebServer(
+                app=create_web_app(),
+                host=web_host,
+                port=int(self.config_manager.config_dict["WEBUI_PORT"]),
+            )
+
         logger.info("命令解析器初始化完成")
 
         self._cleanup_download_directory()
@@ -199,6 +217,8 @@ class MangaBot:
         """运行机器人主函数"""
         logger.info("JMComic下载机器人启动中...")
 
+        if self.web_server is not None:
+            self.web_server.start()
         self.connect_websocket()
         self.start_reconnect_manager()
 
@@ -276,11 +296,16 @@ class MangaBot:
         self._shutdown_event.set()
         logger.info("开始关闭JMComic下载机器人资源...")
 
-        close_steps = (
-            ("WebSocket", self.ws_client.close),
-            ("文件发送队列", self.message_manager.stop),
-            ("下载队列", self.download_manager.stop),
-            ("SQLite数据库", self.database_manager.close),
+        close_steps = []
+        if self.web_server is not None:
+            close_steps.append(("WebUI", self.web_server.stop))
+        close_steps.extend(
+            (
+                ("WebSocket", self.ws_client.close),
+                ("文件发送队列", self.message_manager.stop),
+                ("下载队列", self.download_manager.stop),
+                ("SQLite数据库", self.database_manager.close),
+            )
         )
         close_errors = []
         for name, close_step in close_steps:
