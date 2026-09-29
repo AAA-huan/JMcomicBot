@@ -113,7 +113,7 @@ class TestDatabaseManager:
                 text("SELECT MAX(version) FROM schema_version")
             ).scalar()
 
-        assert alembic_version == "0002_management_tables"
+        assert alembic_version == "0003_web_tables"
         assert version == 1
 
     def test_unknown_schema_version_is_rejected(self, tmp_path) -> None:
@@ -149,6 +149,6 @@ class TestDatabaseManager:
                     text("SELECT version_num FROM alembic_version")
                 ).scalars().all()
 
-            assert versions == ["0002_management_tables"]
+            assert versions == ["0003_web_tables"]
         finally:
             db.close()
