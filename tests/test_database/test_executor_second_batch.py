@@ -6,6 +6,7 @@ from typing import Any, Callable, Dict, List, Optional
 from src.command.executor import CommandExecutor
 from src.database.repositories import MangaRepository, MangaTagRepository
 from src.download.manager import DownloadManager
+from src.service import DownloadQueueService
 
 
 class _PermissionManager:
@@ -34,6 +35,17 @@ class _DownloadManager:
     ) -> None:
         del user_id, manga_id, group_id, private
 
+    def cancel_download(self, manga_id: str) -> bool:
+        if manga_id not in self.queued_tasks:
+            return False
+        del self.queued_tasks[manga_id]
+        return True
+
+    def cancel_all_downloads(self) -> int:
+        cancelled_count = len(self.queued_tasks)
+        self.queued_tasks.clear()
+        return cancelled_count
+
 
 def _build_executor(
     download_path: str,
@@ -58,6 +70,7 @@ def _build_executor(
         config={"MANGA_DOWNLOAD_PATH": download_path, "FILE_SEND_BATCH_SIZE": 10},
         self_id_getter=lambda: "bot",
         permission_manager=_PermissionManager(),
+        download_service=DownloadQueueService(download_manager),
         manga_repo=manga_repo,
         tag_repo=tag_repo,
     )
@@ -84,6 +97,27 @@ def test_unknown_command_replies(tmp_path) -> None:
     executor.execute_command("10001", "哈哈哈")
 
     assert messages == ["❓ 未知命令，请输入'漫画帮助'查看所有可用命令"]
+
+
+def test_cancel_downloads_uses_service_without_changing_qq_messages(tmp_path) -> None:
+    """取消下载迁入应用服务后应保持既有 QQ 回复。"""
+    messages: List[str] = []
+    download_manager = _DownloadManager()
+    download_manager.queued_tasks = {
+        "100": ("user", None, True),
+        "101": ("user", None, True),
+    }
+    executor = _build_executor(
+        str(tmp_path), messages, download_manager=download_manager
+    )
+
+    executor._cancel_downloads("10001", "100,999", None, True)
+    executor._cancel_downloads("10001", "", None, True)
+
+    assert messages == [
+        "🛑 已取消 1 个下载任务：100",
+        "🛑 已取消全部下载任务（共 1 个）",
+    ]
 
 
 def test_tag_query_splits_spaces_like_parser(tmp_path) -> None:

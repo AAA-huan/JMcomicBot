@@ -9,7 +9,7 @@ import time
 from src.command.parser import CommandParser
 from src.database.repositories import MangaRepository, MangaTagRepository
 from src.logging.logger_config import logger
-from src.service import OperationContext, OperationTaskService
+from src.service import DownloadService, OperationContext, TaskService
 from src.utils.batch import (
     format_batch_response,
     paginate_blocks,
@@ -36,11 +36,12 @@ class CommandExecutor:
         config: Dict[str, Any],
         self_id_getter: Callable[[], Optional[str]],
         permission_manager: Any,
+        download_service: DownloadService,
         resend_handler: Optional[Callable[[str, Optional[str], bool], int]] = None,
         send_status_provider: Optional[Callable[[], Dict[str, Any]]] = None,
         manga_repo: Optional[MangaRepository] = None,
         tag_repo: Optional[MangaTagRepository] = None,
-        operation_task_service: Optional[OperationTaskService] = None,
+        operation_task_service: Optional[TaskService] = None,
     ) -> None:
         """
         初始化命令执行器
@@ -52,6 +53,7 @@ class CommandExecutor:
             config: 配置字典
             self_id_getter: 获取自身ID的函数
             permission_manager: 权限管理器实例
+            download_service: 下载队列应用服务
             resend_handler: 重发断线留存文件的处理函数，入参(user_id, group_id, private)，返回重发数量
             send_status_provider: 获取文件发送队列状态的函数，返回包含running等字段的字典
             manga_repo: 漫画元数据仓储，用于数据库查询
@@ -64,6 +66,7 @@ class CommandExecutor:
         self.config = config
         self.self_id_getter = self_id_getter
         self.permission_manager = permission_manager
+        self.download_service = download_service
         self.resend_handler = resend_handler
         self.send_status_provider = send_status_provider
         self.manga_repo = manga_repo
@@ -279,23 +282,23 @@ class CommandExecutor:
         self.logger.info(f"取消下载请求 - 用户{user_id}, 参数: '{cancel_params}'")
 
         if not cancel_params:
-            count = self.download_manager.cancel_all_downloads()
+            result = self.download_service.cancel_all()
             response = (
-                f"🛑 已取消全部下载任务（共 {count} 个）"
-                if count
+                f"🛑 已取消全部下载任务（共 {result.cancelled_count} 个）"
+                if result.cancelled_count
                 else "✅ 当前没有待取消的下载任务"
             )
             self.message_sender(user_id, response, group_id, private)
             return
 
         manga_ids = validate_manga_ids(parse_batch_params(cancel_params)[0])
-        cancelled = []
-        for manga_id in manga_ids:
-            if self.download_manager.cancel_download(manga_id):
-                cancelled.append(manga_id)
+        result = self.download_service.cancel(manga_ids)
 
-        if cancelled:
-            response = f"🛑 已取消 {len(cancelled)} 个下载任务：{', '.join(cancelled)}"
+        if result.cancelled_ids:
+            response = (
+                f"🛑 已取消 {result.cancelled_count} 个下载任务："
+                f"{', '.join(result.cancelled_ids)}"
+            )
         else:
             response = "❌ 未找到待取消的下载任务（可能正在下载中或不在队列中）"
         self.message_sender(user_id, response, group_id, private)

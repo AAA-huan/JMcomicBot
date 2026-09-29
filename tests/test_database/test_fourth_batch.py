@@ -8,6 +8,7 @@ import pytest
 from src.bot import MangaBot
 from src.command.executor import CommandExecutor
 from src.command.parser import CommandParser
+from src.service import DownloadQueueService
 from src.utils.helpers import cleanup_failed_downloads
 from src.utils.manga_scanner import MangaScanEntry
 
@@ -25,19 +26,29 @@ class _DownloadManager:
 
     downloading_mangas: Dict[str, bool] = {}
 
+    @staticmethod
+    def cancel_download(_manga_id: str) -> bool:
+        return False
+
+    @staticmethod
+    def cancel_all_downloads() -> int:
+        return 0
+
 
 def test_list_help_uses_real_page_example(tmp_path) -> None:
     """帮助与错误提示应使用可执行的 -2 示例，并准确描述 -a"""
     messages: List[str] = []
+    download_manager = _DownloadManager()
     executor = CommandExecutor(
         message_sender=lambda _user, message, _group, _private: messages.append(
             message
         ),
         file_sender=lambda *_args: None,
-        download_manager=_DownloadManager(),
+        download_manager=download_manager,
         config={"MANGA_DOWNLOAD_PATH": str(tmp_path)},
         self_id_getter=lambda: "bot",
         permission_manager=_PermissionManager(),
+        download_service=DownloadQueueService(download_manager),
     )
 
     executor._send_help("10001", "", None, True)

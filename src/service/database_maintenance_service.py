@@ -4,8 +4,9 @@ from pathlib import Path
 
 from src.database.database import DatabaseManager
 from src.database.migrations import backup_database
+from src.service.contracts import TaskService
 from src.service.operation_context import OperationContext
-from src.service.operation_task_service import OperationTaskService
+from src.service.results import BackupResult
 
 
 class DatabaseMaintenanceService:
@@ -14,7 +15,7 @@ class DatabaseMaintenanceService:
     def __init__(
         self,
         db_manager: DatabaseManager,
-        operation_task_service: OperationTaskService,
+        operation_task_service: TaskService,
     ) -> None:
         self.db_manager = db_manager
         self.operation_task_service = operation_task_service
@@ -23,7 +24,7 @@ class DatabaseMaintenanceService:
         self,
         destination: str,
         context: OperationContext | None = None,
-    ) -> Path:
+    ) -> BackupResult:
         """创建一致性备份，并持久化任务状态、事件和审计。"""
         operation_context = context or OperationContext.system()
         task = self.operation_task_service.create("backup", operation_context)
@@ -34,7 +35,7 @@ class DatabaseMaintenanceService:
             self.operation_task_service.succeed(
                 task.id, metadata={"file_count": 1}, context=operation_context
             )
-            return backup_path
+            return BackupResult(task_id=task.id, path=backup_path, file_count=1)
         except Exception as error:
             self.operation_task_service.fail(
                 task.id,

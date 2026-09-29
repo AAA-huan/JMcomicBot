@@ -16,7 +16,7 @@ from src.database.repositories import (
     MangaTagRepository,
     TaskLogRepository,
 )
-from src.service import OperationContext, OperationTaskService
+from src.service import OperationContext, TaskService
 from src.utils.helpers import sanitize_filename
 
 
@@ -98,7 +98,7 @@ class DownloadManager:
         manga_repo: Optional[MangaRepository] = None,
         task_log_repo: Optional[TaskLogRepository] = None,
         tag_repo: Optional[MangaTagRepository] = None,
-        operation_task_service: Optional[OperationTaskService] = None,
+        operation_task_service: Optional[TaskService] = None,
     ) -> None:
         """
         初始化下载管理器

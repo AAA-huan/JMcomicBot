@@ -9,6 +9,7 @@ from src.database.repositories import (
     TaskEventRepository,
 )
 from src.service.operation_context import OperationContext
+from src.service.results import TaskResult
 
 
 class OperationTaskService:
@@ -24,17 +25,32 @@ class OperationTaskService:
         self.event_repo = event_repo
         self.audit_repo = audit_repo
 
+    @staticmethod
+    def _to_result(task: OperationTask) -> TaskResult:
+        """复制公开字段，避免 ORM 实体越过应用服务边界。"""
+        return TaskResult(
+            id=task.id,
+            task_type=task.task_type,
+            source=task.source,
+            status=task.status,
+            stage=task.stage,
+            progress=task.progress,
+            manga_id=task.manga_id,
+            error_code=task.error_code,
+            error_message=task.error_message,
+        )
+
     def create(
         self,
         task_type: str,
         context: OperationContext,
         manga_id: Optional[str] = None,
-    ) -> OperationTask:
+    ) -> TaskResult:
         """创建任务，并记录请求事件和审计。"""
         if task_type == "download" and manga_id is not None:
             active = self.task_repo.find_active_download(manga_id)
             if active is not None:
-                return active
+                return self._to_result(active)
         task = self.task_repo.create(
             task_type,
             context.source,
@@ -52,13 +68,13 @@ class OperationTaskService:
             target_type="manga" if manga_id else task_type,
             target_id=manga_id or task.id,
         )
-        return task
+        return self._to_result(task)
 
-    def start(self, task_id: str, stage: str) -> OperationTask:
+    def start(self, task_id: str, stage: str) -> TaskResult:
         """将排队任务切换为运行中。"""
         task = self.task_repo.update_state(task_id, "running", stage)
         self.event_repo.append(task_id, f"{task.task_type}.started", stage)
-        return task
+        return self._to_result(task)
 
     def progress(
         self,
@@ -66,7 +82,7 @@ class OperationTaskService:
         stage: str,
         progress: Optional[int],
         metadata: Optional[Dict[str, Any]] = None,
-    ) -> OperationTask:
+    ) -> TaskResult:
         """更新运行进度并追加事件。"""
         task = self.task_repo.update_state(task_id, "running", stage, progress)
         self.event_repo.append(
@@ -76,14 +92,14 @@ class OperationTaskService:
             progress=progress,
             metadata=metadata,
         )
-        return task
+        return self._to_result(task)
 
     def succeed(
         self,
         task_id: str,
         metadata: Optional[Dict[str, Any]] = None,
         context: Optional[OperationContext] = None,
-    ) -> OperationTask:
+    ) -> TaskResult:
         """完成任务并记录成功审计。"""
         task = self.task_repo.update_state(task_id, "succeeded", "completed", 100)
         self.event_repo.append(
@@ -106,7 +122,7 @@ class OperationTaskService:
             target_id=task.manga_id or task.id,
             metadata=metadata,
         )
-        return task
+        return self._to_result(task)
 
     def fail(
         self,
@@ -114,7 +130,7 @@ class OperationTaskService:
         error_code: str,
         error_message: str,
         context: Optional[OperationContext] = None,
-    ) -> OperationTask:
+    ) -> TaskResult:
         """以脱敏错误摘要结束任务。"""
         task = self.task_repo.update_state(
             task_id,
@@ -137,13 +153,13 @@ class OperationTaskService:
             target_id=task.manga_id or task.id,
             error_code=error_code,
         )
-        return task
+        return self._to_result(task)
 
-    def cancel(self, task_id: str) -> OperationTask:
+    def cancel(self, task_id: str) -> TaskResult:
         """取消尚未开始的任务。"""
         task = self.task_repo.update_state(task_id, "cancelled", "cancelled")
         self.event_repo.append(task_id, f"{task.task_type}.cancelled", "cancelled")
-        return task
+        return self._to_result(task)
 
     def recover_interrupted(self) -> int:
         """启动时中断全部遗留运行任务。"""

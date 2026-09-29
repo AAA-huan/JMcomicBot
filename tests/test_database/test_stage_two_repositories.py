@@ -11,9 +11,11 @@ from src.database.repositories import (
     TaskEventRepository,
 )
 from src.service import (
+    BackupResult,
     DatabaseMaintenanceService,
     OperationContext,
     OperationTaskService,
+    TaskResult,
 )
 
 
@@ -163,6 +165,7 @@ def test_task_service_records_lifecycle_without_existing_manga(
     task = operation_task_service.create(
         "download", OperationContext.qq("10001", "20001"), manga_id="404"
     )
+    assert isinstance(task, TaskResult)
     operation_task_service.start(task.id, "downloading")
     operation_task_service.succeed(
         task.id,
@@ -195,7 +198,10 @@ def test_database_backup_uses_task_service(
 
     result = service.create_backup(str(destination))
 
-    assert result == destination
+    assert isinstance(result, BackupResult)
+    assert result.path == destination
+    assert result.file_count == 1
+    assert result.task_id
     assert destination.read_bytes().startswith(b"SQLite format 3\x00")
     tasks = operation_task_repo.list()
     assert tasks[0].task_type == "backup"

@@ -26,7 +26,7 @@ from src.logging.logger_config import logger
 from src.message.manager import MessageManager
 from src.permission.manager import PermissionManager
 from src.platform.compatibility import PlatformChecker
-from src.service import OperationTaskService
+from src.service import DownloadQueueService, OperationTaskService
 from src.utils.helpers import cleanup_failed_downloads
 from src.utils.name_cache import NameCache
 from src.websocket.client import WebSocketClient
@@ -107,6 +107,7 @@ class MangaBot:
             tag_repo=self.tag_repo,
             operation_task_service=self.operation_task_service,
         )
+        self.download_service = DownloadQueueService(self.download_manager)
 
         self.command_executor = CommandExecutor(
             message_sender=self.message_manager.send_message,
@@ -115,6 +116,7 @@ class MangaBot:
             config=self.config_manager.config_dict,
             self_id_getter=lambda: self.SELF_ID,
             permission_manager=self.permission_manager,
+            download_service=self.download_service,
             resend_handler=self.message_manager.resend_pending_files,
             send_status_provider=self.message_manager.get_send_queue_status,
             manga_repo=self.manga_repo,

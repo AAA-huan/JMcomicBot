@@ -4,6 +4,7 @@ from typing import Any, Dict, List
 
 from src.command.executor import CommandExecutor
 from src.message.manager import MessageManager
+from src.service import DownloadQueueService
 
 
 class _PermissionManager:
@@ -20,6 +21,14 @@ class _DownloadManager:
     def __init__(self) -> None:
         self.downloading_mangas: Dict[str, bool] = {}
 
+    @staticmethod
+    def cancel_download(_manga_id: str) -> bool:
+        return False
+
+    @staticmethod
+    def cancel_all_downloads() -> int:
+        return 0
+
 
 def _build_executor(download_path: str, messages: List[str]) -> CommandExecutor:
     """构造使用即时成功文件发送器的命令执行器"""
@@ -27,10 +36,11 @@ def _build_executor(download_path: str, messages: List[str]) -> CommandExecutor:
     def message_sender(*args: Any) -> None:
         messages.append(str(args[1]))
 
+    download_manager = _DownloadManager()
     return CommandExecutor(
         message_sender=message_sender,
         file_sender=lambda *_args: None,
-        download_manager=_DownloadManager(),
+        download_manager=download_manager,
         config={
             "MANGA_DOWNLOAD_PATH": download_path,
             "FILE_SEND_BATCH_SIZE": 2,
@@ -38,6 +48,7 @@ def _build_executor(download_path: str, messages: List[str]) -> CommandExecutor:
         },
         self_id_getter=lambda: "bot",
         permission_manager=_PermissionManager(),
+        download_service=DownloadQueueService(download_manager),
     )
 
 
