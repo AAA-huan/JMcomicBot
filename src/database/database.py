@@ -8,8 +8,8 @@ from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
+from src.database.migrations import ensure_schema_version, upgrade_schema
 from src.database.models import Base
-from src.database.migrations import ensure_schema_version
 from src.logging.logger_config import logger
 
 
@@ -70,6 +70,7 @@ class DatabaseManager:
         """创建数据库目录并初始化所有表结构"""
         os.makedirs(self.db_dir, exist_ok=True)
         Base.metadata.create_all(self.engine)
+        upgrade_schema(self.engine)
         ensure_schema_version(self.engine)
         self.logger.info(f"SQLite数据库初始化完成: {self.db_file}")
 

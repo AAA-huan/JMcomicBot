@@ -3,9 +3,22 @@
 当前版本只登记现有 ORM 结构，后续 schema 改造必须通过新增版本迁移完成。
 """
 
+from pathlib import Path
+
+from alembic import command
+from alembic.config import Config
 from sqlalchemy import Engine, text
 
 CURRENT_SCHEMA_VERSION = 1
+
+
+def upgrade_schema(engine: Engine) -> None:
+    """将数据库升级到迁移目录中的最新版本。"""
+    project_root = Path(__file__).resolve().parents[2]
+    config = Config(str(project_root / "alembic.ini"))
+    config.set_main_option("script_location", str(project_root / "alembic"))
+    config.set_main_option("sqlalchemy.url", engine.url.render_as_string())
+    command.upgrade(config, "head")
 
 
 def ensure_schema_version(engine: Engine) -> None:

@@ -72,10 +72,14 @@ class TestDatabaseManager:
     def test_schema_version_is_recorded(self, db_manager: DatabaseManager) -> None:
         """初始化数据库时应记录当前 schema 版本"""
         with db_manager.get_session() as session:
+            alembic_version = session.execute(
+                text("SELECT version_num FROM alembic_version")
+            ).scalar()
             version = session.execute(
                 text("SELECT MAX(version) FROM schema_version")
             ).scalar()
 
+        assert alembic_version == "0001_baseline"
         assert version == 1
 
     def test_unknown_schema_version_is_rejected(self, tmp_path) -> None:
@@ -96,5 +100,21 @@ class TestDatabaseManager:
         try:
             with pytest.raises(RuntimeError, match="高于当前代码支持的版本"):
                 db.init_db()
+        finally:
+            db.close()
+
+    def test_init_db_is_idempotent_with_alembic(self, tmp_path) -> None:
+        """重复初始化同一个数据库不应重复应用迁移。"""
+        db = DatabaseManager(db_path=str(tmp_path / "data"))
+        try:
+            db.init_db()
+            db.init_db()
+
+            with db.get_session() as session:
+                versions = session.execute(
+                    text("SELECT version_num FROM alembic_version")
+                ).scalars().all()
+
+            assert versions == ["0001_baseline"]
         finally:
             db.close()
