@@ -1,22 +1,29 @@
 """数据库管理器，负责 SQLite 引擎创建、会话管理与建表初始化"""
 
-import os
 from typing import Any
+
+import os
 
 from sqlalchemy import create_engine, event
 from sqlalchemy.engine import Engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from src.database.models import Base
+from src.database.migrations import ensure_schema_version
 from src.logging.logger_config import logger
 
 
 @event.listens_for(Engine, "connect")
 def _set_sqlite_pragma(dbapi_connection, _connection_record) -> None:
-    """SQLite 连接建立时启用外键约束"""
+    """SQLite 连接建立时启用外键、WAL 和并发写入配置"""
     cursor = dbapi_connection.cursor()
-    cursor.execute("PRAGMA foreign_keys=ON")
-    cursor.close()
+    try:
+        cursor.execute("PRAGMA foreign_keys=ON")
+        cursor.execute("PRAGMA journal_mode=WAL")
+        cursor.execute("PRAGMA busy_timeout=5000")
+        cursor.execute("PRAGMA synchronous=NORMAL")
+    finally:
+        cursor.close()
 
 
 class DatabaseManager:
@@ -63,6 +70,7 @@ class DatabaseManager:
         """创建数据库目录并初始化所有表结构"""
         os.makedirs(self.db_dir, exist_ok=True)
         Base.metadata.create_all(self.engine)
+        ensure_schema_version(self.engine)
         self.logger.info(f"SQLite数据库初始化完成: {self.db_file}")
 
     def get_session(self) -> Session:

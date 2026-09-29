@@ -1,6 +1,7 @@
 """数据库管理器初始化与表结构创建测试"""
 
-from sqlalchemy import inspect
+import pytest
+from sqlalchemy import inspect, text
 
 from src.database.database import DatabaseManager
 
@@ -45,3 +46,55 @@ class TestDatabaseManager:
         """close 调用两次不应抛出异常"""
         db_manager.close()
         db_manager.close()
+
+    def test_sqlite_reliability_pragmas_are_enabled(
+        self, db_manager: DatabaseManager
+    ) -> None:
+        """每个连接都应启用外键、WAL、忙等待和合理同步级别"""
+        with db_manager.get_session() as session:
+            values = {
+                name: session.execute(text(f"PRAGMA {name}")).scalar()
+                for name in (
+                    "foreign_keys",
+                    "journal_mode",
+                    "busy_timeout",
+                    "synchronous",
+                )
+            }
+
+        assert values == {
+            "foreign_keys": 1,
+            "journal_mode": "wal",
+            "busy_timeout": 5000,
+            "synchronous": 1,
+        }
+
+    def test_schema_version_is_recorded(self, db_manager: DatabaseManager) -> None:
+        """初始化数据库时应记录当前 schema 版本"""
+        with db_manager.get_session() as session:
+            version = session.execute(
+                text("SELECT MAX(version) FROM schema_version")
+            ).scalar()
+
+        assert version == 1
+
+    def test_unknown_schema_version_is_rejected(self, tmp_path) -> None:
+        """数据库版本高于代码支持范围时必须停止初始化"""
+        db = DatabaseManager(db_path=str(tmp_path / "data"))
+        db.init_db()
+        db.close()
+
+        with db.engine.begin() as connection:
+            connection.execute(text("DELETE FROM schema_version"))
+            connection.execute(
+                text(
+                    "INSERT INTO schema_version(version, applied_at) "
+                    "VALUES (999, CURRENT_TIMESTAMP)"
+                )
+            )
+
+        try:
+            with pytest.raises(RuntimeError, match="高于当前代码支持的版本"):
+                db.init_db()
+        finally:
+            db.close()

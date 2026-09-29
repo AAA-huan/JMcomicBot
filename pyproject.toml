@@ -3,6 +3,7 @@ name = "jmbot"
 version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
+    "alembic>=1.20.0",
     "colorama>=0.4.6",
     "img2pdf>=0.6.3",
     "jmcomic>=2.7.7",
