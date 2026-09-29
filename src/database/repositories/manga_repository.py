@@ -2,7 +2,10 @@
 
 # pylint: disable=arguments-differ, too-many-positional-arguments
 
+from datetime import datetime
 from typing import List, Optional
+
+import os
 
 from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
@@ -112,12 +115,14 @@ class MangaRepository(BaseRepository):
             if manga is None:
                 manga = Manga(id=manga_id)
                 session.add(manga)
+                manga.created_at = datetime.now()
             manga.title = title
             manga.author = author
             manga.tags = tags
             manga.chapter_count = chapter_count
             manga.page_count = page_count
             manga.status = status
+            manga.updated_at = datetime.now()
             session.commit()
             session.refresh(manga)
             return manga
@@ -156,10 +161,21 @@ class MangaRepository(BaseRepository):
             ).first()
             if existing is not None:
                 return existing
+            file_size_bytes = (
+                os.path.getsize(file_path)
+                if os.path.isfile(file_path)
+                else int(file_size_mb * 1024 * 1024)
+            )
             manga_file = MangaFile(
                 manga_id=manga_id,
                 file_path=file_path,
                 file_size_mb=file_size_mb,
+                display_name=os.path.basename(file_path),
+                file_type="pdf",
+                mime_type="application/pdf",
+                file_size_bytes=file_size_bytes,
+                status="ready",
+                updated_at=datetime.now(),
             )
             session.add(manga_file)
             session.commit()

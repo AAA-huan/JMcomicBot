@@ -74,6 +74,11 @@ class TestManga:
         assert len(files) == 1
         assert files[0].file_path == str(pdf)
         assert files[0].file_size_mb == 1.5
+        assert files[0].display_name == pdf.name
+        assert files[0].file_type == "pdf"
+        assert files[0].mime_type == "application/pdf"
+        assert files[0].file_size_bytes == pdf.stat().st_size
+        assert files[0].status == "ready"
 
     def test_get_all(self, manga_repo: MangaRepository) -> None:
         manga_repo.upsert(
