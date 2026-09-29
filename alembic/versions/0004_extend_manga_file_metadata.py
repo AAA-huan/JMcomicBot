@@ -14,6 +14,7 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     """增加兼容字段，为后续仓储切换准备数据承载。"""
+    inspector = sa.inspect(op.get_bind())
     manga_columns = (
         ("source_site", sa.String(64), "jmcomic"),
         ("description", sa.Text(), None),
@@ -23,10 +24,11 @@ def upgrade() -> None:
         ("last_verified_at", sa.DateTime(), None),
     )
     for name, column_type, default in manga_columns:
-        op.add_column(
-            "manga",
-            sa.Column(name, column_type, server_default=default, nullable=True),
-        )
+        if name not in {column["name"] for column in inspector.get_columns("manga")}:
+            op.add_column(
+                "manga",
+                sa.Column(name, column_type, server_default=default, nullable=True),
+            )
 
     file_columns = (
         ("relative_path", sa.String(1024)),
@@ -42,7 +44,10 @@ def upgrade() -> None:
         ("deleted_at", sa.DateTime()),
     )
     for name, column_type in file_columns:
-        op.add_column("manga_file", sa.Column(name, column_type, nullable=True))
+        if name not in {
+            column["name"] for column in inspector.get_columns("manga_file")
+        }:
+            op.add_column("manga_file", sa.Column(name, column_type, nullable=True))
 
     op.create_index("ix_manga_status_downloaded", "manga", ["status", "downloaded_at", "id"])
     op.create_index("ix_manga_updated", "manga", ["updated_at", "id"])

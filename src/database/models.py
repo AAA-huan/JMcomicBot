@@ -1,6 +1,7 @@
 """SQLAlchemy ORM 模型定义，对应 SQLite 数据库中的各张表"""
 
 from datetime import datetime
+from typing import Optional
 
 from sqlalchemy import (
     Boolean,
@@ -25,8 +26,12 @@ class Manga(Base):
     __tablename__ = "manga"
 
     id: Mapped[str] = mapped_column(String(32), primary_key=True, comment="漫画ID")
+    source_site: Mapped[str] = mapped_column(
+        String(64), default="jmcomic", comment="来源站点"
+    )
     title: Mapped[str] = mapped_column(String(255), default="", comment="漫画标题")
     author: Mapped[str] = mapped_column(String(255), default="", comment="漫画作者")
+    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="简介")
     tags: Mapped[str] = mapped_column(
         String(1024), default="", comment="漫画类型标签(逗号分隔)"
     )
@@ -35,8 +40,16 @@ class Manga(Base):
     status: Mapped[str] = mapped_column(
         String(32), default="downloaded", comment="下载状态"
     )
+    metadata_source: Mapped[str] = mapped_column(
+        String(64), default="jmcomic", comment="元数据来源"
+    )
     downloaded_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, comment="下载完成时间"
+    )
+    created_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_verified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
     )
 
     files: Mapped[list["MangaFile"]] = relationship(
@@ -60,9 +73,22 @@ class MangaFile(Base):
     file_size_mb: Mapped[float] = mapped_column(
         Float, default=0.0, comment="文件大小(MB)"
     )
+    relative_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    display_name: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
+    file_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    mime_type: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
+    file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    page_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
+    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, comment="记录创建时间"
     )
+    updated_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
+    last_verified_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     manga: Mapped["Manga"] = relationship(back_populates="files")
 
