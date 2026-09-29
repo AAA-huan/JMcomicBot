@@ -627,11 +627,17 @@ class CommandExecutor:
             db_files: List[Tuple[str, float]] = []
             for manga in self.manga_repo.get_all():
                 for manga_file in manga.files:
-                    if os.path.exists(manga_file.file_path):
-                        name_without_ext = os.path.splitext(
-                            os.path.basename(manga_file.file_path)
-                        )[0]
-                        db_files.append((name_without_ext, manga_file.file_size_mb))
+                    try:
+                        resolved_path = self.manga_repo.resolve_file_path(
+                            manga_file.id, download_path
+                        )
+                    except (FileNotFoundError, ValueError):
+                        continue
+                    name_without_ext = os.path.splitext(
+                        manga_file.display_name or resolved_path.name
+                    )[0]
+                    size_mb = manga_file.file_size_bytes / (1024 * 1024)
+                    db_files.append((name_without_ext, round(size_mb, 2)))
             if db_files:
                 db_files.sort(key=lambda x: x[0])
                 return db_files
