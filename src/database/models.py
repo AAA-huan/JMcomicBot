@@ -77,13 +77,7 @@ class MangaFile(Base):
     manga_id: Mapped[str] = mapped_column(
         ForeignKey("manga.id", ondelete="CASCADE"), index=True
     )
-    file_path: Mapped[str] = mapped_column(
-        String(1024), unique=True, comment="PDF文件路径"
-    )
-    file_size_mb: Mapped[float] = mapped_column(
-        Float, default=0.0, comment="文件大小(MB)"
-    )
-    relative_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
+    relative_path: Mapped[str] = mapped_column(String(1024), unique=True)
     display_name: Mapped[str] = mapped_column(String(512), default="")
     file_type: Mapped[str] = mapped_column(String(32), default="pdf")
     mime_type: Mapped[str] = mapped_column(

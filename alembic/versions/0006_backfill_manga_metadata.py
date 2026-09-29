@@ -26,23 +26,41 @@ def upgrade() -> None:
             """
         )
     )
-    connection.execute(
-        sa.text(
-            """
-            UPDATE manga_file
-            SET display_name = COALESCE(NULLIF(display_name, ''), file_path),
-                file_type = COALESCE(NULLIF(file_type, ''), 'pdf'),
-                mime_type = COALESCE(NULLIF(mime_type, ''), 'application/pdf'),
-                file_size_bytes = COALESCE(
-                    file_size_bytes,
-                    CAST(file_size_mb * 1024 * 1024 AS INTEGER),
-                    0
-                ),
-                status = COALESCE(NULLIF(status, ''), 'ready'),
-                updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP)
-            """
+    columns = {
+        column["name"] for column in sa.inspect(connection).get_columns("manga_file")
+    }
+    if {"file_path", "file_size_mb"} <= columns:
+        connection.execute(
+            sa.text(
+                """
+                UPDATE manga_file
+                SET display_name = COALESCE(NULLIF(display_name, ''), file_path),
+                    file_type = COALESCE(NULLIF(file_type, ''), 'pdf'),
+                    mime_type = COALESCE(NULLIF(mime_type, ''), 'application/pdf'),
+                    file_size_bytes = COALESCE(
+                        file_size_bytes,
+                        CAST(file_size_mb * 1024 * 1024 AS INTEGER),
+                        0
+                    ),
+                    status = COALESCE(NULLIF(status, ''), 'ready'),
+                    updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP)
+                """
+            )
         )
-    )
+    else:
+        connection.execute(
+            sa.text(
+                """
+                UPDATE manga_file
+                SET display_name = COALESCE(NULLIF(display_name, ''), ''),
+                    file_type = COALESCE(NULLIF(file_type, ''), 'pdf'),
+                    mime_type = COALESCE(NULLIF(mime_type, ''), 'application/pdf'),
+                    file_size_bytes = COALESCE(file_size_bytes, 0),
+                    status = COALESCE(NULLIF(status, ''), 'ready'),
+                    updated_at = COALESCE(updated_at, created_at, CURRENT_TIMESTAMP)
+                """
+            )
+        )
 
 
 def downgrade() -> None:

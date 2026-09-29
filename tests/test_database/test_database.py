@@ -113,8 +113,8 @@ class TestDatabaseManager:
                 text("SELECT MAX(version) FROM schema_version")
             ).scalar()
 
-        assert alembic_version == "0016_add_status_checks"
-        assert version == 16
+        assert alembic_version == "0017_remove_legacy_file_columns"
+        assert version == 17
 
     def test_unknown_schema_version_is_rejected(self, tmp_path) -> None:
         """数据库版本高于代码支持范围时必须停止初始化"""
@@ -149,7 +149,7 @@ class TestDatabaseManager:
                     text("SELECT version_num FROM alembic_version")
                 ).scalars().all()
 
-            assert versions == ["0016_add_status_checks"]
+            assert versions == ["0017_remove_legacy_file_columns"]
         finally:
             db.close()
 

@@ -185,9 +185,6 @@ class MangaRepository(BaseRepository):
                 raise ValueError("写入PDF文件前必须配置下载根目录")
             if session.get(Manga, manga_id) is None:
                 raise ValueError(f"漫画记录不存在，无法写入文件: {manga_id}")
-            existing = session.scalars(
-                select(MangaFile).where(MangaFile.file_path == file_path)
-            ).first()
             file_size_bytes = (
                 os.path.getsize(file_path)
                 if os.path.isfile(file_path)
@@ -198,8 +195,10 @@ class MangaRepository(BaseRepository):
                 relative_path = str(resolved_path.relative_to(self.download_root))
             except ValueError as error:
                 raise ValueError("PDF文件路径必须位于下载根目录内") from error
+            existing = session.scalars(
+                select(MangaFile).where(MangaFile.relative_path == relative_path)
+            ).first()
             if existing is not None:
-                existing.file_size_mb = file_size_mb
                 existing.file_size_bytes = file_size_bytes
                 existing.display_name = os.path.basename(file_path)
                 existing.status = "ready"
@@ -215,8 +214,6 @@ class MangaRepository(BaseRepository):
                 select(MangaFile).where(MangaFile.manga_id == manga_id)
             ).first()
             if existing_for_manga is not None:
-                existing_for_manga.file_path = file_path
-                existing_for_manga.file_size_mb = file_size_mb
                 existing_for_manga.display_name = os.path.basename(file_path)
                 existing_for_manga.file_type = "pdf"
                 existing_for_manga.mime_type = "application/pdf"
@@ -232,8 +229,6 @@ class MangaRepository(BaseRepository):
                 return existing_for_manga
             manga_file = MangaFile(
                 manga_id=manga_id,
-                file_path=file_path,
-                file_size_mb=file_size_mb,
                 display_name=os.path.basename(file_path),
                 file_type="pdf",
                 mime_type="application/pdf",
@@ -309,36 +304,6 @@ class MangaRepository(BaseRepository):
             if not resolved_path.is_file():
                 raise FileNotFoundError(f"文件不存在: {resolved_path}")
             return resolved_path
-
-    def backfill_relative_paths(self, download_root: str) -> tuple[int, int]:
-        """回填旧绝对路径并标记无法安全转换的文件。"""
-        root = Path(download_root).resolve()
-        updated_count = 0
-        invalid_count = 0
-        with self._get_session() as session:
-            files = list(session.scalars(select(MangaFile)).all())
-            for manga_file in files:
-                if manga_file.relative_path:
-                    continue
-                resolved_path = Path(manga_file.file_path).resolve()
-                try:
-                    relative_path = resolved_path.relative_to(root)
-                except ValueError:
-                    manga_file.status = "invalid_path"
-                    manga_file.updated_at = datetime.now()
-                    invalid_count += 1
-                    continue
-                if not resolved_path.is_file():
-                    manga_file.status = "invalid_path"
-                    manga_file.updated_at = datetime.now()
-                    invalid_count += 1
-                    continue
-                manga_file.relative_path = str(relative_path)
-                manga_file.status = "ready"
-                manga_file.updated_at = datetime.now()
-                updated_count += 1
-            session.commit()
-        return updated_count, invalid_count
 
     def delete_files(self, manga_id: str) -> int:
         """删除指定漫画的全部 PDF 文件记录

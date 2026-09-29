@@ -15,18 +15,27 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """将可由旧字段推导的文件元数据统一为非空值。"""
     connection = op.get_bind()
+    columns = {
+        column["name"] for column in sa.inspect(connection).get_columns("manga_file")
+    }
+    size_expression = (
+        "COALESCE(file_size_bytes, CAST(file_size_mb * 1024 * 1024 AS INTEGER), 0)"
+        if "file_size_mb" in columns
+        else "COALESCE(file_size_bytes, 0)"
+    )
+    display_expression = (
+        "COALESCE(NULLIF(display_name, ''), file_path)"
+        if "file_path" in columns
+        else "COALESCE(NULLIF(display_name, ''), '')"
+    )
     connection.execute(
         sa.text(
-            """
+            f"""
             UPDATE manga_file
-            SET display_name = COALESCE(NULLIF(display_name, ''), file_path),
+            SET display_name = {display_expression},
                 file_type = COALESCE(NULLIF(file_type, ''), 'pdf'),
                 mime_type = COALESCE(NULLIF(mime_type, ''), 'application/pdf'),
-                file_size_bytes = COALESCE(
-                    file_size_bytes,
-                    CAST(file_size_mb * 1024 * 1024 AS INTEGER),
-                    0
-                ),
+                file_size_bytes = {size_expression},
                 page_count = COALESCE(page_count, 0),
                 status = COALESCE(NULLIF(status, ''), 'ready')
             """

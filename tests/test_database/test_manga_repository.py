@@ -73,8 +73,7 @@ class TestManga:
 
         files = manga_repo.list_files("11")
         assert len(files) == 1
-        assert files[0].file_path == str(pdf)
-        assert files[0].file_size_mb == 1.5
+        assert files[0].relative_path == pdf.name
         assert files[0].display_name == pdf.name
         assert files[0].file_type == "pdf"
         assert files[0].mime_type == "application/pdf"
@@ -117,7 +116,6 @@ class TestManga:
         refreshed = manga_repo.add_file("24", str(pdf), 0.2, page_count=4)
 
         assert refreshed.file_size_bytes == len(b"new-content")
-        assert refreshed.file_size_mb == 0.2
         assert refreshed.page_count == 4
         assert refreshed.sha256 is None
         assert refreshed.last_verified_at is None
@@ -136,7 +134,7 @@ class TestManga:
         second_record = manga_repo.add_file("27", str(second_pdf), 0.1)
 
         assert second_record.id == first_record.id
-        assert manga_repo.list_files("27")[0].file_path == str(second_pdf)
+        assert manga_repo.list_files("27")[0].relative_path == second_pdf.name
 
     def test_upsert_rejects_unknown_status(self, manga_repo: MangaRepository) -> None:
         with pytest.raises(ValueError, match="不支持的漫画状态"):
@@ -184,40 +182,6 @@ class TestManga:
             session.commit()
         with pytest.raises(ValueError, match="超出下载根目录"):
             repository.resolve_file_path(manga_file.id, str(download_root))
-
-    def test_backfill_relative_paths_marks_unsafe_files(
-        self, db_manager, tmp_path
-    ) -> None:
-        download_root = tmp_path / "downloads"
-        download_root.mkdir()
-        inside_file = download_root / "inside.pdf"
-        inside_file.write_bytes(b"%PDF")
-        outside_file = tmp_path / "outside.pdf"
-        outside_file.write_bytes(b"%PDF")
-        repository = MangaRepository(db_manager, download_root=str(tmp_path))
-        for manga_id, file_path in (("28", inside_file), ("29", outside_file)):
-            repository.upsert(
-                manga_id=manga_id,
-                title="标题",
-                author="",
-                tags="",
-                chapter_count=1,
-                page_count=1,
-            )
-            repository.add_file(manga_id, str(file_path), 0.1)
-
-        with db_manager.get_session() as session:
-            session.execute(
-                text("UPDATE manga_file SET relative_path = NULL WHERE manga_id IN ('28', '29')")
-            )
-            session.commit()
-
-        updated_count, invalid_count = repository.backfill_relative_paths(
-            str(download_root)
-        )
-        assert (updated_count, invalid_count) == (1, 1)
-        assert repository.list_files("28")[0].relative_path == "inside.pdf"
-        assert repository.list_files("29")[0].status == "invalid_path"
 
     def test_delete(self, manga_repo: MangaRepository) -> None:
         manga_repo.upsert(
