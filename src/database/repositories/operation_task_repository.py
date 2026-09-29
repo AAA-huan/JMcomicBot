@@ -13,6 +13,14 @@ from src.database.repositories._base import BaseRepository
 
 _TASK_TYPES = {"download", "scan", "repair", "delete", "backup"}
 _TASK_SOURCES = {"qq", "web", "system"}
+_TASK_STATUSES = {
+    "queued",
+    "running",
+    "succeeded",
+    "failed",
+    "cancelled",
+    "interrupted",
+}
 _TASK_EVENT_METADATA_KEYS = {
     "duration_ms",
     "file_count",
@@ -100,6 +108,40 @@ class OperationTaskRepository(BaseRepository):
                 .limit(1)
             )
             return session.scalar(statement)
+
+    def update_state(
+        self,
+        task_id: str,
+        status: str,
+        stage: str,
+        progress: Optional[int] = None,
+        error_code: Optional[str] = None,
+        error_message: Optional[str] = None,
+    ) -> OperationTask:
+        """更新任务状态；任务不存在或字段非法时明确报错。"""
+        if status not in _TASK_STATUSES:
+            raise ValueError(f"不支持的任务状态: {status}")
+        if progress is not None and not 0 <= progress <= 100:
+            raise ValueError("任务进度必须位于 0 到 100 之间")
+        now = utc_now()
+        with self._get_session() as session:
+            task = session.get(OperationTask, task_id)
+            if task is None:
+                raise ValueError(f"任务不存在: {task_id}")
+            task.status = status
+            task.stage = stage
+            task.progress = progress
+            task.error_code = error_code
+            task.error_message = error_message
+            task.updated_at = now
+            if status == "running" and task.started_at is None:
+                task.started_at = now
+                task.attempt_count += 1
+            if status in {"succeeded", "failed", "cancelled", "interrupted"}:
+                task.finished_at = now
+            session.commit()
+            session.refresh(task)
+            return task
 
     def interrupt_running(self) -> int:
         """将启动时遗留的运行中任务统一标记为中断。"""

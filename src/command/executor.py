@@ -9,6 +9,7 @@ import time
 from src.command.parser import CommandParser
 from src.database.repositories import MangaRepository, MangaTagRepository
 from src.logging.logger_config import logger
+from src.service import OperationTaskService
 from src.utils.batch import (
     format_batch_response,
     paginate_blocks,
@@ -39,6 +40,7 @@ class CommandExecutor:
         send_status_provider: Optional[Callable[[], Dict[str, Any]]] = None,
         manga_repo: Optional[MangaRepository] = None,
         tag_repo: Optional[MangaTagRepository] = None,
+        operation_task_service: Optional[OperationTaskService] = None,
     ) -> None:
         """
         初始化命令执行器
@@ -54,6 +56,7 @@ class CommandExecutor:
             send_status_provider: 获取文件发送队列状态的函数，返回包含running等字段的字典
             manga_repo: 漫画元数据仓储，用于数据库查询
             tag_repo: 漫画标签仓储，用于按标签查询漫画
+            operation_task_service: 持久化操作任务服务
         """
         self.message_sender = message_sender
         self.file_sender = file_sender
@@ -65,6 +68,7 @@ class CommandExecutor:
         self.send_status_provider = send_status_provider
         self.manga_repo = manga_repo
         self.tag_repo = tag_repo
+        self.operation_task_service = operation_task_service
         self.command_parser = CommandParser()
         self.logger = logger
         self.SELF_ID: Optional[str] = None
@@ -1141,6 +1145,16 @@ class CommandExecutor:
         self.message_sender(user_id, response, group_id, private)
 
         results: List[Tuple[str, bool, str]] = []
+        operation_task_id = None
+        if self.operation_task_service is not None:
+            operation_task = self.operation_task_service.create(
+                "delete",
+                "qq",
+                requested_by=user_id,
+                actor_group_id=group_id,
+            )
+            operation_task_id = operation_task.id
+            self.operation_task_service.start(operation_task_id, "deleting")
 
         for manga_id in manga_ids:
             try:
@@ -1175,6 +1189,13 @@ class CommandExecutor:
 
         batch_response = format_batch_response("删除", results)
         self.message_sender(user_id, batch_response, group_id, private)
+        if self.operation_task_service is not None and operation_task_id:
+            succeeded_count = sum(
+                1 for _manga_id, succeeded, _message in results if succeeded
+            )
+            self.operation_task_service.succeed(
+                operation_task_id, metadata={"file_count": succeeded_count}
+            )
 
     def _handle_egg(self, user_id, args, group_id, private):
         """这才是真正的新宿之战，五条老师没有输！！！！！"""

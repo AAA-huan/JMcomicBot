@@ -11,9 +11,12 @@ from src.command.executor import CommandExecutor
 from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
 from src.database.repositories import (
+    AuditEventRepository,
     MangaRepository,
     MangaTagRepository,
+    OperationTaskRepository,
     PermissionRepository,
+    TaskEventRepository,
     TaskLogRepository,
     UserGroupRepository,
 )
@@ -23,6 +26,7 @@ from src.logging.logger_config import logger
 from src.message.manager import MessageManager
 from src.permission.manager import PermissionManager
 from src.platform.compatibility import PlatformChecker
+from src.service import OperationTaskService
 from src.utils.helpers import cleanup_failed_downloads
 from src.utils.name_cache import NameCache
 from src.websocket.client import WebSocketClient
@@ -63,6 +67,17 @@ class MangaBot:
         self.user_group_repo = UserGroupRepository(self.database_manager)
         self.permission_repo = PermissionRepository(self.database_manager)
         self.tag_repo = MangaTagRepository(self.database_manager)
+        self.operation_task_repo = OperationTaskRepository(self.database_manager)
+        self.task_event_repo = TaskEventRepository(self.database_manager)
+        self.audit_event_repo = AuditEventRepository(self.database_manager)
+        self.operation_task_service = OperationTaskService(
+            self.operation_task_repo,
+            self.task_event_repo,
+            self.audit_event_repo,
+        )
+        interrupted_count = self.operation_task_service.recover_interrupted()
+        if interrupted_count:
+            logger.warning(f"启动时已中断 {interrupted_count} 个遗留运行任务")
 
         # 挂载名称缓存持久化仓储
         NameCache.get_instance().attach_user_group_repo(self.user_group_repo)
@@ -90,6 +105,7 @@ class MangaBot:
             manga_repo=self.manga_repo,
             task_log_repo=self.task_log_repo,
             tag_repo=self.tag_repo,
+            operation_task_service=self.operation_task_service,
         )
 
         self.command_executor = CommandExecutor(
@@ -103,6 +119,7 @@ class MangaBot:
             send_status_provider=self.message_manager.get_send_queue_status,
             manga_repo=self.manga_repo,
             tag_repo=self.tag_repo,
+            operation_task_service=self.operation_task_service,
         )
 
         self.SELF_ID: Optional[str] = None

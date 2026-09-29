@@ -175,9 +175,7 @@ class OperationTask(Base):
     status: Mapped[str] = mapped_column(String(32), nullable=False, default="queued")
     stage: Mapped[str] = mapped_column(String(64), nullable=False, default="queued")
     progress: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    manga_id: Mapped[Optional[str]] = mapped_column(
-        ForeignKey("manga.id"), nullable=True
-    )
+    manga_id: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
     requested_by: Mapped[str] = mapped_column(String(64), nullable=False, default="")
     error_code: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)

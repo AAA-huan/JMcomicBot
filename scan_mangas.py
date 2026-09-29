@@ -13,8 +13,15 @@ import sys
 
 from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
-from src.database.repositories import MangaRepository, MangaTagRepository
+from src.database.repositories import (
+    AuditEventRepository,
+    MangaRepository,
+    MangaTagRepository,
+    OperationTaskRepository,
+    TaskEventRepository,
+)
 from src.logging.logger_config import logger
+from src.service import OperationTaskService
 from src.utils.manga_scanner import (
     enrich_metadata_from_jmcomic,
     scan_download_dir,
@@ -77,12 +84,29 @@ def main() -> None:
     db_manager.init_db()
     repo = MangaRepository(db_manager)
     tag_repo = MangaTagRepository(db_manager)
+    task_service = OperationTaskService(
+        OperationTaskRepository(db_manager),
+        TaskEventRepository(db_manager),
+        AuditEventRepository(db_manager),
+    )
+    operation_task = None if args.dry_run else task_service.create("scan", "system")
 
     try:
+        if operation_task is not None:
+            task_service.start(operation_task.id, "scanning")
         result = sync_scanned_to_db(
             repo, entries, dry_run=args.dry_run, tag_repo=tag_repo
         )
+        if operation_task is not None:
+            task_service.succeed(
+                operation_task.id,
+                metadata={"file_count": result.scanned_files},
+            )
         _print_result(result, dry_run=args.dry_run)
+    except Exception as error:
+        if operation_task is not None:
+            task_service.fail(operation_task.id, "scan_failed", type(error).__name__)
+        raise
     finally:
         db_manager.close()
 

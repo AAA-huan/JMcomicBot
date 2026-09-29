@@ -10,6 +10,7 @@ from src.database.repositories import (
     OperationTaskRepository,
     TaskEventRepository,
 )
+from src.service import DatabaseMaintenanceService, OperationTaskService
 
 
 @pytest.fixture()
@@ -25,6 +26,13 @@ def task_event_repo(db_manager) -> TaskEventRepository:
 @pytest.fixture()
 def audit_event_repo(db_manager) -> AuditEventRepository:
     return AuditEventRepository(db_manager)
+
+
+@pytest.fixture()
+def operation_task_service(
+    operation_task_repo, task_event_repo, audit_event_repo
+) -> OperationTaskService:
+    return OperationTaskService(operation_task_repo, task_event_repo, audit_event_repo)
 
 
 def test_stage_two_constraints_and_indexes_exist(db_manager) -> None:
@@ -51,6 +59,7 @@ def test_stage_two_constraints_and_indexes_exist(db_manager) -> None:
     assert "ck_task_event_progress" in event_checks
     assert "ck_audit_event_source" in audit_checks
     assert "ix_audit_event_actor_created" in audit_indexes
+    assert inspect(db_manager.engine).get_foreign_keys("operation_task") == []
 
 
 def test_create_task_and_find_active_download(operation_task_repo, manga_repo) -> None:
@@ -141,3 +150,45 @@ def test_audit_event_records_only_whitelisted_metadata(audit_event_repo) -> None
             result="failed",
             metadata={"password": "secret"},
         )
+
+
+def test_task_service_records_lifecycle_without_existing_manga(
+    operation_task_service, operation_task_repo, task_event_repo, audit_event_repo
+) -> None:
+    """下载请求应能先于漫画资料入库，并完整记录生命周期。"""
+    task = operation_task_service.create(
+        "download", "qq", requested_by="10001", manga_id="404"
+    )
+    operation_task_service.start(task.id, "downloading")
+    operation_task_service.succeed(task.id, metadata={"page_count": 12})
+
+    stored = operation_task_repo.get(task.id)
+    assert stored is not None
+    assert stored.status == "succeeded"
+    assert stored.progress == 100
+    assert stored.attempt_count == 1
+    assert [event.event_type for event in task_event_repo.list(task.id)] == [
+        "download.requested",
+        "download.started",
+        "download.completed",
+    ]
+    assert [event.event_type for event in audit_event_repo.list()] == [
+        "download.completed",
+        "download.requested",
+    ]
+
+
+def test_database_backup_uses_task_service(
+    tmp_path, db_manager, operation_task_service, operation_task_repo
+) -> None:
+    """正式备份入口应生成可读取备份并完成持久化任务。"""
+    service = DatabaseMaintenanceService(db_manager, operation_task_service)
+    destination = tmp_path / "backup" / "main.db"
+
+    result = service.create_backup(str(destination), requested_by="system")
+
+    assert result == destination
+    assert destination.read_bytes().startswith(b"SQLite format 3\x00")
+    tasks = operation_task_repo.list()
+    assert tasks[0].task_type == "backup"
+    assert tasks[0].status == "succeeded"
