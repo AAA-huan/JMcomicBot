@@ -172,6 +172,10 @@ class MangaRepository(BaseRepository):
             MangaFile: 已保存的文件记录
         """
         with self._get_session() as session:
+            if self.download_root is None:
+                raise ValueError("写入PDF文件前必须配置下载根目录")
+            if session.get(Manga, manga_id) is None:
+                raise ValueError(f"漫画记录不存在，无法写入文件: {manga_id}")
             existing = session.scalars(
                 select(MangaFile).where(MangaFile.file_path == file_path)
             ).first()
@@ -180,13 +184,11 @@ class MangaRepository(BaseRepository):
                 if os.path.isfile(file_path)
                 else int(file_size_mb * 1024 * 1024)
             )
-            relative_path = None
-            if self.download_root is not None:
-                resolved_path = Path(file_path).resolve()
-                try:
-                    relative_path = str(resolved_path.relative_to(self.download_root))
-                except ValueError as error:
-                    raise ValueError("PDF文件路径必须位于下载根目录内") from error
+            resolved_path = Path(file_path).resolve()
+            try:
+                relative_path = str(resolved_path.relative_to(self.download_root))
+            except ValueError as error:
+                raise ValueError("PDF文件路径必须位于下载根目录内") from error
             if existing is not None:
                 existing.file_size_mb = file_size_mb
                 existing.file_size_bytes = file_size_bytes

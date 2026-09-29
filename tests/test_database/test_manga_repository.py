@@ -190,7 +190,7 @@ class TestManga:
         inside_file.write_bytes(b"%PDF")
         outside_file = tmp_path / "outside.pdf"
         outside_file.write_bytes(b"%PDF")
-        repository = MangaRepository(db_manager)
+        repository = MangaRepository(db_manager, download_root=str(tmp_path))
         for manga_id, file_path in (("28", inside_file), ("29", outside_file)):
             repository.upsert(
                 manga_id=manga_id,
@@ -201,6 +201,12 @@ class TestManga:
                 page_count=1,
             )
             repository.add_file(manga_id, str(file_path), 0.1)
+
+        with db_manager.get_session() as session:
+            session.execute(
+                text("UPDATE manga_file SET relative_path = NULL WHERE manga_id IN ('28', '29')")
+            )
+            session.commit()
 
         updated_count, invalid_count = repository.backfill_relative_paths(
             str(download_root)

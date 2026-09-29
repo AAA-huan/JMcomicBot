@@ -1,6 +1,7 @@
 """pytest 共享夹具：提供内存SQLite数据库与各仓储实例"""
 
 import pytest
+from pathlib import Path
 
 from src.database.database import DatabaseManager
 from src.database.repositories import (
@@ -25,7 +26,7 @@ def db_manager(tmp_path) -> DatabaseManager:
 @pytest.fixture()
 def manga_repo(db_manager: DatabaseManager) -> MangaRepository:
     """漫画元数据仓储实例"""
-    return MangaRepository(db_manager)
+    return MangaRepository(db_manager, download_root=str(Path(db_manager.db_dir).parent))
 
 
 @pytest.fixture()
