@@ -1,6 +1,6 @@
 """SQLAlchemy ORM 模型定义，对应 SQLite 数据库中的各张表"""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional
 
 from sqlalchemy import (
@@ -20,6 +20,11 @@ class Base(DeclarativeBase):
     """所有 ORM 模型的声明式基类"""
 
 
+def utc_now() -> datetime:
+    """返回使用 UTC 语义的无时区时间，兼容 SQLite DATETIME。"""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
 class Manga(Base):
     """漫画元数据表，记录已下载漫画的标题、作者、标签等信息"""
 
@@ -37,7 +42,9 @@ class Manga(Base):
     )
     title: Mapped[str] = mapped_column(String(255), default="", comment="漫画标题")
     author: Mapped[str] = mapped_column(String(255), default="", comment="漫画作者")
-    description: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="简介")
+    description: Mapped[Optional[str]] = mapped_column(
+        Text, nullable=True, comment="简介"
+    )
     chapter_count: Mapped[int] = mapped_column(Integer, default=0, comment="章节数")
     page_count: Mapped[int] = mapped_column(Integer, default=0, comment="总页数")
     status: Mapped[str] = mapped_column(
@@ -47,10 +54,10 @@ class Manga(Base):
         String(64), default="jmcomic", comment="元数据来源"
     )
     downloaded_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, comment="下载完成时间"
+        DateTime, default=utc_now, comment="下载完成时间"
     )
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     last_verified_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )
@@ -70,6 +77,7 @@ class MangaFile(Base):
             "status IN ('ready', 'missing', 'corrupted', 'deleting', 'deleted', 'invalid_path')",
             name="ck_manga_file_status",
         ),
+        UniqueConstraint("manga_id", name="uq_manga_file_manga_id"),
     )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
@@ -79,17 +87,15 @@ class MangaFile(Base):
     relative_path: Mapped[str] = mapped_column(String(1024), unique=True)
     display_name: Mapped[str] = mapped_column(String(512), default="")
     file_type: Mapped[str] = mapped_column(String(32), default="pdf")
-    mime_type: Mapped[str] = mapped_column(
-        String(128), default="application/pdf"
-    )
+    mime_type: Mapped[str] = mapped_column(String(128), default="application/pdf")
     file_size_bytes: Mapped[int] = mapped_column(Integer, default=0)
     page_count: Mapped[int] = mapped_column(Integer, default=0)
     sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
     status: Mapped[str] = mapped_column(String(32), default="ready")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, comment="记录创建时间"
+        DateTime, default=utc_now, comment="记录创建时间"
     )
-    updated_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
     last_verified_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )
@@ -109,26 +115,23 @@ class Tag(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     name: Mapped[str] = mapped_column(String(128), nullable=False)
     normalized_name: Mapped[str] = mapped_column(String(128), nullable=False)
-    created_at: Mapped[datetime] = mapped_column(DateTime, default=datetime.now)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
 
 
 class MangaTag(Base):
     """漫画与规范化标签的关系表。"""
 
     __tablename__ = "manga_tag"
-    __table_args__ = (
-        UniqueConstraint("manga_id", "tag_id", name="uq_manga_tag_manga_tag"),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     manga_id: Mapped[str] = mapped_column(
-        ForeignKey("manga.id", ondelete="CASCADE"), index=True, comment="漫画ID"
+        ForeignKey("manga.id", ondelete="CASCADE"),
+        primary_key=True,
+        comment="漫画ID",
     )
     tag_id: Mapped[int] = mapped_column(
-        ForeignKey("tag.id", ondelete="CASCADE"), nullable=False
+        ForeignKey("tag.id", ondelete="CASCADE"), primary_key=True
     )
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, comment="记录创建时间"
+        DateTime, default=utc_now, comment="记录创建时间"
     )
 
 
@@ -150,7 +153,7 @@ class TaskLog(Base):
     private: Mapped[bool] = mapped_column(Boolean, default=True, comment="是否为私聊")
     message: Mapped[str] = mapped_column(Text, default="", comment="任务结果信息")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, index=True, comment="任务创建时间"
+        DateTime, default=utc_now, index=True, comment="任务创建时间"
     )
 
 
@@ -162,7 +165,7 @@ class UserInfo(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="用户QQ号")
     nickname: Mapped[str] = mapped_column(String(255), default="", comment="用户昵称")
     last_seen_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, comment="最近一次活跃时间"
+        DateTime, default=utc_now, comment="最近一次活跃时间"
     )
 
 
@@ -174,7 +177,7 @@ class GroupInfo(Base):
     id: Mapped[str] = mapped_column(String(64), primary_key=True, comment="群组ID")
     group_name: Mapped[str] = mapped_column(String(255), default="", comment="群名称")
     last_seen_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, comment="最近一次活跃时间"
+        DateTime, default=utc_now, comment="最近一次活跃时间"
     )
 
 
@@ -191,7 +194,7 @@ class Permission(Base):
     value: Mapped[str] = mapped_column(String(64), comment="名单内ID")
     remark: Mapped[str] = mapped_column(String(255), default="", comment="备注")
     created_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, comment="记录创建时间"
+        DateTime, default=utc_now, comment="记录创建时间"
     )
 
 
@@ -203,5 +206,5 @@ class Setting(Base):
     key: Mapped[str] = mapped_column(String(128), primary_key=True, comment="配置键")
     value: Mapped[str] = mapped_column(String(1024), default="", comment="配置值")
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime, default=datetime.now, onupdate=datetime.now, comment="更新时间"
+        DateTime, default=utc_now, onupdate=utc_now, comment="更新时间"
     )

@@ -1,6 +1,5 @@
 """漫画标签仓储，负责按标签查询对应漫画的 PDF 文件记录"""
 
-import os
 from typing import List, Optional, Set
 
 from sqlalchemy import delete, select
@@ -18,17 +17,18 @@ class MangaTagRepository(BaseRepository):
     def __init__(self, db_manager: DatabaseManager) -> None:
         super().__init__(db_manager)
 
-    def get(self, record_id: int) -> Optional[MangaTag]:
-        """按主键查询单条标签记录
+    def get(self, manga_id: str, tag_id: int) -> Optional[MangaTag]:
+        """按漫画和标签联合主键查询单条关系记录
 
         Args:
-            record_id: 记录主键 ID
+            manga_id: 漫画 ID
+            tag_id: 标签 ID
 
         Returns:
             Optional[MangaTag]: 标签记录，不存在时返回 None
         """
         with self._get_session() as session:
-            return session.get(MangaTag, record_id)
+            return session.get(MangaTag, (manga_id, tag_id))
 
     def list(self, page: int = 1, page_size: int = 50) -> List[MangaTag]:
         """分页查询标签记录
@@ -49,13 +49,12 @@ class MangaTagRepository(BaseRepository):
             )
             return list(session.scalars(stmt).all())
 
-    def add(self, tag: str, manga_id: str, pdf_name: str) -> None:
+    def add(self, tag: str, manga_id: str) -> None:
         """为已存在漫画添加一条标签关系（已存在时忽略）。
 
         Args:
             tag: 标签名
             manga_id: 漫画ID
-            pdf_name: 漫画PDF文件名
         """
         with self._get_session() as session:
             if session.get(Manga, manga_id) is None:
@@ -81,13 +80,11 @@ class MangaTagRepository(BaseRepository):
                         manga_id=manga_id,
                     )
                 )
-            else:
-                existing.tag_id = tag_definition.id
             session.commit()
 
-    def add_for_existing_manga(self, tag: str, manga_id: str, pdf_name: str) -> None:
+    def add_for_existing_manga(self, tag: str, manga_id: str) -> None:
         """仅为已存在的漫画写入标签关系。"""
-        self.add(tag, manga_id, pdf_name)
+        self.add(tag, manga_id)
 
     def get_by_tag(self, tag: str) -> List[MangaTag]:
         """按标签查询其下的漫画PDF记录

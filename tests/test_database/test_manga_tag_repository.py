@@ -16,7 +16,6 @@ class TestMangaTag:
                 manga_id=manga_id,
                 title="",
                 author="",
-                tags="",
                 chapter_count=0,
                 page_count=0,
             )
@@ -25,8 +24,8 @@ class TestMangaTag:
         self, tag_repo: MangaTagRepository, manga_repo: MangaRepository
     ) -> None:
         self._create_mangas(manga_repo, "100", "101")
-        tag_repo.add("萌系", "100", "100-萌漫画(1章).pdf")
-        tag_repo.add("萌系", "101", "101-甜漫画(2章).pdf")
+        tag_repo.add("萌系", "100")
+        tag_repo.add("萌系", "101")
 
         records = tag_repo.get_by_tag("萌系")
         assert len(records) == 2
@@ -37,8 +36,8 @@ class TestMangaTag:
         self, tag_repo: MangaTagRepository, manga_repo: MangaRepository
     ) -> None:
         self._create_mangas(manga_repo, "100")
-        tag_repo.add("萌系", "100", "100-萌漫画(1章).pdf")
-        tag_repo.add("萌系", "100", "100-萌漫画(1章).pdf")
+        tag_repo.add("萌系", "100")
+        tag_repo.add("萌系", "100")
 
         assert len(tag_repo.get_by_tag("萌系")) == 1
 
@@ -46,7 +45,7 @@ class TestMangaTag:
         self, tag_repo: MangaTagRepository, manga_repo: MangaRepository
     ) -> None:
         self._create_mangas(manga_repo, "100")
-        tag_repo.add(" 萌系 ", "100", "100-a.pdf")
+        tag_repo.add(" 萌系 ", "100")
 
         assert len(tag_repo.get_by_tag("萌系")) == 1
         assert tag_repo.list_all_tags() == ["萌系"]
@@ -55,14 +54,14 @@ class TestMangaTag:
         self, tag_repo: MangaTagRepository
     ) -> None:
         with pytest.raises(ValueError, match="漫画记录不存在"):
-            tag_repo.add_for_existing_manga("萌系", "404", "404.pdf")
+            tag_repo.add_for_existing_manga("萌系", "404")
 
     def test_list_all_tags(
         self, tag_repo: MangaTagRepository, manga_repo: MangaRepository
     ) -> None:
         self._create_mangas(manga_repo, "100", "200")
-        tag_repo.add("萌系", "100", "100-萌漫画(1章).pdf")
-        tag_repo.add("热血", "200", "200-热血漫画(1章).pdf")
+        tag_repo.add("萌系", "100")
+        tag_repo.add("热血", "200")
 
         assert tag_repo.list_all_tags() == sorted(["萌系", "热血"])
 
@@ -70,9 +69,9 @@ class TestMangaTag:
         self, tag_repo: MangaTagRepository, manga_repo: MangaRepository
     ) -> None:
         self._create_mangas(manga_repo, "100", "200")
-        tag_repo.add("萌系", "100", "100-a.pdf")
-        tag_repo.add("热血", "100", "100-a.pdf")
-        tag_repo.add("萌系", "200", "200-b.pdf")
+        tag_repo.add("萌系", "100")
+        tag_repo.add("热血", "100")
+        tag_repo.add("萌系", "200")
 
         assert tag_repo.delete_by_manga_id("100") == 2
         assert len(tag_repo.get_by_tag("萌系")) == 1
@@ -82,10 +81,10 @@ class TestMangaTag:
         self, tag_repo: MangaTagRepository, manga_repo: MangaRepository
     ) -> None:
         self._create_mangas(manga_repo, "100", "200", "300")
-        tag_repo.add("萌系", "100", "100-a.pdf")
-        tag_repo.add("纯爱", "100", "100-a.pdf")
-        tag_repo.add("萌系", "200", "200-b.pdf")
-        tag_repo.add("纯爱", "300", "300-c.pdf")
+        tag_repo.add("萌系", "100")
+        tag_repo.add("纯爱", "100")
+        tag_repo.add("萌系", "200")
+        tag_repo.add("纯爱", "300")
 
         # 同时命中"萌系"和"纯爱"的只有 100
         assert tag_repo.get_manga_ids_by_tags(["萌系", "纯爱"]) == {"100"}
@@ -101,7 +100,6 @@ class TestMangaTag:
             manga_id="110",
             title="萌漫画",
             author="",
-            tags="萌系,纯爱",
             chapter_count=1,
             page_count=10,
         )
@@ -115,7 +113,6 @@ class TestMangaTag:
             manga_id="111",
             title="热血漫画",
             author="",
-            tags="热血",
             chapter_count=1,
             page_count=10,
         )

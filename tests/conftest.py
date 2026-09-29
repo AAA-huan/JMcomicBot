@@ -26,7 +26,9 @@ def db_manager(tmp_path) -> DatabaseManager:
 @pytest.fixture()
 def manga_repo(db_manager: DatabaseManager) -> MangaRepository:
     """漫画元数据仓储实例"""
-    return MangaRepository(db_manager, download_root=str(Path(db_manager.db_dir).parent))
+    return MangaRepository(
+        db_manager, download_root=str(Path(db_manager.db_dir).parent)
+    )
 
 
 @pytest.fixture()

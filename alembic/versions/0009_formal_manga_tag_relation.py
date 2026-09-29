@@ -5,7 +5,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-
 revision: str = "0009_formal_manga_tag_relation"
 down_revision: Union[str, None] = "0008_unique_manga_file"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -24,7 +23,11 @@ def upgrade() -> None:
     if (tuple(["tag_id"]), "tag") not in constrained:
         with op.batch_alter_table("manga_tag") as batch_op:
             batch_op.create_foreign_key(
-                "fk_manga_tag_tag_id_formal", "tag", ["tag_id"], ["id"], ondelete="CASCADE"
+                "fk_manga_tag_tag_id_formal",
+                "tag",
+                ["tag_id"],
+                ["id"],
+                ondelete="CASCADE",
             )
     if "uq_manga_tag_manga_tag" not in {
         index["name"] for index in sa.inspect(connection).get_indexes("manga_tag")

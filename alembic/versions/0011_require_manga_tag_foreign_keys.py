@@ -5,7 +5,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-
 revision: str = "0011_require_manga_tag_foreign_keys"
 down_revision: Union[str, None] = "0010_remove_legacy_tag_columns"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -15,27 +14,19 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """清理孤儿关系并要求漫画和标签均存在。"""
     connection = op.get_bind()
-    connection.execute(
-        sa.text(
-            """
+    connection.execute(sa.text("""
             DELETE FROM manga_tag
             WHERE NOT EXISTS (
                 SELECT 1 FROM manga WHERE manga.id = manga_tag.manga_id
             )
-            """
-        )
-    )
-    connection.execute(
-        sa.text(
-            """
+            """))
+    connection.execute(sa.text("""
             DELETE FROM manga_tag
             WHERE tag_id IS NULL
                OR NOT EXISTS (
                    SELECT 1 FROM tag WHERE tag.id = manga_tag.tag_id
                )
-            """
-        )
-    )
+            """))
     inspector = sa.inspect(connection)
     foreign_keys = inspector.get_foreign_keys("manga_tag")
     has_manga_foreign_key = any(
@@ -51,7 +42,11 @@ def upgrade() -> None:
     with op.batch_alter_table("manga_tag") as batch_op:
         if not has_manga_foreign_key:
             batch_op.create_foreign_key(
-                "fk_manga_tag_manga_id", "manga", ["manga_id"], ["id"], ondelete="CASCADE"
+                "fk_manga_tag_manga_id",
+                "manga",
+                ["manga_id"],
+                ["id"],
+                ondelete="CASCADE",
             )
         if not has_tag_foreign_key:
             batch_op.create_foreign_key(

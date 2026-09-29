@@ -5,7 +5,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-
 revision: str = "0004_manga_file_metadata"
 down_revision: Union[str, None] = "0003_web_tables"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -49,9 +48,13 @@ def upgrade() -> None:
         }:
             op.add_column("manga_file", sa.Column(name, column_type, nullable=True))
 
-    op.create_index("ix_manga_status_downloaded", "manga", ["status", "downloaded_at", "id"])
+    op.create_index(
+        "ix_manga_status_downloaded", "manga", ["status", "downloaded_at", "id"]
+    )
     op.create_index("ix_manga_updated", "manga", ["updated_at", "id"])
-    op.create_index("ix_manga_file_status_updated", "manga_file", ["status", "updated_at"])
+    op.create_index(
+        "ix_manga_file_status_updated", "manga_file", ["status", "updated_at"]
+    )
     op.create_index("ix_manga_file_verified", "manga_file", ["last_verified_at"])
 
 

@@ -5,7 +5,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-
 revision: str = "0003_web_tables"
 down_revision: Union[str, None] = "0002_management_tables"
 branch_labels: Union[str, Sequence[str], None] = None

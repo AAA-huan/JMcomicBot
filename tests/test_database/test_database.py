@@ -31,16 +31,13 @@ class TestDatabaseManager:
         inspector = inspect(db_manager.engine)
 
         assert "uq_tag_normalized_name" in {
-            constraint["name"]
-            for constraint in inspector.get_unique_constraints("tag")
+            constraint["name"] for constraint in inspector.get_unique_constraints("tag")
         }
         assert {
             tuple(foreign_key["constrained_columns"])
             for foreign_key in inspector.get_foreign_keys("task_event")
         } == {("task_id",)}
-        assert {
-            index["name"] for index in inspector.get_indexes("operation_task")
-        } >= {
+        assert {index["name"] for index in inspector.get_indexes("operation_task")} >= {
             "ix_operation_task_status_created",
             "ix_operation_task_manga_created",
         }
@@ -113,8 +110,32 @@ class TestDatabaseManager:
                 text("SELECT MAX(version) FROM schema_version")
             ).scalar()
 
-        assert alembic_version == "0017_remove_legacy_file_columns"
-        assert version == 17
+        assert alembic_version == "0018_use_manga_tag_composite_key"
+        assert version == 18
+
+    def test_outdated_schema_version_is_synchronized(self, tmp_path) -> None:
+        """Alembic 已升级到最新版本时应同步过旧的辅助版本号。"""
+        db = DatabaseManager(db_path=str(tmp_path / "data"))
+        try:
+            db.init_db()
+            with db.engine.begin() as connection:
+                connection.execute(text("DELETE FROM schema_version"))
+                connection.execute(
+                    text(
+                        "INSERT INTO schema_version(version, applied_at) "
+                        "VALUES (17, CURRENT_TIMESTAMP)"
+                    )
+                )
+
+            db.init_db()
+
+            with db.get_session() as session:
+                version = session.execute(
+                    text("SELECT MAX(version) FROM schema_version")
+                ).scalar_one()
+            assert version == 18
+        finally:
+            db.close()
 
     def test_unknown_schema_version_is_rejected(self, tmp_path) -> None:
         """数据库版本高于代码支持范围时必须停止初始化"""
@@ -147,11 +168,13 @@ class TestDatabaseManager:
             db.init_db()
 
             with db.get_session() as session:
-                versions = session.execute(
-                    text("SELECT version_num FROM alembic_version")
-                ).scalars().all()
+                versions = (
+                    session.execute(text("SELECT version_num FROM alembic_version"))
+                    .scalars()
+                    .all()
+                )
 
-            assert versions == ["0017_remove_legacy_file_columns"]
+            assert versions == ["0018_use_manga_tag_composite_key"]
             assert backup_path.stat().st_mtime_ns == initial_backup_mtime
         finally:
             db.close()
@@ -215,6 +238,7 @@ class TestDatabaseManager:
             tuple(item["constrained_columns"]): item
             for item in inspector.get_foreign_keys("manga_tag")
         }
+        relation_primary_key = inspector.get_pk_constraint("manga_tag")
 
         assert file_indexes["uq_manga_file_manga_id"]["unique"] == 1
         assert file_indexes["uq_manga_file_relative_path"]["unique"] == 1
@@ -222,6 +246,7 @@ class TestDatabaseManager:
         assert relation_foreign_keys[("manga_id",)]["options"]["ondelete"] == "CASCADE"
         assert relation_foreign_keys[("tag_id",)]["referred_table"] == "tag"
         assert relation_foreign_keys[("tag_id",)]["options"]["ondelete"] == "CASCADE"
+        assert relation_primary_key["constrained_columns"] == ["manga_id", "tag_id"]
 
     def test_key_queries_use_expected_indexes(
         self, db_manager: DatabaseManager

@@ -5,7 +5,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-
 revision: str = "0015_require_file_metadata"
 down_revision: Union[str, None] = "0014_remove_legacy_manga_tag_name"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -28,9 +27,7 @@ def upgrade() -> None:
         if "file_path" in columns
         else "COALESCE(NULLIF(display_name, ''), '')"
     )
-    connection.execute(
-        sa.text(
-            f"""
+    connection.execute(sa.text(f"""
             UPDATE manga_file
             SET display_name = {display_expression},
                 file_type = COALESCE(NULLIF(file_type, ''), 'pdf'),
@@ -38,9 +35,7 @@ def upgrade() -> None:
                 file_size_bytes = {size_expression},
                 page_count = COALESCE(page_count, 0),
                 status = COALESCE(NULLIF(status, ''), 'ready')
-            """
-        )
-    )
+            """))
     with op.batch_alter_table("manga_file") as batch_op:
         for name, column_type in (
             ("display_name", sa.String(512)),

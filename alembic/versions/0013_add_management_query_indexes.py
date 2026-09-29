@@ -5,7 +5,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-
 revision: str = "0013_add_management_query_indexes"
 down_revision: Union[str, None] = "0012_require_manga_timestamps"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -13,8 +12,16 @@ depends_on: Union[str, Sequence[str], None] = None
 
 
 _INDEXES = (
-    ("ix_operation_task_type_status_created", "operation_task", ("task_type", "status", "created_at", "id")),
-    ("ix_operation_task_source_created", "operation_task", ("source", "created_at", "id")),
+    (
+        "ix_operation_task_type_status_created",
+        "operation_task",
+        ("task_type", "status", "created_at", "id"),
+    ),
+    (
+        "ix_operation_task_source_created",
+        "operation_task",
+        ("source", "created_at", "id"),
+    ),
     ("ix_audit_event_source_created", "audit_event", ("source", "created_at", "id")),
     ("ix_reading_progress_updated", "reading_progress", ("updated_at",)),
     ("ix_user_info_last_seen", "user_info", ("last_seen_at", "id")),

@@ -69,7 +69,6 @@ def _add_manga(manga_repo: MangaRepository, manga_id: str, chapter_count: int) -
         manga_id=manga_id,
         title=f"标题{manga_id}",
         author="作者",
-        tags="纯爱,后宫",
         chapter_count=chapter_count,
         page_count=100,
     )
@@ -175,7 +174,7 @@ def test_batch_delete_cleans_database(
         pdf_path.write_bytes(b"%PDF")
         _add_manga(manga_repo, manga_id, chapter_count=3)
         manga_repo.add_file(manga_id, str(pdf_path))
-        tag_repo.add("纯爱", manga_id, pdf_path.name)
+        tag_repo.add("纯爱", manga_id)
 
     download_manager = object.__new__(DownloadManager)
     download_manager.manga_repo = manga_repo

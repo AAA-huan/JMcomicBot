@@ -7,13 +7,14 @@ from pathlib import Path
 import os
 import sqlite3
 
+from sqlalchemy import Engine, inspect, text
+
 from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
-from sqlalchemy import Engine, text
 
-CURRENT_SCHEMA_VERSION = 17
+CURRENT_SCHEMA_VERSION = 18
 
 
 def prepare_legacy_file_paths(engine: Engine, download_root: str | None) -> None:
@@ -23,8 +24,7 @@ def prepare_legacy_file_paths(engine: Engine, download_root: str | None) -> None
     root = Path(download_root).resolve()
     with engine.begin() as connection:
         columns = {
-            column["name"]
-            for column in connection.exec_driver_sql("PRAGMA table_info(manga_file)")
+            column["name"] for column in inspect(connection).get_columns("manga_file")
         }
         if "file_path" not in columns or "relative_path" not in columns:
             return
@@ -98,21 +98,17 @@ def upgrade_schema(engine: Engine, download_root: str | None = None) -> None:
 def ensure_schema_version(engine: Engine) -> None:
     """创建并校验 schema 版本，拒绝由更新代码读取的未知版本。"""
     with engine.begin() as connection:
-        connection.execute(
-            text(
-                """
+        connection.execute(text("""
                 CREATE TABLE IF NOT EXISTS schema_version (
                     version INTEGER PRIMARY KEY,
                     applied_at DATETIME NOT NULL
                 )
-                """
-            )
-        )
+                """))
         current_version = connection.execute(
             text("SELECT MAX(version) FROM schema_version")
         ).scalar()
 
-        if current_version is None:
+        if current_version is None or current_version < CURRENT_SCHEMA_VERSION:
             connection.execute(
                 text(
                     "INSERT INTO schema_version(version, applied_at) "

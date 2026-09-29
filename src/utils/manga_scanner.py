@@ -104,7 +104,7 @@ def scan_download_dir(download_path: str) -> List[MangaScanEntry]:
     manga_map: dict[str, MangaScanEntry] = {}
     scanned_files_count = 0
 
-    for file_name in os.listdir(download_path):
+    for file_name in sorted(os.listdir(download_path)):
         if not file_name.lower().endswith(".pdf"):
             continue
 
@@ -183,7 +183,7 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
                 if existing.chapter_count
                 else entry.chapter_count
             )
-            status = existing.status
+            status = "downloaded"
             result.updated_count += 1
         else:
             title = entry.title
@@ -198,7 +198,6 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
             manga_id=entry.manga_id,
             title=title,
             author=entry.author or (existing.author if existing is not None else ""),
-            tags="",
             chapter_count=chapter_count,
             # 扫描无法从文件名获取真实页数，page_count 无法可靠得到，新记录保持 0
             page_count=existing.page_count if existing is not None else 0,
@@ -212,11 +211,10 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
         # 若本次扫描联网补全了标签，同步写入标签表
         if not dry_run and tag_repo is not None and entry.tags:
             for file_path in entry.files[-1:]:
-                pdf_name = os.path.basename(file_path)
                 for tag in entry.tags.split(","):
                     tag = tag.strip()
                     if tag:
-                        tag_repo.add_for_existing_manga(tag, entry.manga_id, pdf_name)
+                        tag_repo.add_for_existing_manga(tag, entry.manga_id)
 
     # 清理数据库中文件已不存在的残留记录
     if not dry_run:

@@ -5,7 +5,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-
 revision: str = "0010_remove_legacy_tag_columns"
 down_revision: Union[str, None] = "0009_formal_manga_tag_relation"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -15,7 +14,9 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """删除已不再作为事实来源的旧字段。"""
     connection = op.get_bind()
-    manga_columns = {column["name"] for column in sa.inspect(connection).get_columns("manga")}
+    manga_columns = {
+        column["name"] for column in sa.inspect(connection).get_columns("manga")
+    }
     manga_tag_columns = {
         column["name"] for column in sa.inspect(connection).get_columns("manga_tag")
     }

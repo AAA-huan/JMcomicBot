@@ -5,7 +5,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-
 revision: str = "0016_add_status_checks"
 down_revision: Union[str, None] = "0015_require_file_metadata"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -15,29 +14,20 @@ depends_on: Union[str, Sequence[str], None] = None
 def upgrade() -> None:
     """归一化未知状态并建立 CHECK 约束。"""
     connection = op.get_bind()
-    connection.execute(
-        sa.text(
-            """
+    connection.execute(sa.text("""
             UPDATE manga
             SET status = 'invalid'
             WHERE status NOT IN ('downloaded', 'missing_file', 'invalid', 'deleted')
-            """
-        )
-    )
-    connection.execute(
-        sa.text(
-            """
+            """))
+    connection.execute(sa.text("""
             UPDATE manga_file
             SET status = 'invalid_path'
             WHERE status NOT IN (
                 'ready', 'missing', 'corrupted', 'deleting', 'deleted', 'invalid_path'
             )
-            """
-        )
-    )
+            """))
     manga_checks = {
-        item["name"]
-        for item in sa.inspect(connection).get_check_constraints("manga")
+        item["name"] for item in sa.inspect(connection).get_check_constraints("manga")
     }
     file_checks = {
         item["name"]

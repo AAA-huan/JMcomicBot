@@ -15,7 +15,6 @@ class TestManga:
             manga_id="11",
             title="标题",
             author="作者",
-            tags="热血,格斗",
             chapter_count=3,
             page_count=100,
         )
@@ -31,7 +30,6 @@ class TestManga:
             manga_id="12",
             title="旧标题",
             author="作者",
-            tags="",
             chapter_count=1,
             page_count=10,
         )
@@ -39,7 +37,6 @@ class TestManga:
             manga_id="12",
             title="新标题",
             author="作者",
-            tags="新标签",
             chapter_count=2,
             page_count=20,
         )
@@ -51,10 +48,10 @@ class TestManga:
     def test_count(self, manga_repo: MangaRepository) -> None:
         assert manga_repo.count() == 0
         manga_repo.upsert(
-            manga_id="13", title="A", author="", tags="", chapter_count=1, page_count=1
+            manga_id="13", title="A", author="", chapter_count=1, page_count=1
         )
         manga_repo.upsert(
-            manga_id="14", title="B", author="", tags="", chapter_count=1, page_count=1
+            manga_id="14", title="B", author="", chapter_count=1, page_count=1
         )
         assert manga_repo.count() == 2
 
@@ -65,7 +62,6 @@ class TestManga:
             manga_id="11",
             title="标题",
             author="",
-            tags="",
             chapter_count=3,
             page_count=100,
         )
@@ -83,7 +79,7 @@ class TestManga:
 
     def test_get_all(self, manga_repo: MangaRepository) -> None:
         manga_repo.upsert(
-            manga_id="15", title="A", author="", tags="", chapter_count=1, page_count=1
+            manga_id="15", title="A", author="", chapter_count=1, page_count=1
         )
         result = manga_repo.get_all()
         assert len(result) == 1
@@ -92,9 +88,11 @@ class TestManga:
     def test_add_file_rejects_path_outside_download_root(
         self, db_manager, tmp_path
     ) -> None:
-        repository = MangaRepository(db_manager, download_root=str(tmp_path / "downloads"))
+        repository = MangaRepository(
+            db_manager, download_root=str(tmp_path / "downloads")
+        )
         repository.upsert(
-            manga_id="23", title="A", author="", tags="", chapter_count=1, page_count=1
+            manga_id="23", title="A", author="", chapter_count=1, page_count=1
         )
         outside_file = tmp_path / "outside.pdf"
         outside_file.write_bytes(b"%PDF")
@@ -109,7 +107,6 @@ class TestManga:
             manga_id="231",
             title="A",
             author="",
-            tags="",
             chapter_count=1,
             page_count=1,
         )
@@ -123,7 +120,7 @@ class TestManga:
         pdf = tmp_path / "24-标题(1章).pdf"
         pdf.write_bytes(b"old")
         manga_repo.upsert(
-            manga_id="24", title="标题", author="", tags="", chapter_count=1, page_count=1
+            manga_id="24", title="标题", author="", chapter_count=1, page_count=1
         )
         manga_repo.add_file("24", str(pdf), page_count=3, sha256="old-hash")
 
@@ -136,13 +133,30 @@ class TestManga:
         assert refreshed.last_verified_at is None
         assert refreshed.status == "ready"
 
-    def test_add_file_replaces_existing_manga_pdf(self, manga_repo: MangaRepository, tmp_path) -> None:
+    def test_add_file_without_page_count_preserves_existing_value(
+        self, manga_repo: MangaRepository, tmp_path
+    ) -> None:
+        """扫描等无法获取页数的流程不应清空已有文件页数。"""
+        pdf = tmp_path / "241-标题(1章).pdf"
+        pdf.write_bytes(b"%PDF")
+        manga_repo.upsert(
+            manga_id="241", title="标题", author="", chapter_count=1, page_count=8
+        )
+        manga_repo.add_file("241", str(pdf), page_count=8)
+
+        refreshed = manga_repo.add_file("241", str(pdf))
+
+        assert refreshed.page_count == 8
+
+    def test_add_file_replaces_existing_manga_pdf(
+        self, manga_repo: MangaRepository, tmp_path
+    ) -> None:
         first_pdf = tmp_path / "27-old.pdf"
         second_pdf = tmp_path / "27-new.pdf"
         first_pdf.write_bytes(b"old")
         second_pdf.write_bytes(b"new")
         manga_repo.upsert(
-            manga_id="27", title="标题", author="", tags="", chapter_count=1, page_count=1
+            manga_id="27", title="标题", author="", chapter_count=1, page_count=1
         )
 
         first_record = manga_repo.add_file("27", str(first_pdf))
@@ -161,7 +175,6 @@ class TestManga:
                 manga_id=manga_id,
                 title="标题",
                 author="",
-                tags="",
                 chapter_count=1,
                 page_count=1,
             )
@@ -176,17 +189,18 @@ class TestManga:
                 manga_id="25",
                 title="标题",
                 author="",
-                tags="",
                 chapter_count=1,
                 page_count=1,
                 status="unknown",
             )
 
-    def test_update_file_status_validates_state(self, manga_repo: MangaRepository, tmp_path) -> None:
+    def test_update_file_status_validates_state(
+        self, manga_repo: MangaRepository, tmp_path
+    ) -> None:
         pdf = tmp_path / "26-标题(1章).pdf"
         pdf.write_bytes(b"%PDF")
         manga_repo.upsert(
-            manga_id="26", title="标题", author="", tags="", chapter_count=1, page_count=1
+            manga_id="26", title="标题", author="", chapter_count=1, page_count=1
         )
         manga_file = manga_repo.add_file("26", str(pdf))
 
@@ -202,7 +216,7 @@ class TestManga:
         pdf.write_bytes(b"%PDF")
         repository = MangaRepository(db_manager, download_root=str(download_root))
         repository.upsert(
-            manga_id="27", title="标题", author="", tags="", chapter_count=1, page_count=1
+            manga_id="27", title="标题", author="", chapter_count=1, page_count=1
         )
         manga_file = repository.add_file("27", str(pdf))
 
@@ -210,7 +224,9 @@ class TestManga:
 
         with db_manager.get_session() as session:
             session.execute(
-                text("UPDATE manga_file SET relative_path = '../outside.pdf' WHERE id = :id"),
+                text(
+                    "UPDATE manga_file SET relative_path = '../outside.pdf' WHERE id = :id"
+                ),
                 {"id": manga_file.id},
             )
             session.commit()
@@ -219,7 +235,7 @@ class TestManga:
 
     def test_delete(self, manga_repo: MangaRepository) -> None:
         manga_repo.upsert(
-            manga_id="16", title="A", author="", tags="", chapter_count=1, page_count=1
+            manga_id="16", title="A", author="", chapter_count=1, page_count=1
         )
         assert manga_repo.delete("16") is True
         assert manga_repo.get("16") is None
@@ -232,7 +248,6 @@ class TestManga:
             manga_id="17",
             title="标题",
             author="",
-            tags="",
             chapter_count=1,
             page_count=1,
         )
@@ -245,7 +260,6 @@ class TestManga:
             manga_id="20",
             title="A",
             author="しにま",
-            tags="",
             chapter_count=1,
             page_count=1,
         )
@@ -253,7 +267,6 @@ class TestManga:
             manga_id="21",
             title="B",
             author="しにま,佐々木篠",
-            tags="",
             chapter_count=1,
             page_count=1,
         )
@@ -261,7 +274,6 @@ class TestManga:
             manga_id="22",
             title="C",
             author="某人",
-            tags="",
             chapter_count=1,
             page_count=1,
         )

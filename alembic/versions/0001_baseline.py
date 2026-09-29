@@ -5,7 +5,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-
 revision: str = "0001_baseline"
 down_revision: Union[str, None] = None
 branch_labels: Union[str, Sequence[str], None] = None
@@ -23,9 +22,13 @@ def upgrade() -> None:
             sa.Column("title", sa.String(255), nullable=False, server_default=""),
             sa.Column("author", sa.String(255), nullable=False, server_default=""),
             sa.Column("tags", sa.String(1024), nullable=False, server_default=""),
-            sa.Column("chapter_count", sa.Integer(), nullable=False, server_default="0"),
+            sa.Column(
+                "chapter_count", sa.Integer(), nullable=False, server_default="0"
+            ),
             sa.Column("page_count", sa.Integer(), nullable=False, server_default="0"),
-            sa.Column("status", sa.String(32), nullable=False, server_default="downloaded"),
+            sa.Column(
+                "status", sa.String(32), nullable=False, server_default="downloaded"
+            ),
             sa.Column("downloaded_at", sa.DateTime(), nullable=False),
         )
     if "manga_file" not in existing_tables:
@@ -56,11 +59,15 @@ def upgrade() -> None:
             "task_log",
             sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
             sa.Column("task_type", sa.String(32), nullable=False),
-            sa.Column("status", sa.String(32), nullable=False, server_default="pending"),
+            sa.Column(
+                "status", sa.String(32), nullable=False, server_default="pending"
+            ),
             sa.Column("manga_id", sa.String(32), nullable=False, server_default=""),
             sa.Column("user_id", sa.String(64), nullable=False, server_default=""),
             sa.Column("group_id", sa.String(64), nullable=False, server_default=""),
-            sa.Column("private", sa.Boolean(), nullable=False, server_default=sa.true()),
+            sa.Column(
+                "private", sa.Boolean(), nullable=False, server_default=sa.true()
+            ),
             sa.Column("message", sa.Text(), nullable=False, server_default=""),
             sa.Column("created_at", sa.DateTime(), nullable=False),
         )

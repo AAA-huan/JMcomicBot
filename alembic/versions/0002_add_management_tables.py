@@ -5,7 +5,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-
 revision: str = "0002_management_tables"
 down_revision: Union[str, None] = "0001_baseline"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -61,7 +60,9 @@ def upgrade() -> None:
         sa.Column("page_count", sa.Integer(), nullable=False, server_default="0"),
         sa.Column("percent", sa.Float(), nullable=False, server_default="0"),
         sa.Column("updated_at", sa.DateTime(), nullable=False),
-        sa.ForeignKeyConstraint(["manga_file_id"], ["manga_file.id"], ondelete="CASCADE"),
+        sa.ForeignKeyConstraint(
+            ["manga_file_id"], ["manga_file.id"], ondelete="CASCADE"
+        ),
     )
     op.create_table(
         "audit_event",
@@ -113,10 +114,22 @@ def upgrade() -> None:
         sa.Column("changed_by", sa.String(64), nullable=False),
         sa.Column("changed_at", sa.DateTime(), nullable=False),
     )
-    op.create_index("ix_task_event_task_created", "task_event", ["task_id", "created_at", "id"])
-    op.create_index("ix_operation_task_status_created", "operation_task", ["status", "created_at", "id"])
-    op.create_index("ix_operation_task_manga_created", "operation_task", ["manga_id", "created_at", "id"])
-    op.create_index("ix_audit_event_type_created", "audit_event", ["event_type", "created_at", "id"])
+    op.create_index(
+        "ix_task_event_task_created", "task_event", ["task_id", "created_at", "id"]
+    )
+    op.create_index(
+        "ix_operation_task_status_created",
+        "operation_task",
+        ["status", "created_at", "id"],
+    )
+    op.create_index(
+        "ix_operation_task_manga_created",
+        "operation_task",
+        ["manga_id", "created_at", "id"],
+    )
+    op.create_index(
+        "ix_audit_event_type_created", "audit_event", ["event_type", "created_at", "id"]
+    )
 
 
 def downgrade() -> None:

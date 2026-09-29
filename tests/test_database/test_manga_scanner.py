@@ -83,7 +83,6 @@ class TestSyncScannedToDb:
             manga_id="350235",
             title="旧标题",
             author="作者A",
-            tags="热血",
             chapter_count=1,
             page_count=999,
         )
@@ -123,7 +122,6 @@ class TestSyncScannedToDb:
             manga_id="350236",
             title="旧标题",
             author="",
-            tags="",
             chapter_count=25,
             page_count=500,
         )
@@ -152,6 +150,23 @@ class TestSyncScannedToDb:
         assert manga_repo.count() == 1
         assert len(manga.files) == 1
 
+    def test_rescan_restores_missing_status(
+        self, tmp_path, manga_repo: MangaRepository
+    ) -> None:
+        """缺失文件重新出现后应恢复漫画和文件的可用状态。"""
+        pdf = tmp_path / "350237-漫画(3章).pdf"
+        pdf.write_bytes(b"%PDF")
+        entries = scan_download_dir(str(tmp_path))
+        sync_scanned_to_db(manga_repo, entries)
+        manga_repo.mark_manga_missing("350237")
+
+        sync_scanned_to_db(manga_repo, entries)
+
+        manga = manga_repo.get("350237")
+        assert manga is not None
+        assert manga.status == "downloaded"
+        assert manga.files[0].status == "ready"
+
     def test_cleanup_missing_files(self, tmp_path, manga_repo: MangaRepository) -> None:
         """数据库中存在但文件不存在的记录应被清理"""
         os.makedirs(tmp_path, exist_ok=True)
@@ -165,7 +180,6 @@ class TestSyncScannedToDb:
             manga_id="999999",
             title="残留漫画",
             author="",
-            tags="",
             chapter_count=1,
             page_count=0,
         )
@@ -205,7 +219,6 @@ class TestSyncScannedToDb:
             manga_id="350234",
             title="旧标题",
             author="作者",
-            tags="纯爱",
             chapter_count=3,
             page_count=100,
         )
@@ -238,13 +251,10 @@ class TestSyncScannedToDbTagCleanup:
             manga_id="999999",
             title="残留漫画",
             author="",
-            tags="萌系",
             chapter_count=1,
             page_count=0,
         )
-        tag_repo.add_for_existing_manga(
-            "萌系", "999999", "999999-残留漫画(1章).pdf"
-        )
+        tag_repo.add_for_existing_manga("萌系", "999999")
 
         result = sync_scanned_to_db(manga_repo, entries, tag_repo=tag_repo)
 

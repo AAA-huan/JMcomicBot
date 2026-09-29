@@ -2,7 +2,6 @@
 
 # pylint: disable=arguments-differ, too-many-positional-arguments
 
-from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -12,7 +11,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import selectinload
 
 from src.database.database import DatabaseManager
-from src.database.models import Manga, MangaFile
+from src.database.models import Manga, MangaFile, utc_now
 from src.database.repositories._base import BaseRepository
 
 _VALID_MANGA_STATUSES = {"downloaded", "missing_file", "invalid", "deleted"}
@@ -66,7 +65,7 @@ class MangaRepository(BaseRepository):
             stmt = (
                 select(Manga)
                 .options(selectinload(Manga.files))
-                .order_by(Manga.downloaded_at.desc())
+                .order_by(Manga.downloaded_at.desc(), Manga.id)
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )
@@ -78,7 +77,7 @@ class MangaRepository(BaseRepository):
             stmt = (
                 select(Manga)
                 .options(selectinload(Manga.files))
-                .order_by(Manga.downloaded_at.desc())
+                .order_by(Manga.downloaded_at.desc(), Manga.id)
             )
             return list(session.scalars(stmt).all())
 
@@ -96,7 +95,7 @@ class MangaRepository(BaseRepository):
                 select(Manga)
                 .where(Manga.author.like(f"%{author}%"))
                 .options(selectinload(Manga.files))
-                .order_by(Manga.downloaded_at.desc())
+                .order_by(Manga.downloaded_at.desc(), Manga.id)
             )
             return list(session.scalars(stmt).all())
 
@@ -105,7 +104,6 @@ class MangaRepository(BaseRepository):
         manga_id: str,
         title: str,
         author: str,
-        tags: str,
         chapter_count: int,
         page_count: int,
         status: str = "downloaded",
@@ -116,7 +114,6 @@ class MangaRepository(BaseRepository):
             manga_id: 漫画ID
             title: 漫画标题
             author: 漫画作者
-            tags: 漫画类型标签(逗号分隔)
             chapter_count: 章节数
             page_count: 总页数
             status: 下载状态
@@ -132,13 +129,13 @@ class MangaRepository(BaseRepository):
             if manga is None:
                 manga = Manga(id=manga_id)
                 session.add(manga)
-                manga.created_at = datetime.now()
+                manga.created_at = utc_now()
             manga.title = title
             manga.author = author
             manga.chapter_count = chapter_count
             manga.page_count = page_count
             manga.status = status
-            manga.updated_at = datetime.now()
+            manga.updated_at = utc_now()
             session.commit()
             session.refresh(manga)
             return manga
@@ -202,10 +199,11 @@ class MangaRepository(BaseRepository):
                 existing.file_size_bytes = file_size_bytes
                 existing.display_name = os.path.basename(file_path)
                 existing.status = "ready"
-                existing.updated_at = datetime.now()
+                existing.updated_at = utc_now()
                 existing.last_verified_at = None
                 existing.sha256 = sha256
-                existing.page_count = page_count or 0
+                if page_count is not None:
+                    existing.page_count = page_count
                 existing.relative_path = relative_path
                 session.commit()
                 session.refresh(existing)
@@ -219,10 +217,11 @@ class MangaRepository(BaseRepository):
                 existing_for_manga.mime_type = "application/pdf"
                 existing_for_manga.file_size_bytes = file_size_bytes
                 existing_for_manga.status = "ready"
-                existing_for_manga.updated_at = datetime.now()
+                existing_for_manga.updated_at = utc_now()
                 existing_for_manga.last_verified_at = None
                 existing_for_manga.sha256 = sha256
-                existing_for_manga.page_count = page_count or 0
+                if page_count is not None:
+                    existing_for_manga.page_count = page_count
                 existing_for_manga.relative_path = relative_path
                 session.commit()
                 session.refresh(existing_for_manga)
@@ -236,7 +235,7 @@ class MangaRepository(BaseRepository):
                 page_count=page_count or 0,
                 sha256=sha256,
                 status="ready",
-                updated_at=datetime.now(),
+                updated_at=utc_now(),
                 relative_path=relative_path,
             )
             session.add(manga_file)
@@ -271,7 +270,7 @@ class MangaRepository(BaseRepository):
             if manga_file is None:
                 return False
             manga_file.status = status
-            manga_file.updated_at = datetime.now()
+            manga_file.updated_at = utc_now()
             session.commit()
             return True
 
@@ -282,10 +281,10 @@ class MangaRepository(BaseRepository):
             if manga is None:
                 return False
             manga.status = "missing_file"
-            manga.updated_at = datetime.now()
+            manga.updated_at = utc_now()
             for manga_file in manga.files:
                 manga_file.status = "missing"
-                manga_file.updated_at = datetime.now()
+                manga_file.updated_at = utc_now()
             session.commit()
             return True
 

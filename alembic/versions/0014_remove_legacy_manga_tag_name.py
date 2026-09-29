@@ -5,7 +5,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-
 revision: str = "0014_remove_legacy_manga_tag_name"
 down_revision: Union[str, None] = "0013_add_management_query_indexes"
 branch_labels: Union[str, Sequence[str], None] = None

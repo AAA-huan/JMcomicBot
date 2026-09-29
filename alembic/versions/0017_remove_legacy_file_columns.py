@@ -5,7 +5,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-
 revision: str = "0017_remove_legacy_file_columns"
 down_revision: Union[str, None] = "0016_add_status_checks"
 branch_labels: Union[str, Sequence[str], None] = None

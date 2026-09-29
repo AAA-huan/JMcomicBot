@@ -5,7 +5,6 @@ from typing import Sequence, Union
 from alembic import op
 import sqlalchemy as sa
 
-
 revision: str = "0008_unique_manga_file"
 down_revision: Union[str, None] = "0007_unique_relative_file_path"
 branch_labels: Union[str, Sequence[str], None] = None
@@ -18,7 +17,9 @@ def upgrade() -> None:
     if "uq_manga_file_manga_id" not in {
         index["name"] for index in inspector.get_indexes("manga_file")
     }:
-        op.create_index("uq_manga_file_manga_id", "manga_file", ["manga_id"], unique=True)
+        op.create_index(
+            "uq_manga_file_manga_id", "manga_file", ["manga_id"], unique=True
+        )
 
 
 def downgrade() -> None:
