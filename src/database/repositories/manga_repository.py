@@ -246,6 +246,20 @@ class MangaRepository(BaseRepository):
             session.commit()
             return True
 
+    def mark_manga_missing(self, manga_id: str) -> bool:
+        """将漫画及其文件标记为缺失，不删除数据库记录。"""
+        with self._get_session() as session:
+            manga = session.get(Manga, manga_id)
+            if manga is None:
+                return False
+            manga.status = "missing_file"
+            manga.updated_at = datetime.now()
+            for manga_file in manga.files:
+                manga_file.status = "missing"
+                manga_file.updated_at = datetime.now()
+            session.commit()
+            return True
+
     def delete_files(self, manga_id: str) -> int:
         """删除指定漫画的全部 PDF 文件记录
 

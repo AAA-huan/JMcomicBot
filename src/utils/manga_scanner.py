@@ -154,7 +154,7 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
     将扫描到的漫画条目同步到数据库
 
     对数据库已有记录仅更新可解析的标题与章节数，保留更完整的元数据；
-    对数据库中存在但文件已不存在的残留记录进行清理（含对应的标签记录）。
+    对数据库中存在但文件已不存在的残留记录标记为缺失，不直接删除。
 
     Args:
         repo: 漫画元数据仓储
@@ -225,11 +225,9 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
         db_ids = {manga.id for manga in repo.get_all()}
         orphan_ids = db_ids - disk_ids
         for manga_id in sorted(orphan_ids):
-            logger.info(f"清理残留记录: 漫画ID {manga_id} 的PDF文件已不存在")
-            repo.delete(manga_id)
-            if tag_repo is not None:
-                tag_repo.delete_by_manga_id(manga_id)
-        result.deleted_count = len(orphan_ids)
+            logger.info(f"标记缺失文件: 漫画ID {manga_id} 的PDF文件已不存在")
+            repo.mark_manga_missing(manga_id)
+        result.deleted_count = 0
     else:
         result.pending_cleanup_count = _count_pending_cleanup(repo, disk_ids)
 

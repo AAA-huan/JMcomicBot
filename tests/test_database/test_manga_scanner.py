@@ -173,9 +173,11 @@ class TestSyncScannedToDb:
         assert manga_repo.count() == 2
 
         result = sync_scanned_to_db(manga_repo, entries)
-        assert result.deleted_count == 1
-        assert manga_repo.count() == 1
-        assert manga_repo.get("999999") is None
+        assert result.deleted_count == 0
+        assert manga_repo.count() == 2
+        missing = manga_repo.get("999999")
+        assert missing is not None
+        assert missing.status == "missing_file"
 
     def test_dry_run_writes_nothing(
         self, tmp_path, manga_repo: MangaRepository
@@ -245,8 +247,8 @@ class TestSyncScannedToDbTagCleanup:
 
         result = sync_scanned_to_db(manga_repo, entries, tag_repo=tag_repo)
 
-        assert result.deleted_count == 1
-        assert tag_repo.get_by_tag("萌系") == []
+        assert result.deleted_count == 0
+        assert len(tag_repo.get_by_tag("萌系")) == 1
 
     def test_enrich_entry_writes_tags(
         self, tmp_path, manga_repo: MangaRepository, tag_repo
