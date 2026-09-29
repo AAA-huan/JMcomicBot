@@ -71,13 +71,15 @@ class MangaFile(Base):
         Float, default=0.0, comment="文件大小(MB)"
     )
     relative_path: Mapped[Optional[str]] = mapped_column(String(1024), nullable=True)
-    display_name: Mapped[Optional[str]] = mapped_column(String(512), nullable=True)
-    file_type: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
-    mime_type: Mapped[Optional[str]] = mapped_column(String(128), nullable=True)
-    file_size_bytes: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
-    page_count: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
+    display_name: Mapped[str] = mapped_column(String(512), default="")
+    file_type: Mapped[str] = mapped_column(String(32), default="pdf")
+    mime_type: Mapped[str] = mapped_column(
+        String(128), default="application/pdf"
+    )
+    file_size_bytes: Mapped[int] = mapped_column(Integer, default=0)
+    page_count: Mapped[int] = mapped_column(Integer, default=0)
     sha256: Mapped[Optional[str]] = mapped_column(String(64), nullable=True)
-    status: Mapped[Optional[str]] = mapped_column(String(32), nullable=True)
+    status: Mapped[str] = mapped_column(String(32), default="ready")
     created_at: Mapped[datetime] = mapped_column(
         DateTime, default=datetime.now, comment="记录创建时间"
     )
