@@ -9,6 +9,7 @@ import time
 import pytest
 
 from src.bot import MangaBot
+from src.database.repositories.audit_event_repository import AuditEventRepository
 from src.download.manager import DownloadManager
 from src.logging.logger_config import logger
 from src.message.manager import MessageManager
@@ -76,10 +77,11 @@ def test_websocket_watchdog_stops_immediately() -> None:
     assert elapsed < 0.5
 
 
-def test_shutdown_request_unblocks_main_loop() -> None:
+def test_shutdown_request_unblocks_main_loop(db_manager) -> None:
     """关闭请求应立即唤醒主循环，不再依赖一秒轮询"""
     bot = object.__new__(MangaBot)
     bot._shutdown_event = threading.Event()
+    bot.audit_event_repo = AuditEventRepository(db_manager)
     bot.web_server = None
     bot.connect_websocket = lambda: None
     bot.start_reconnect_manager = lambda: None
@@ -90,6 +92,24 @@ def test_shutdown_request_unblocks_main_loop() -> None:
     runner.join(timeout=0.5)
 
     assert not runner.is_alive()
+
+
+def test_shutdown_request_records_audit(db_manager) -> None:
+    """关闭请求应记录 bot.shutdown_requested 审计，且重复调用不重复记录。"""
+    bot = object.__new__(MangaBot)
+    bot._shutdown_event = threading.Event()
+    bot.audit_event_repo = AuditEventRepository(db_manager)
+
+    bot.request_shutdown("收到用户中断信号")
+    bot.request_shutdown("重复调用不应再记录")
+
+    events = AuditEventRepository(db_manager).list()
+    shutdown_events = [
+        event for event in events if event.event_type == "bot.shutdown_requested"
+    ]
+    assert len(shutdown_events) == 1
+    assert shutdown_events[0].source == "system"
+    assert shutdown_events[0].result == "accepted"
 
 
 def test_idle_download_queue_stops_immediately(tmp_path) -> None:

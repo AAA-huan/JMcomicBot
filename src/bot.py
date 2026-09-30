@@ -313,8 +313,18 @@ class MangaBot:
 
     def request_shutdown(self, reason: str = "") -> None:
         """请求主循环退出，重复调用不会产生额外副作用"""
+        if self._shutdown_event.is_set():
+            return
         if reason:
             logger.info(f"请求关闭机器人: {reason}")
+        self.audit_event_repo.record(
+            event_type="bot.shutdown_requested",
+            source="system",
+            result="accepted",
+            target_type="bot",
+            target_id="self",
+            metadata={"reason": reason} if reason else None,
+        )
         self._shutdown_event.set()
 
     def close(self) -> None:
