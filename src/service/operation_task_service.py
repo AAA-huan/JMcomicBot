@@ -11,6 +11,46 @@ from src.database.repositories import (
 from src.service.operation_context import OperationContext
 from src.service.results import TaskResult
 
+# 审计事件名按 task_type 映射到第 2.11 节规定的领域前缀。
+# task_event 过程事件保持 {task_type}.xxx 命名，不在此映射。
+_AUDIT_EVENT_NAMES: Dict[str, Dict[str, str]] = {
+    "download": {
+        "requested": "download.requested",
+        "succeeded": "download.completed",
+        "failed": "download.failed",
+    },
+    "delete": {
+        "requested": "manga.delete_requested",
+        "succeeded": "manga.deleted",
+        "failed": "manga.delete_failed",
+    },
+    "backup": {
+        "requested": "database.backup_requested",
+        "succeeded": "database.backup_created",
+        "failed": "database.backup_failed",
+    },
+    "scan": {
+        "requested": "library.scan_requested",
+        "succeeded": "library.scan_completed",
+        "failed": "library.scan_failed",
+    },
+    "repair": {
+        "requested": "library.repair_requested",
+        "succeeded": "library.repair_completed",
+        "failed": "library.repair_failed",
+    },
+}
+
+
+def _audit_event_name(task_type: str, phase: str) -> str:
+    """按 task_type 和生命周期阶段返回第 2.11 节规定的审计事件名。"""
+    try:
+        return _AUDIT_EVENT_NAMES[task_type][phase]
+    except KeyError as error:
+        raise ValueError(
+            f"未定义的审计事件名: task_type={task_type}, phase={phase}"
+        ) from error
+
 
 class OperationTaskService:
     """协调操作任务、过程事件和审计记录。"""
@@ -60,7 +100,7 @@ class OperationTaskService:
         )
         self.event_repo.append(task.id, f"{task_type}.requested", "queued")
         self.audit_repo.record(
-            event_type=f"{task_type}.requested",
+            event_type=_audit_event_name(task_type, "requested"),
             source=context.source,
             result="accepted",
             actor_user_id=context.actor_user_id,
@@ -111,7 +151,7 @@ class OperationTaskService:
             metadata=metadata,
         )
         self.audit_repo.record(
-            event_type=f"{task.task_type}.completed",
+            event_type=_audit_event_name(task.task_type, "succeeded"),
             source=task.source,
             result="succeeded",
             actor_user_id=(
@@ -142,7 +182,7 @@ class OperationTaskService:
         )
         self.event_repo.append(task_id, f"{task.task_type}.failed", "failed")
         self.audit_repo.record(
-            event_type=f"{task.task_type}.failed",
+            event_type=_audit_event_name(task.task_type, "failed"),
             source=task.source,
             result="failed",
             actor_user_id=(

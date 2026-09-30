@@ -303,3 +303,46 @@ def test_web_context_records_source_actor_and_client_ip(
 def test_web_context_requires_client_ip() -> None:
     with pytest.raises(ValueError, match="客户端 IP"):
         OperationContext.web("admin", " ")
+
+
+def test_audit_event_names_align_to_spec(
+    operation_task_service, audit_event_repo
+) -> None:
+    """任务型审计事件名应严格对齐第 2.11 节领域前缀命名。"""
+    expected = {
+        "download": ("download.requested", "download.completed", "download.failed"),
+        "delete": ("manga.delete_requested", "manga.deleted", "manga.delete_failed"),
+        "backup": (
+            "database.backup_requested",
+            "database.backup_created",
+            "database.backup_failed",
+        ),
+        "scan": (
+            "library.scan_requested",
+            "library.scan_completed",
+            "library.scan_failed",
+        ),
+        "repair": (
+            "library.repair_requested",
+            "library.repair_completed",
+            "library.repair_failed",
+        ),
+    }
+    context = OperationContext.system()
+    for task_type, (_requested, _succeeded, _failed) in expected.items():
+        # 成功路径：产生 requested 与 succeeded 审计
+        ok_task = operation_task_service.create(task_type, context)
+        operation_task_service.start(ok_task.id, "working")
+        operation_task_service.succeed(ok_task.id, context=context)
+        # 失败路径：产生 requested 与 failed 审计
+        bad_task = operation_task_service.create(task_type, context)
+        operation_task_service.start(bad_task.id, "working")
+        operation_task_service.fail(
+            bad_task.id, f"{task_type}_failed", "error", context=context
+        )
+
+    event_types = {event.event_type for event in audit_event_repo.list()}
+    for requested, succeeded, failed in expected.values():
+        assert requested in event_types, f"缺失审计事件: {requested}"
+        assert succeeded in event_types, f"缺失审计事件: {succeeded}"
+        assert failed in event_types, f"缺失审计事件: {failed}"
