@@ -5,6 +5,7 @@ from starlette.testclient import TestClient
 
 from src.database.models import utc_now
 from src.database.repositories import (
+    AuditEventRepository,
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
@@ -26,6 +27,7 @@ def _create_client(db_manager) -> TestClient:
         auth_service=WebAuthService(
             WebAdminRepository(db_manager),
             WebSessionRepository(db_manager),
+            AuditEventRepository(db_manager),
             session_hours=24,
             password_hasher=PasswordHasher(
                 time_cost=1,

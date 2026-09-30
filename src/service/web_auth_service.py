@@ -10,6 +10,7 @@ from argon2 import PasswordHasher
 from argon2.exceptions import InvalidHashError, VerifyMismatchError
 
 from src.database.models import utc_now
+from src.database.repositories.audit_event_repository import AuditEventRepository
 from src.database.repositories.web_auth_repository import (
     WebAdminRepository,
     WebSessionRepository,
@@ -51,6 +52,7 @@ class WebAuthService:
         self,
         admin_repository: WebAdminRepository,
         session_repository: WebSessionRepository,
+        audit_repository: AuditEventRepository,
         session_hours: int,
         password_hasher: PasswordHasher | None = None,
     ) -> None:
@@ -58,6 +60,7 @@ class WebAuthService:
             raise ValueError("WebUI 会话时长必须至少为 1 小时")
         self.admin_repository = admin_repository
         self.session_repository = session_repository
+        self.audit_repository = audit_repository
         self.session_hours = session_hours
         self.password_hasher = password_hasher or PasswordHasher()
 
@@ -91,16 +94,19 @@ class WebAuthService:
         self._validate_password(password)
         self.admin_repository.create(self.password_hasher.hash(password))
 
-    def login(self, password: str) -> CreatedSession:
-        """校验密码并创建新会话。"""
+    def login(self, password: str, client_ip: str) -> CreatedSession:
+        """校验密码并创建新会话，并记录登录审计。"""
         admin = self.admin_repository.get()
         if admin is None:
+            self._record_login_failed(client_ip, "admin_not_initialized")
             raise ValueError("WebUI 管理员尚未初始化")
         try:
             verified = self.password_hasher.verify(admin.password_hash, password)
         except (InvalidHashError, VerifyMismatchError) as error:
+            self._record_login_failed(client_ip, "password_mismatch")
             raise ValueError("管理员密码错误") from error
         if not verified:
+            self._record_login_failed(client_ip, "password_mismatch")
             raise ValueError("管理员密码错误")
         if self.password_hasher.check_needs_rehash(admin.password_hash):
             admin = self.admin_repository.change_password(
@@ -117,11 +123,35 @@ class WebAuthService:
             password_version=admin.password_version,
             expires_at=expires_at,
         )
+        self._record_login_succeeded(client_ip, admin.id)
         return CreatedSession(
             session_id=web_session.id,
             admin_id=web_session.admin_id,
             expires_at=web_session.expires_at,
             token=token,
+        )
+
+    def _record_login_succeeded(self, client_ip: str, admin_id: int) -> None:
+        """记录登录成功审计。"""
+        self.audit_repository.record(
+            event_type="web.login_succeeded",
+            source="web",
+            result="succeeded",
+            actor_user_id=str(admin_id),
+            client_ip=client_ip,
+            target_type="web_admin",
+            target_id=str(admin_id),
+        )
+
+    def _record_login_failed(self, client_ip: str, error_code: str) -> None:
+        """记录登录失败审计，不向调用方泄露内部状态。"""
+        self.audit_repository.record(
+            event_type="web.login_failed",
+            source="web",
+            result="failed",
+            client_ip=client_ip,
+            target_type="web_admin",
+            error_code=error_code,
         )
 
     def authenticate(self, token: str) -> AuthenticatedSession | None:

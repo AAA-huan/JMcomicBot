@@ -93,7 +93,7 @@ def create_api_router(  # pylint: disable=too-many-locals,too-many-statements
         if not login_rate_limiter.is_allowed(client_ip):
             raise ApiError(429, "LOGIN_RATE_LIMITED", "登录尝试过于频繁，请稍后重试")
         try:
-            created = auth_service.login(body.password)
+            created = auth_service.login(body.password, client_ip)
         except ValueError as error:
             login_rate_limiter.record_failure(client_ip)
             raise HTTPException(status.HTTP_401_UNAUTHORIZED, "登录凭据无效") from error

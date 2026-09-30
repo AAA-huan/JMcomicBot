@@ -122,6 +122,7 @@ class MangaBot:
         self.web_auth_service = WebAuthService(
             self.web_admin_repo,
             self.web_session_repo,
+            self.audit_event_repo,
             int(self.config_manager.config_dict["WEBUI_SESSION_HOURS"]),
         )
         self.manga_query_service = MangaQueryService(self.manga_repo, self.tag_repo)
