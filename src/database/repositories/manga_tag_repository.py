@@ -172,6 +172,21 @@ class MangaTagRepository(BaseRepository):
             session.commit()
         return added_count
 
+    def list_orphan_tags(self) -> List[str]:
+        """列出无任何漫画关联的孤儿标签名。
+
+        Returns:
+            List[str]: 孤儿标签名称列表
+        """
+        with self._get_session() as session:
+            return list(
+                session.scalars(
+                    select(Tag.name)
+                    .outerjoin(MangaTag, MangaTag.tag_id == Tag.id)
+                    .where(MangaTag.manga_id.is_(None))
+                ).all()
+            )
+
     def delete_orphan_tags(self) -> int:
         """删除无任何漫画关联的孤儿标签。
 
