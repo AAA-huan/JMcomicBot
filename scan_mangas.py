@@ -101,7 +101,7 @@ def main() -> None:
     # 初始化数据库并同步
     db_manager = DatabaseManager(db_path=db_path)
     db_manager.init_db()
-    repo = MangaRepository(db_manager)
+    repo = MangaRepository(db_manager, download_root=download_path)
     tag_repo = MangaTagRepository(db_manager)
     scan_record_repo = ScanRecordRepository(db_manager)
     task_service = OperationTaskService(

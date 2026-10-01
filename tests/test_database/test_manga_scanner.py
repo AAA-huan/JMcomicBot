@@ -1,9 +1,12 @@
 """漫画扫描模块的测试"""
 
 import os
+import sys
 
 import pytest
 
+from scan_mangas import main as scan_main
+from src.database.database import DatabaseManager
 from src.database.models import Manga
 from src.database.repositories import MangaRepository
 from src.utils.manga_scanner import (
@@ -281,3 +284,30 @@ class TestSyncScannedToDbTagCleanup:
 
         assert len(tag_repo.get_by_tag("萌系")) == 1
         assert len(tag_repo.get_by_tag("纯爱")) == 1
+
+
+class TestScanMangasScriptEntry:
+    """scan_mangas.py 脚本入口回归测试"""
+
+    def test_main_writes_new_files_with_download_root(
+        self, tmp_path, monkeypatch
+    ) -> None:
+        """脚本入口必须配置下载根目录，否则新增文件无法入库"""
+        download_dir = tmp_path / "downloads"
+        download_dir.mkdir()
+        pdf = download_dir / "123456-脚本测试(1章).pdf"
+        pdf.write_bytes(b"%PDF-1.4\n")
+        db_dir = tmp_path / "data"
+        monkeypatch.setenv("MANGA_DOWNLOAD_PATH", str(download_dir))
+        monkeypatch.setenv("DB_PATH", str(db_dir))
+        monkeypatch.setattr(sys, "argv", ["scan_mangas.py"])
+
+        scan_main()
+
+        db_manager = DatabaseManager(db_path=str(db_dir))
+        db_manager.init_db()
+        try:
+            repo = MangaRepository(db_manager, download_root=str(download_dir))
+            assert repo.get("123456") is not None
+        finally:
+            db_manager.close()
