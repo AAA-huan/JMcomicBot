@@ -171,3 +171,20 @@ class MangaTagRepository(BaseRepository):
         with self._get_session() as session:
             session.commit()
         return added_count
+
+    def delete_orphan_tags(self) -> int:
+        """删除无任何漫画关联的孤儿标签。
+
+        Returns:
+            int: 删除的标签数量
+        """
+        with self._get_session() as session:
+            orphan_tags = session.scalars(
+                select(Tag)
+                .outerjoin(MangaTag, MangaTag.tag_id == Tag.id)
+                .where(MangaTag.manga_id.is_(None))
+            ).all()
+            for tag in orphan_tags:
+                session.delete(tag)
+            session.commit()
+            return len(orphan_tags)

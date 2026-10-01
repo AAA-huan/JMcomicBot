@@ -2,6 +2,7 @@
 
 import pytest
 
+from src.database.models import Tag
 from src.database.repositories.manga_repository import MangaRepository
 from src.database.repositories.manga_tag_repository import MangaTagRepository
 
@@ -123,3 +124,17 @@ class TestMangaTag:
 
         # 幂等：再次回填不再新增
         assert tag_repo.sync_from_manga() == 0
+
+    def test_delete_orphan_tags_removes_only_unlinked(
+        self, db_manager, tag_repo: MangaTagRepository, manga_repo: MangaRepository
+    ) -> None:
+        self._create_mangas(manga_repo, "100")
+        tag_repo.add("纯爱", "100")  # 有关联的标签
+        with db_manager.get_session() as session:
+            session.add(Tag(name="孤儿标签", normalized_name="孤儿标签"))
+            session.commit()
+
+        removed = tag_repo.delete_orphan_tags()
+
+        assert removed == 1
+        assert tag_repo.list_all_tags() == ["纯爱"]
