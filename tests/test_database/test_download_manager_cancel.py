@@ -2,7 +2,8 @@
 
 from unittest.mock import Mock
 
-from src.download.manager import DownloadManager
+from src.download.manager import DownloadManager, DownloadQueueItem
+from src.service import OperationContext
 
 
 class TestDownloadManagerCancel:
@@ -19,10 +20,20 @@ class TestDownloadManagerCancel:
         )
         return manager
 
+    @staticmethod
+    def _queued_item(manga_id: str) -> DownloadQueueItem:
+        """构造静默的排队任务项，供取消测试使用。"""
+        return DownloadQueueItem(
+            manga_id=manga_id,
+            context=OperationContext.qq("user"),
+            operation_task_id=None,
+            notifier=None,
+        )
+
     def test_cancel_queued_task(self) -> None:
         manager = self._make_manager()
         # 模拟一个排队中的任务
-        manager.queued_tasks["100"] = ("user", None, True)
+        manager.queued_tasks["100"] = self._queued_item("100")
 
         assert manager.cancel_download("100") is True
         assert "100" not in manager.queued_tasks
@@ -41,8 +52,8 @@ class TestDownloadManagerCancel:
 
     def test_cancel_all_downloads(self) -> None:
         manager = self._make_manager()
-        manager.queued_tasks["100"] = ("user", None, True)
-        manager.queued_tasks["101"] = ("user", None, True)
+        manager.queued_tasks["100"] = self._queued_item("100")
+        manager.queued_tasks["101"] = self._queued_item("101")
         manager.downloading_mangas["200"] = True  # 正在下载的不计入
 
         count = manager.cancel_all_downloads()
@@ -53,13 +64,13 @@ class TestDownloadManagerCancel:
 
     def test_process_download_task_skips_cancelled(self) -> None:
         manager = self._make_manager()
-        manager.queued_tasks["100"] = ("user", None, True)
+        manager.queued_tasks["100"] = self._queued_item("100")
         manager.cancelled_downloads["100"] = True
 
         # 已取消的排队任务被取出执行时直接跳过
-        manager._process_download_task(
-            "user", "100", "", True
-        )  # pylint: disable=protected-access
+        manager._process_download_task(  # pylint: disable=protected-access
+            self._queued_item("100")
+        )
 
         assert "100" not in manager.downloading_mangas
         assert "100" not in manager.cancelled_downloads

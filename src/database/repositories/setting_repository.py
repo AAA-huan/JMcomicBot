@@ -2,7 +2,7 @@
 
 # pylint: disable=arguments-differ
 
-from typing import List
+from typing import List, Optional
 
 from src.database.database import DatabaseManager
 from src.database.models import Setting
@@ -28,6 +28,12 @@ class SettingRepository(BaseRepository):
         with self._get_session() as session:
             setting = session.get(Setting, key)
             return setting.value if setting else default
+
+    def get_optional(self, key: str) -> Optional[str]:
+        """读取指定键的配置值，未显式保存时返回 None（区别于空字符串）"""
+        with self._get_session() as session:
+            setting = session.get(Setting, key)
+            return setting.value if setting else None
 
     def get_int(self, key: str, default: int = 0) -> int:
         """读取整型配置值，解析失败时回退到默认值"""

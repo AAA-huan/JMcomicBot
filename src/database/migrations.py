@@ -23,9 +23,11 @@ def prepare_legacy_file_paths(engine: Engine, download_root: str | None) -> None
         return
     root = Path(download_root).resolve()
     with engine.begin() as connection:
-        columns = {
-            column["name"] for column in inspect(connection).get_columns("manga_file")
-        }
+        inspector = inspect(connection)
+        if "manga_file" not in inspector.get_table_names():
+            # 全新数据库尚无 manga_file 表，没有旧路径需要回填
+            return
+        columns = {column["name"] for column in inspector.get_columns("manga_file")}
         if "file_path" not in columns or "relative_path" not in columns:
             return
         rows = connection.execute(

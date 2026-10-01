@@ -20,6 +20,14 @@ class PermissionManager:
     SCOPE_GLOBAL_BLACKLIST = "global_blacklist"
     SCOPE_DELETE_PERMISSION_USER = "delete_permission_user"
 
+    # 全部合法名单类型，供 WebUI 与命令入口统一校验
+    SCOPES = (
+        SCOPE_GROUP_WHITELIST,
+        SCOPE_PRIVATE_WHITELIST,
+        SCOPE_GLOBAL_BLACKLIST,
+        SCOPE_DELETE_PERMISSION_USER,
+    )
+
     def __init__(
         self,
         permission_repo: PermissionRepository,
@@ -154,6 +162,7 @@ class PermissionManager:
         Returns:
             bool: 是否为新插入
         """
+        self.validate_scope(scope)
         added = self.permission_repo.add(scope, value)
         if added:
             self._reload_scopes()
@@ -170,10 +179,51 @@ class PermissionManager:
         Returns:
             bool: 是否实际删除了记录
         """
+        self.validate_scope(scope)
         removed = self.permission_repo.remove(scope, value)
         if removed:
             self._reload_scopes()
         return removed
+
+    @classmethod
+    def validate_scope(cls, scope: str) -> str:
+        """
+        校验名单类型是否受支持
+
+        Args:
+            scope: 名单类型
+
+        Returns:
+            str: 原样返回合法名单类型
+
+        Raises:
+            ValueError: 名单类型不在项目定义的四种类型中时
+        """
+        if scope not in cls.SCOPES:
+            raise ValueError(f"不支持的权限类型: {scope}")
+        return scope
+
+    def get_scope(self, scope: str) -> List[str]:
+        """
+        返回指定名单当前的内存快照
+
+        Args:
+            scope: 名单类型
+
+        Returns:
+            List[str]: 名单内ID列表的副本
+
+        Raises:
+            ValueError: 名单类型不受支持时
+        """
+        self.validate_scope(scope)
+        scope_values = {
+            self.SCOPE_GROUP_WHITELIST: self.group_whitelist,
+            self.SCOPE_PRIVATE_WHITELIST: self.private_whitelist,
+            self.SCOPE_GLOBAL_BLACKLIST: self.global_blacklist,
+            self.SCOPE_DELETE_PERMISSION_USER: self.delete_permission_user,
+        }
+        return list(scope_values[scope])
 
     def update_whitelist(
         self,

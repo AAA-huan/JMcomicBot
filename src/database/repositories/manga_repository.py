@@ -220,6 +220,34 @@ class MangaRepository(BaseRepository):
             session.commit()
             return True
 
+    def update_metadata(
+        self,
+        manga_id: str,
+        title: Optional[str] = None,
+        author: Optional[str] = None,
+    ) -> bool:
+        """更新漫画允许编辑的元数据字段
+
+        Args:
+            manga_id: 漫画ID
+            title: 新标题，None 表示不修改
+            author: 新作者，None 表示不修改
+
+        Returns:
+            bool: 是否找到并更新了漫画记录
+        """
+        with self._get_session() as session:
+            manga = session.get(Manga, manga_id)
+            if manga is None:
+                return False
+            if title is not None:
+                manga.title = title
+            if author is not None:
+                manga.author = author
+            manga.updated_at = utc_now()
+            session.commit()
+            return True
+
     def add_file(
         self,
         manga_id: str,

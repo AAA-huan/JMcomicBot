@@ -1,5 +1,6 @@
 """文件发送队列计数与批量进度回归测试"""
 
+from types import SimpleNamespace
 from typing import Any, Dict, List
 
 import queue
@@ -50,7 +51,13 @@ def _build_executor(download_path: str, messages: List[str]) -> CommandExecutor:
         },
         self_id_getter=lambda: "bot",
         permission_manager=_PermissionManager(),
-        download_service=DownloadQueueService(download_manager),
+        download_service=DownloadQueueService(
+            download_manager,
+            task_repository=SimpleNamespace(  # type: ignore[arg-type]
+                find_active_download=lambda _manga_id: None
+            ),
+        ),
+        manga_service=SimpleNamespace(delete=lambda *_args, **_kwargs: None),
     )
 
 
@@ -113,7 +120,7 @@ def test_no_progress_pause_after_final_file(tmp_path, monkeypatch) -> None:
     messages: List[str] = []
     sleep_calls: List[float] = []
     executor = _build_executor(str(tmp_path), messages)
-    executor.config["FILE_SEND_BATCH_SIZE"] = 10
+    executor.update_batch_settings(batch_size=10)
     monkeypatch.setattr(
         "src.command.executor.time.sleep", lambda seconds: sleep_calls.append(seconds)
     )

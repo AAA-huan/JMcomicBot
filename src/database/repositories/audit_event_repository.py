@@ -24,6 +24,7 @@ _LONG_RETENTION_PREFIXES = (
 
 
 _AUDIT_METADATA_KEYS = {
+    "action",
     "changed_fields",
     "cleaned_count",
     "corrupted_count",
@@ -35,6 +36,7 @@ _AUDIT_METADATA_KEYS = {
     "page_count",
     "reason",
     "retry_count",
+    "scope",
     "updated_count",
 }
 

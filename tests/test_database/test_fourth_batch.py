@@ -48,7 +48,13 @@ def test_list_help_uses_real_page_example(tmp_path) -> None:
         config={"MANGA_DOWNLOAD_PATH": str(tmp_path)},
         self_id_getter=lambda: "bot",
         permission_manager=_PermissionManager(),
-        download_service=DownloadQueueService(download_manager),
+        download_service=DownloadQueueService(
+            download_manager,
+            task_repository=SimpleNamespace(  # type: ignore[arg-type]
+                find_active_download=lambda _manga_id: None
+            ),
+        ),
+        manga_service=SimpleNamespace(delete=lambda *_args, **_kwargs: None),
     )
 
     executor._send_help("10001", "", None, True)

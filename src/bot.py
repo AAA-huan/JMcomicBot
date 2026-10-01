@@ -18,6 +18,8 @@ from src.database.repositories import (
     MangaTagRepository,
     OperationTaskRepository,
     PermissionRepository,
+    SettingHistoryRepository,
+    SettingRepository,
     TaskEventRepository,
     TaskLogRepository,
     UserGroupRepository,
@@ -30,7 +32,14 @@ from src.logging.logger_config import logger
 from src.message.manager import MessageManager
 from src.permission.manager import PermissionManager
 from src.platform.compatibility import PlatformChecker
-from src.service import CleanupService, DownloadQueueService, OperationTaskService
+from src.service import (
+    CleanupService,
+    DownloadQueueService,
+    MangaService,
+    OperationTaskService,
+    PermissionService,
+    SettingsService,
+)
 from src.service.query_service import MangaQueryService, TaskQueryService
 from src.service.system_service import SystemService
 from src.service.web_auth_service import WebAuthService
@@ -83,6 +92,8 @@ class MangaBot:
         self.web_admin_repo = WebAdminRepository(self.database_manager)
         self.web_session_repo = WebSessionRepository(self.database_manager)
         self.backup_repo = BackupRepository(self.database_manager)
+        self.setting_repo = SettingRepository(self.database_manager)
+        self.setting_history_repo = SettingHistoryRepository(self.database_manager)
         self.operation_task_service = OperationTaskService(
             self.operation_task_repo,
             self.task_event_repo,
@@ -91,6 +102,17 @@ class MangaBot:
         interrupted_count = self.operation_task_service.recover_interrupted()
         if interrupted_count:
             logger.warning(f"启动时已中断 {interrupted_count} 个遗留运行任务")
+
+        # 运行时配置服务先于组件创建，加载数据库动态覆盖值
+        self.settings_service = SettingsService(
+            self.setting_repo,
+            self.setting_history_repo,
+            self.audit_event_repo,
+            self.config_manager,
+        )
+        persisted_settings = self.settings_service.load_persisted()
+        if persisted_settings:
+            logger.info(f"已应用 {persisted_settings} 项数据库动态配置")
 
         self.cleanup_service = CleanupService(
             self.operation_task_repo,
@@ -111,6 +133,9 @@ class MangaBot:
             seed_global_blacklist=self.config_manager.global_blacklist,
             seed_delete_permission_user=self.config_manager.delete_permission_user,
         )
+        self.permission_service = PermissionService(
+            self.permission_manager, self.audit_event_repo
+        )
 
         self.ws_client = WebSocketClient(self.config_manager.config_dict)
         self.message_manager = MessageManager(
@@ -130,7 +155,19 @@ class MangaBot:
             operation_task_service=self.operation_task_service,
             send_conflict_checker=self.message_manager.is_manga_sending,
         )
-        self.download_service = DownloadQueueService(self.download_manager)
+        self.download_service = DownloadQueueService(
+            self.download_manager, self.operation_task_repo
+        )
+        # 统一删除服务：QQ 删除命令与 Web 写接口共用同一套删除流程
+        self.manga_service = MangaService(
+            manga_repository=self.manga_repo,
+            tag_repository=self.tag_repo,
+            audit_repository=self.audit_event_repo,
+            operation_task_service=self.operation_task_service,
+            download_root=str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]),
+            download_conflict_checker=self.download_manager.is_download_active,
+            send_conflict_checker=self.message_manager.is_manga_sending,
+        )
         self.web_auth_service = WebAuthService(
             self.web_admin_repo,
             self.web_session_repo,
@@ -158,12 +195,37 @@ class MangaBot:
             self_id_getter=lambda: self.SELF_ID,
             permission_manager=self.permission_manager,
             download_service=self.download_service,
+            manga_service=self.manga_service,
             resend_handler=self.message_manager.resend_pending_files,
             send_status_provider=self.message_manager.get_send_queue_status,
             manga_repo=self.manga_repo,
             tag_repo=self.tag_repo,
-            operation_task_service=self.operation_task_service,
-            send_conflict_checker=self.message_manager.is_manga_sending,
+        )
+
+        # 注册立即生效配置的显式应用接口，WebUI 修改后由服务直接调用
+        self.settings_service.register_appliers(
+            {
+                "FILE_SEND_INTERVAL": lambda value: (
+                    self.message_manager.update_send_settings(send_interval=value)
+                ),
+                "FILE_SEND_BATCH_SIZE": lambda value: (
+                    self.command_executor.update_batch_settings(batch_size=value)
+                ),
+                "FILE_SEND_BATCH_INTERVAL": lambda value: (
+                    self.command_executor.update_batch_settings(batch_interval=value)
+                ),
+                "SEND_RETRY_TIMEOUT": lambda value: (
+                    self.message_manager.update_send_settings(retry_timeout=value)
+                ),
+                "RESEND_CONFIRM_TIMEOUT": lambda value: (
+                    self.message_manager.update_send_settings(
+                        resend_confirm_timeout=value
+                    )
+                ),
+                "LOW_MEMORY_DELETE_DELAY": lambda value: (
+                    self.download_manager.update_low_memory_settings(delete_delay=value)
+                ),
+            }
         )
 
         self.SELF_ID: Optional[str] = None

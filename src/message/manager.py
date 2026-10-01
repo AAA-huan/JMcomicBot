@@ -62,7 +62,42 @@ class MessageManager:
         # 未完成的任务总数（队列中等待 + 正在处理的），替代 qsize()
         self._queue_count: int = 0
         self._queue_count_lock: threading.Lock = threading.Lock()
+        # 发送参数独立保存，SettingsService 通过 update_send_settings 显式更新
+        self.file_send_interval: float = float(config.get("FILE_SEND_INTERVAL", 1.8))
+        self.send_retry_timeout: int = int(config.get("SEND_RETRY_TIMEOUT", 30))
+        self.resend_confirm_timeout: int = int(
+            config.get("RESEND_CONFIRM_TIMEOUT", 300)
+        )
         self._start_file_queue_worker()
+
+    def update_send_settings(
+        self,
+        send_interval: Optional[float] = None,
+        retry_timeout: Optional[int] = None,
+        resend_confirm_timeout: Optional[int] = None,
+    ) -> None:
+        """由 SettingsService 调用，显式更新发送参数并立即生效。"""
+        if send_interval is not None:
+            if send_interval <= 0:
+                raise ValueError("文件发送间隔必须大于 0")
+            self.file_send_interval = send_interval
+            self.config["FILE_SEND_INTERVAL"] = send_interval
+        if retry_timeout is not None:
+            if retry_timeout < 1:
+                raise ValueError("发送重试超时必须至少为 1 秒")
+            self.send_retry_timeout = retry_timeout
+            self.config["SEND_RETRY_TIMEOUT"] = retry_timeout
+        if resend_confirm_timeout is not None:
+            if resend_confirm_timeout < 1:
+                raise ValueError("重发确认超时必须至少为 1 秒")
+            self.resend_confirm_timeout = resend_confirm_timeout
+            self.config["RESEND_CONFIRM_TIMEOUT"] = resend_confirm_timeout
+        self.logger.info(
+            "文件发送参数已更新: "
+            f"发送间隔 {self.file_send_interval} 秒, "
+            f"重试超时 {self.send_retry_timeout} 秒, "
+            f"重发确认超时 {self.resend_confirm_timeout} 秒"
+        )
 
     def get_send_queue_status(self) -> Dict[str, Any]:
         """获取当前文件发送队列状态
@@ -210,7 +245,7 @@ class MessageManager:
         payload = self._build_file_payload(
             task.file_path, task.user_id, task.group_id, task.private
         )
-        retry_timeout = int(self.config.get("SEND_RETRY_TIMEOUT", 30))
+        retry_timeout = self.send_retry_timeout
         deadline = time.time() + retry_timeout
 
         while time.time() < deadline and not self._stop_event.is_set():
@@ -225,7 +260,7 @@ class MessageManager:
                     f"目标: {'私聊' if task.private else '群聊'}, "
                     f"用户: {task.user_id}"
                 )
-                send_interval = float(self.config.get("FILE_SEND_INTERVAL", 1.8))
+                send_interval = self.file_send_interval
                 self._stop_event.wait(send_interval)
                 return
             except Exception as e:
@@ -439,7 +474,7 @@ class MessageManager:
                     by_manga[manga_id] = by_manga.get(manga_id, 0) + 1
                 for manga_id, count in by_manga.items():
                     notify += f" • 漫画ID {manga_id}（{count} 个文件）\n"
-                resend_timeout = int(self.config.get("RESEND_CONFIRM_TIMEOUT", 300))
+                resend_timeout = self.resend_confirm_timeout
                 notify += (
                     f"\n📬 回复「重发重发」确认重新发送，"
                     f"{int(resend_timeout / 60)} 分钟内未确认将自动放弃"
@@ -533,7 +568,7 @@ class MessageManager:
 
     def _cleanup_expired_resends(self) -> None:
         """清理等待用户确认重发但已超时的文件，防止残留"""
-        timeout = int(self.config.get("RESEND_CONFIRM_TIMEOUT", 300))
+        timeout = self.resend_confirm_timeout
         now = time.time()
         expired: List[Dict[str, Any]] = []
         with self._pending_errors_lock:

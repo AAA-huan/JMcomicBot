@@ -3,7 +3,24 @@
 from typing import Any, Dict, List, Optional, Protocol
 
 from src.service.operation_context import OperationContext
-from src.service.results import DownloadCancellationResult, TaskResult
+from src.service.results import (
+    DownloadCancellationResult,
+    DownloadRequestItem,
+    DownloadRequestResult,
+    TaskResult,
+)
+
+
+class DownloadNotifier(Protocol):
+    """下载过程通知回调；不传表示静默（Web/系统来源）。"""
+
+    def message(self, text: str) -> None:
+        """发送一条文本通知。"""
+        raise NotImplementedError
+
+    def file(self, file_path: str) -> None:
+        """发送一个文件通知。"""
+        raise NotImplementedError
 
 
 class DownloadQueueGateway(Protocol):
@@ -17,6 +34,19 @@ class DownloadQueueGateway(Protocol):
         """取消全部排队任务。"""
         raise NotImplementedError
 
+    def find_active_download(self, manga_id: str) -> Optional[str]:
+        """返回内存中活动下载任务的 ID，无活动任务时返回 None。"""
+        raise NotImplementedError
+
+    def request_download(
+        self,
+        manga_id: str,
+        context: OperationContext,
+        notifier: Optional[DownloadNotifier],
+    ) -> DownloadRequestItem:
+        """请求下载单个漫画并返回入队结果。"""
+        raise NotImplementedError
+
 
 class DownloadService(Protocol):
     """下载任务应用服务接口。"""
@@ -27,6 +57,15 @@ class DownloadService(Protocol):
 
     def cancel_all(self) -> DownloadCancellationResult:
         """取消全部排队任务。"""
+        raise NotImplementedError
+
+    def request(
+        self,
+        manga_ids: List[str],
+        context: OperationContext,
+        notifier: Optional[DownloadNotifier] = None,
+    ) -> DownloadRequestResult:
+        """校验、去重并请求下载。"""
         raise NotImplementedError
 
 

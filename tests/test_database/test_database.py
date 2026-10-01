@@ -217,6 +217,25 @@ class TestDatabaseManager:
         finally:
             db.close()
 
+    def test_fresh_database_with_download_root_initializes(self, tmp_path) -> None:
+        """全新数据库配置下载根目录时不应因缺少旧表而中断初始化。"""
+        download_root = tmp_path / "downloads"
+        download_root.mkdir()
+        db = DatabaseManager(
+            db_path=str(tmp_path / "data"), download_root=str(download_root)
+        )
+        try:
+            db.init_db()
+
+            with db.get_session() as session:
+                file_count = session.execute(
+                    text("SELECT COUNT(*) FROM manga_file")
+                ).scalar()
+
+            assert file_count == 0
+        finally:
+            db.close()
+
     def test_management_query_indexes_exist(self, db_manager: DatabaseManager) -> None:
         """管理列表的筛选和稳定排序应有对应索引。"""
         inspector = inspect(db_manager.engine)

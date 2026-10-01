@@ -492,3 +492,23 @@ class Setting(Base):
     updated_at: Mapped[datetime] = mapped_column(
         DateTime, default=utc_now, onupdate=utc_now, comment="更新时间"
     )
+
+
+class SettingHistory(Base):
+    """运行时配置修改历史表，只保存脱敏后的前后值，不保存秘密"""
+
+    __tablename__ = "setting_history"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    key: Mapped[str] = mapped_column(String(128), comment="配置键")
+    old_value_masked: Mapped[str] = mapped_column(
+        String(1024), default="", comment="修改前脱敏值"
+    )
+    new_value_masked: Mapped[str] = mapped_column(
+        String(1024), default="", comment="修改后脱敏值"
+    )
+    source: Mapped[str] = mapped_column(String(16), comment="操作来源")
+    changed_by: Mapped[str] = mapped_column(String(64), default="", comment="操作者")
+    changed_at: Mapped[datetime] = mapped_column(
+        DateTime, default=utc_now, comment="修改时间"
+    )

@@ -16,9 +16,11 @@ from src.database.repositories import (
 from src.download.manager import DownloadManager
 from src.service import (
     DownloadQueueService,
+    MangaService,
     OperationContext,
     OperationTaskService,
 )
+from src.service.results import DownloadRequestItem
 
 
 class _PermissionManager:
@@ -42,10 +44,18 @@ class _DownloadManager:
         self.downloading_mangas: Dict[str, bool] = {}
         self.queued_tasks: Dict[str, Any] = {}
 
-    def download_manga(
-        self, user_id: str, manga_id: str, group_id: Optional[str], private: bool
-    ) -> None:
-        del user_id, manga_id, group_id, private
+    def request_download(
+        self,
+        manga_id: str,
+        context: OperationContext,
+        notifier: Optional[Any],
+    ) -> DownloadRequestItem:
+        self.queued_tasks[manga_id] = (context, notifier)
+        return DownloadRequestItem(manga_id=manga_id, status="queued", task_id=None)
+
+    def find_active_download(self, manga_id: str) -> Optional[str]:
+        del manga_id
+        return None
 
     def cancel_download(self, manga_id: str) -> bool:
         if manga_id not in self.queued_tasks:
@@ -59,13 +69,14 @@ class _DownloadManager:
         return cancelled_count
 
 
-def _build_executor(
+def _build_executor(  # pylint: disable=too-many-arguments
     download_path: str,
     messages: List[str],
     download_manager: Any,
     manga_repo: Optional[MangaRepository] = None,
     tag_repo: Optional[MangaTagRepository] = None,
     file_sender: Optional[Callable[[str, str, Optional[str], bool], None]] = None,
+    manga_service: Optional[Any] = None,
 ) -> CommandExecutor:
     """构造具备消息捕获能力的命令执行器"""
 
@@ -82,9 +93,37 @@ def _build_executor(
         config={"MANGA_DOWNLOAD_PATH": download_path, "FILE_SEND_BATCH_SIZE": 10},
         self_id_getter=lambda: "bot",
         permission_manager=_PermissionManager(),
-        download_service=DownloadQueueService(download_manager),
+        download_service=DownloadQueueService(
+            download_manager,
+            task_repository=SimpleNamespace(  # type: ignore[arg-type]
+                find_active_download=lambda _manga_id: None
+            ),
+        ),
+        manga_service=manga_service
+        or SimpleNamespace(delete=lambda *_args, **_kwargs: None),
         manga_repo=manga_repo,
         tag_repo=tag_repo,
+    )
+
+
+def _build_manga_service(
+    download_path: str,
+    manga_repo: MangaRepository,
+    tag_repo: MangaTagRepository,
+    operation_task_service: OperationTaskService,
+    audit_repository: AuditEventRepository,
+    download_manager: Any,
+    send_conflict_checker: Optional[Callable[[str], bool]] = None,
+) -> MangaService:
+    """构造使用真实仓储的删除服务，供 executor 删除测试复用"""
+    return MangaService(
+        manga_repository=manga_repo,
+        tag_repository=tag_repo,
+        audit_repository=audit_repository,
+        operation_task_service=operation_task_service,
+        download_root=download_path,
+        download_conflict_checker=download_manager.is_download_active,
+        send_conflict_checker=send_conflict_checker or (lambda _manga_id: False),
     )
 
 
@@ -221,7 +260,11 @@ def test_chapter_count_falls_back_to_pdf_count(tmp_path) -> None:
 
 
 def test_batch_delete_cleans_database(
-    tmp_path, manga_repo: MangaRepository, tag_repo: MangaTagRepository
+    tmp_path,
+    db_manager,
+    manga_repo: MangaRepository,
+    tag_repo: MangaTagRepository,
+    operation_task_service,
 ) -> None:
     """批量删除磁盘 PDF 后应同步清理漫画、文件和标签记录"""
     manga_ids = ["350236", "350237"]
@@ -245,6 +288,14 @@ def test_batch_delete_cleans_database(
         download_manager=download_manager,
         manga_repo=manga_repo,
         tag_repo=tag_repo,
+        manga_service=_build_manga_service(
+            str(tmp_path),
+            manga_repo,
+            tag_repo,
+            operation_task_service,
+            AuditEventRepository(db_manager),
+            download_manager,
+        ),
     )
 
     executor._delete_batch_mangas("10001", manga_ids, None, True)
@@ -267,7 +318,13 @@ def test_is_download_active_reports_queued_and_downloading() -> None:
     assert manager.is_download_active("333") is False
 
 
-def test_delete_manga_skips_active_download(tmp_path, manga_repo) -> None:
+def test_delete_single_manga_skips_active_download(
+    tmp_path,
+    db_manager,
+    manga_repo: MangaRepository,
+    tag_repo: MangaTagRepository,
+    operation_task_service,
+) -> None:
     """正在下载中的漫画不应被删除，应返回冲突错误并保留文件。"""
     manga_id = "350238"
     pdf_path = tmp_path / f"{manga_id}-标题(1章).pdf"
@@ -276,30 +333,39 @@ def test_delete_manga_skips_active_download(tmp_path, manga_repo) -> None:
     manga_repo.add_file(manga_id, str(pdf_path))
 
     download_manager = object.__new__(DownloadManager)
-    download_manager.manga_repo = manga_repo
-    download_manager.tag_repo = None
     download_manager.queued_tasks = {}
     download_manager.downloading_mangas = {manga_id: True}
-    download_manager.config = {"MANGA_DOWNLOAD_PATH": str(tmp_path)}
-    download_manager.logger = SimpleNamespace(
-        info=lambda *a: None, error=lambda *a: None
-    )
-    download_manager.task_log_repo = None
-    download_manager.operation_task_service = None
-    download_manager.cancelled_downloads = {}
 
     messages: List[str] = []
-    download_manager.message_sender = lambda *args: messages.append(args[1])
+    executor = _build_executor(
+        str(tmp_path),
+        messages,
+        download_manager=download_manager,
+        manga_repo=manga_repo,
+        tag_repo=tag_repo,
+        manga_service=_build_manga_service(
+            str(tmp_path),
+            manga_repo,
+            tag_repo,
+            operation_task_service,
+            AuditEventRepository(db_manager),
+            download_manager,
+        ),
+    )
 
-    download_manager.delete_manga("10001", manga_id, None, True)
+    executor._delete_single_manga("10001", manga_id, None, True)
 
-    assert any("正在下载中" in m for m in messages)
+    assert any("正在下载中" in message for message in messages)
     assert pdf_path.exists()
     assert manga_repo.get(manga_id) is not None
 
 
 def test_batch_delete_skips_active_download(
-    tmp_path, manga_repo: MangaRepository, tag_repo: MangaTagRepository
+    tmp_path,
+    db_manager,
+    manga_repo: MangaRepository,
+    tag_repo: MangaTagRepository,
+    operation_task_service,
 ) -> None:
     """批量删除应跳过正在下载中的漫画，保留其文件与记录。"""
     manga_id = "350238"
@@ -309,8 +375,6 @@ def test_batch_delete_skips_active_download(
     manga_repo.add_file(manga_id, str(pdf_path))
 
     download_manager = object.__new__(DownloadManager)
-    download_manager.manga_repo = manga_repo
-    download_manager.tag_repo = tag_repo
     download_manager.queued_tasks = {}
     download_manager.downloading_mangas = {manga_id: True}
 
@@ -321,6 +385,14 @@ def test_batch_delete_skips_active_download(
         download_manager=download_manager,
         manga_repo=manga_repo,
         tag_repo=tag_repo,
+        manga_service=_build_manga_service(
+            str(tmp_path),
+            manga_repo,
+            tag_repo,
+            operation_task_service,
+            AuditEventRepository(db_manager),
+            download_manager,
+        ),
     )
 
     executor._delete_batch_mangas("10001", [manga_id], None, True)
@@ -330,7 +402,13 @@ def test_batch_delete_skips_active_download(
     assert "正在下载中" in messages[-1]
 
 
-def test_delete_manga_skips_sending(tmp_path, manga_repo) -> None:
+def test_delete_single_manga_skips_sending(
+    tmp_path,
+    db_manager,
+    manga_repo: MangaRepository,
+    tag_repo: MangaTagRepository,
+    operation_task_service,
+) -> None:
     """文件正在发送中的漫画不应被删除，应返回冲突错误并保留文件。"""
     manga_id = "350239"
     pdf_path = tmp_path / f"{manga_id}-标题(1章).pdf"
@@ -339,42 +417,6 @@ def test_delete_manga_skips_sending(tmp_path, manga_repo) -> None:
     manga_repo.add_file(manga_id, str(pdf_path))
 
     download_manager = object.__new__(DownloadManager)
-    download_manager.manga_repo = manga_repo
-    download_manager.tag_repo = None
-    download_manager.queued_tasks = {}
-    download_manager.downloading_mangas = {}
-    download_manager.config = {"MANGA_DOWNLOAD_PATH": str(tmp_path)}
-    download_manager.logger = SimpleNamespace(
-        info=lambda *a: None, error=lambda *a: None
-    )
-    download_manager.task_log_repo = None
-    download_manager.operation_task_service = None
-    download_manager.cancelled_downloads = {}
-    download_manager.send_conflict_checker = lambda _manga_id: True
-
-    messages: List[str] = []
-    download_manager.message_sender = lambda *args: messages.append(args[1])
-
-    download_manager.delete_manga("10001", manga_id, None, True)
-
-    assert any("正在发送中" in m for m in messages)
-    assert pdf_path.exists()
-    assert manga_repo.get(manga_id) is not None
-
-
-def test_batch_delete_skips_sending(
-    tmp_path, manga_repo: MangaRepository, tag_repo: MangaTagRepository
-) -> None:
-    """批量删除应跳过正在发送中的漫画，保留其文件与记录。"""
-    manga_id = "350240"
-    pdf_path = tmp_path / f"{manga_id}-标题(1章).pdf"
-    pdf_path.write_bytes(b"%PDF")
-    _add_manga(manga_repo, manga_id, chapter_count=1)
-    manga_repo.add_file(manga_id, str(pdf_path))
-
-    download_manager = object.__new__(DownloadManager)
-    download_manager.manga_repo = manga_repo
-    download_manager.tag_repo = tag_repo
     download_manager.queued_tasks = {}
     download_manager.downloading_mangas = {}
 
@@ -385,8 +427,59 @@ def test_batch_delete_skips_sending(
         download_manager=download_manager,
         manga_repo=manga_repo,
         tag_repo=tag_repo,
+        manga_service=_build_manga_service(
+            str(tmp_path),
+            manga_repo,
+            tag_repo,
+            operation_task_service,
+            AuditEventRepository(db_manager),
+            download_manager,
+            send_conflict_checker=lambda _manga_id: True,
+        ),
     )
-    executor.send_conflict_checker = lambda _manga_id: True
+
+    executor._delete_single_manga("10001", manga_id, None, True)
+
+    assert any("正在发送中" in message for message in messages)
+    assert pdf_path.exists()
+    assert manga_repo.get(manga_id) is not None
+
+
+def test_batch_delete_skips_sending(
+    tmp_path,
+    db_manager,
+    manga_repo: MangaRepository,
+    tag_repo: MangaTagRepository,
+    operation_task_service,
+) -> None:
+    """批量删除应跳过正在发送中的漫画，保留其文件与记录。"""
+    manga_id = "350240"
+    pdf_path = tmp_path / f"{manga_id}-标题(1章).pdf"
+    pdf_path.write_bytes(b"%PDF")
+    _add_manga(manga_repo, manga_id, chapter_count=1)
+    manga_repo.add_file(manga_id, str(pdf_path))
+
+    download_manager = object.__new__(DownloadManager)
+    download_manager.queued_tasks = {}
+    download_manager.downloading_mangas = {}
+
+    messages: List[str] = []
+    executor = _build_executor(
+        str(tmp_path),
+        messages,
+        download_manager=download_manager,
+        manga_repo=manga_repo,
+        tag_repo=tag_repo,
+        manga_service=_build_manga_service(
+            str(tmp_path),
+            manga_repo,
+            tag_repo,
+            operation_task_service,
+            AuditEventRepository(db_manager),
+            download_manager,
+            send_conflict_checker=lambda _manga_id: True,
+        ),
+    )
 
     executor._delete_batch_mangas("10001", [manga_id], None, True)
 
@@ -412,8 +505,6 @@ def test_batch_delete_partial_failure_marks_task_failed(
         manga_repo.add_file(manga_id, str(pdf_path))
 
     download_manager = object.__new__(DownloadManager)
-    download_manager.manga_repo = manga_repo
-    download_manager.tag_repo = tag_repo
     download_manager.queued_tasks = {}
     download_manager.downloading_mangas = {busy_id: True}
 
@@ -424,8 +515,15 @@ def test_batch_delete_partial_failure_marks_task_failed(
         download_manager=download_manager,
         manga_repo=manga_repo,
         tag_repo=tag_repo,
+        manga_service=_build_manga_service(
+            str(tmp_path),
+            manga_repo,
+            tag_repo,
+            operation_task_service,
+            AuditEventRepository(db_manager),
+            download_manager,
+        ),
     )
-    executor.operation_task_service = operation_task_service
 
     executor._delete_batch_mangas("10001", [good_id, busy_id], None, True)
 

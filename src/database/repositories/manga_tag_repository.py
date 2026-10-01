@@ -138,6 +138,37 @@ class MangaTagRepository(BaseRepository):
             session.commit()
             return result.rowcount or 0
 
+    def replace_for_manga(self, manga_id: str, tags: List[str]) -> None:
+        """用给定的标签列表整体替换指定漫画的标签关系
+
+        本方法只替换漫画与标签的关联，不清理因此产生的孤儿标签定义，
+        孤儿标签由维护修复流程统一处理。
+
+        Args:
+            manga_id: 漫画ID
+            tags: 新标签列表（调用方已完成去重与清理）
+
+        Raises:
+            ValueError: 漫画记录不存在时
+        """
+        with self._get_session() as session:
+            if session.get(Manga, manga_id) is None:
+                raise ValueError(f"漫画记录不存在，无法写入标签: {manga_id}")
+            session.execute(delete(MangaTag).where(MangaTag.manga_id == manga_id))
+            for tag in tags:
+                normalized_name = " ".join(tag.split()).casefold()
+                tag_definition = session.scalar(
+                    select(Tag).where(Tag.normalized_name == normalized_name)
+                )
+                if tag_definition is None:
+                    tag_definition = Tag(
+                        name=tag.strip(), normalized_name=normalized_name
+                    )
+                    session.add(tag_definition)
+                    session.flush()
+                session.add(MangaTag(tag_id=tag_definition.id, manga_id=manga_id))
+            session.commit()
+
     def get_manga_ids_by_tags(self, tags: List[str]) -> Set[str]:
         """查询同时包含全部指定标签的漫画ID集合（多标签联合查询，取交集）
 

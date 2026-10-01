@@ -1,6 +1,7 @@
 """下载管理器模块，负责漫画下载功能并对下载队列进行管理"""
 
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from dataclasses import dataclass
+from typing import Any, Callable, Dict, Optional
 
 import os
 import queue
@@ -17,7 +18,40 @@ from src.database.repositories import (
     TaskLogRepository,
 )
 from src.service import OperationContext, TaskService
+from src.service.contracts import DownloadNotifier
+from src.service.results import DownloadRequestItem
 from src.utils.helpers import sanitize_filename
+
+
+@dataclass(frozen=True)
+class QQDownloadNotifier:
+    """把下载过程通知转发到 QQ 消息与文件发送器的适配器。"""
+
+    message_sender: Callable[[str, str, Optional[str], bool], None]
+    file_sender: Optional[Callable[[str, str, Optional[str], bool], None]]
+    user_id: str
+    group_id: Optional[str]
+    private: bool
+
+    def message(self, text: str) -> None:
+        """发送下载过程文本消息。"""
+        self.message_sender(self.user_id, text, self.group_id, self.private)
+
+    def file(self, file_path: str) -> None:
+        """发送下载完成的 PDF 文件；未配置文件发送器时明确报错。"""
+        if self.file_sender is None:
+            raise RuntimeError("未配置文件发送器，无法发送下载文件")
+        self.file_sender(self.user_id, file_path, self.group_id, self.private)
+
+
+@dataclass(frozen=True)
+class DownloadQueueItem:
+    """下载队列中的单个任务；Web 来源不传通知器表示静默。"""
+
+    manga_id: str
+    context: OperationContext
+    operation_task_id: Optional[str]
+    notifier: Optional[DownloadNotifier]
 
 
 def build_pdf_filename(manga_id: str, safe_title: str, chapter_count: int) -> str:
@@ -128,7 +162,7 @@ class DownloadManager:
         self._stop_event: threading.Event = threading.Event()
         self._queue_state_lock: threading.Lock = threading.Lock()
         self._queue_thread: Optional[threading.Thread] = None
-        self.queued_tasks: Dict[str, Tuple[str, Optional[str], bool]] = {}
+        self.queued_tasks: Dict[str, DownloadQueueItem] = {}
         self.downloading_mangas: Dict[str, bool] = {}
         self._start_download_queue_processor()
 
@@ -138,6 +172,10 @@ class DownloadManager:
 
         # 检查是否启用低占用模式
         self.low_memory_mode: bool = bool(self.config.get("LOW_MEMORY_MODE", False))
+        # 低内存模式下发送完成后的文件删除延迟（分钟），可被 SettingsService 动态更新
+        self.low_memory_delete_delay: int = int(
+            self.config.get("LOW_MEMORY_DELETE_DELAY", 3)
+        )
 
         # 如果启用低占用模式，启动时清空下载文件夹
         if self.low_memory_mode:
@@ -160,26 +198,11 @@ class DownloadManager:
             """下载队列处理函数，顺序执行队列中的下载任务"""
             while not self._stop_event.is_set():
                 try:
-                    task = self.download_queue.get(timeout=1)
-                    if task is None or self._stop_event.is_set():
+                    item = self.download_queue.get(timeout=1)
+                    if item is None or self._stop_event.is_set():
                         self.download_queue.task_done()
                         return
-                    (
-                        user_id,
-                        manga_id,
-                        group_id,
-                        private,
-                        operation_task_id,
-                        operation_context,
-                    ) = task
-                    self._process_download_task(
-                        user_id,
-                        manga_id,
-                        group_id,
-                        private,
-                        operation_task_id,
-                        operation_context,
-                    )
+                    self._process_download_task(item)
                     self.download_queue.task_done()
                 except queue.Empty:
                     continue
@@ -277,19 +300,14 @@ class DownloadManager:
             f"已安排在 {delay_minutes} 分钟后删除文件: {os.path.basename(file_path)}"
         )
 
-    def _process_download_task(
-        self,
-        user_id: str,
-        manga_id: str,
-        group_id: Optional[str],
-        private: bool,
-        operation_task_id: Optional[str] = None,
-        operation_context: Optional[OperationContext] = None,
-    ) -> None:
+    def _process_download_task(self, item: DownloadQueueItem) -> None:
         """
         处理队列中的下载任务
         通过 jmcomic 原生 download_album 整本下载，并注入 img2pdf 插件在下载完成后自动合并为单个 PDF。
         """
+        manga_id = item.manga_id
+        operation_task_id = item.operation_task_id
+        operation_context = item.context
         temp_download_dir = None
         try:
             # 若任务已被取消（排队期间被 -c 取消），直接跳过不执行下载
@@ -383,41 +401,49 @@ class DownloadManager:
                     self.logger.error(f"持久化漫画元数据失败: {e}")
             if self.tag_repo is not None:
                 try:
-                    self._sync_tags_to_db(manga_id, album_tags, pdf_path)
+                    self._sync_tags_to_db(manga_id, album_tags)
                 except Exception as e:
                     self.logger.error(f"同步漫画标签失败: {e}")
-            if self.task_log_repo is not None:
+            if self.task_log_repo is not None and item.context.source == "qq":
+                # TaskLog 只保留 QQ 来源的历史记录，Web 来源以操作任务与审计为准
                 try:
                     self.task_log_repo.add(
                         task_type="download",
                         status="success",
                         manga_id=manga_id,
-                        user_id=user_id,
-                        group_id=group_id or "",
-                        private=private,
+                        user_id=item.context.actor_user_id or "",
+                        group_id=item.context.actor_group_id or "",
+                        private=item.context.actor_group_id is None,
                         message=f"标题: {album_name}, 共{total_pages}页",
                     )
                 except Exception as e:
                     self.logger.error(f"记录下载任务日志失败: {e}")
 
-            # 生成响应消息
+            # 生成响应消息；通知器为空表示 Web/系统来源，只记录状态不发送 QQ 消息
             chapter_info = f"（{chapter_count} 个章节）" if chapter_count > 1 else ""
-            if self.low_memory_mode and self.file_sender:
-                delete_delay = self.config.get("LOW_MEMORY_DELETE_DELAY", 3)
+            # 低内存模式：QQ 有文件发送器或 Web 静默来源都按模式延迟删除文件
+            low_memory_delivery = item.notifier is None or self.file_sender is not None
+            if self.low_memory_mode and low_memory_delivery:
+                delete_delay = self.low_memory_delete_delay
                 response = (
                     f"✅ദ്ദി˶>ω<)✧ "
                     f"漫画ID {manga_id}{chapter_info} 下载完成！\n\n"
                     f"成功生成PDF文件（共{total_pages}页）\n"
                     f"⚠️ 低占用模式：文件将在{delete_delay}分钟后自动删除"
                 )
-                try:
-                    self.file_sender(user_id, pdf_path, group_id, private)
+                if item.notifier is not None:
+                    try:
+                        item.notifier.file(pdf_path)
+                        self.logger.info(
+                            f"低占用模式：已自动发送PDF文件: "
+                            f"{os.path.basename(pdf_path)}"
+                        )
+                    except Exception as send_error:
+                        self.logger.error(f"发送PDF文件失败: {send_error}")
+                else:
                     self.logger.info(
-                        f"低占用模式：已自动发送PDF文件: "
-                        f"{os.path.basename(pdf_path)}"
+                        f"低占用模式：Web 来源下载 {manga_id} 不发送 QQ 文件"
                     )
-                except Exception as send_error:
-                    self.logger.error(f"发送PDF文件失败: {send_error}")
                 self._schedule_file_deletion(pdf_path, delete_delay)
             else:
                 response = (
@@ -427,7 +453,8 @@ class DownloadManager:
                     f"友情提示：输入'发送 {manga_id}'可以将PDF发送给您"
                 )
 
-            self.message_sender(user_id, response, group_id, private)
+            if item.notifier is not None:
+                item.notifier.message(response)
             if self.operation_task_service is not None and operation_task_id:
                 self.operation_task_service.succeed(
                     operation_task_id,
@@ -444,21 +471,22 @@ class DownloadManager:
                     error_message=type(e).__name__,
                     context=operation_context,
                 )
-            if self.task_log_repo is not None:
+            if self.task_log_repo is not None and item.context.source == "qq":
                 try:
                     self.task_log_repo.add(
                         task_type="download",
                         status="failed",
                         manga_id=manga_id,
-                        user_id=user_id,
-                        group_id=group_id or "",
-                        private=private,
+                        user_id=item.context.actor_user_id or "",
+                        group_id=item.context.actor_group_id or "",
+                        private=item.context.actor_group_id is None,
                         message=str(e),
                     )
                 except Exception as log_error:
                     self.logger.error(f"记录下载失败日志出错: {log_error}")
             error_msg = f"❌ 下载失败：{str(e)}\n\n快让主人帮我检查一下∑(O_O；)"
-            self.message_sender(user_id, error_msg, group_id, private)
+            if item.notifier is not None:
+                item.notifier.message(error_msg)
         finally:
             if manga_id in self.downloading_mangas:
                 del self.downloading_mangas[manga_id]
@@ -466,13 +494,12 @@ class DownloadManager:
             if temp_download_dir is not None:
                 shutil.rmtree(temp_download_dir, ignore_errors=True)
 
-    def _sync_tags_to_db(self, manga_id: str, tags: str, pdf_path: str) -> None:
-        """将漫画标签及其PDF文件名同步到标签表
+    def _sync_tags_to_db(self, manga_id: str, tags: str) -> None:
+        """将漫画标签同步到标签表
 
         Args:
             manga_id: 漫画ID
             tags: 逗号分隔的标签字符串
-            pdf_path: PDF文件路径
         """
         if self.tag_repo is None or not tags:
             return
@@ -504,14 +531,48 @@ class DownloadManager:
         Raises:
             RuntimeError: 下载队列已经停止时
         """
+        context = operation_context or OperationContext.qq(user_id, group_id)
+        notifier = QQDownloadNotifier(
+            message_sender=self.message_sender,
+            file_sender=self.file_sender,
+            user_id=user_id,
+            group_id=group_id,
+            private=private,
+        )
+        result = self.request_download(manga_id, context, notifier)
+        if result.status == "duplicate":
+            self.logger.info(f"漫画ID {manga_id} 已存在活动下载任务")
+
+    def request_download(
+        self,
+        manga_id: str,
+        context: OperationContext,
+        notifier: Optional[DownloadNotifier],
+    ) -> DownloadRequestItem:
+        """请求下载单个漫画并入队，重复请求返回既有活动任务状态。
+
+        Args:
+            manga_id: 漫画ID
+            context: 操作来源上下文，贯穿任务与审计
+            notifier: 下载过程通知器，Web/系统来源传 None 表示静默
+
+        Returns:
+            DownloadRequestItem: 入队结果（queued 或 duplicate）
+
+        Raises:
+            RuntimeError: 下载队列已经停止时
+        """
         with self._queue_state_lock:
             if not self.queue_running:
                 raise RuntimeError("下载队列已停止")
             if manga_id in self.queued_tasks or manga_id in self.downloading_mangas:
                 self.logger.info(f"漫画ID {manga_id} 已存在活动下载任务")
-                return
+                return DownloadRequestItem(
+                    manga_id=manga_id,
+                    status="duplicate",
+                    task_id=self.operation_task_ids.get(manga_id),
+                )
             operation_task_id = None
-            context = operation_context or OperationContext.qq(user_id, group_id)
             if self.operation_task_service is not None:
                 operation_task = self.operation_task_service.create(
                     task_type="download",
@@ -520,18 +581,35 @@ class DownloadManager:
                 )
                 operation_task_id = operation_task.id
                 self.operation_task_ids[manga_id] = operation_task.id
-            self.queued_tasks[manga_id] = (user_id, group_id, private)
-            self.download_queue.put(
-                (
-                    user_id,
-                    manga_id,
-                    group_id,
-                    private,
-                    operation_task_id,
-                    context,
-                )
+            item = DownloadQueueItem(
+                manga_id=manga_id,
+                context=context,
+                operation_task_id=operation_task_id,
+                notifier=notifier,
             )
+            self.queued_tasks[manga_id] = item
+            self.download_queue.put(item)
         self.logger.info(f"漫画ID {manga_id} 的下载任务已添加到队列")
+        return DownloadRequestItem(
+            manga_id=manga_id,
+            status="queued",
+            task_id=operation_task_id,
+        )
+
+    def find_active_download(self, manga_id: str) -> Optional[str]:
+        """返回内存中排队或下载中任务的 ID，无活动任务时返回 None。"""
+        if not self.is_download_active(manga_id):
+            return None
+        return self.operation_task_ids.get(manga_id)
+
+    def update_low_memory_settings(self, delete_delay: Optional[int] = None) -> None:
+        """由 SettingsService 调用，显式更新低内存模式文件删除延迟（分钟）。"""
+        if delete_delay is not None:
+            if delete_delay < 1:
+                raise ValueError("低内存模式删除延迟必须至少为 1 分钟")
+            self.low_memory_delete_delay = delete_delay
+            self.config["LOW_MEMORY_DELETE_DELAY"] = delete_delay
+            self.logger.info(f"低内存模式删除延迟已更新为 {delete_delay} 分钟")
 
     def cancel_download(self, manga_id: str) -> bool:
         """取消指定漫画的下载任务（仅对排队中尚未开始的任务生效）
@@ -581,160 +659,3 @@ class DownloadManager:
                 self.operation_task_service.cancel(operation_task_id)
             self.logger.info(f"漫画ID {manga_id} 的下载任务已取消")
         return len(cancelled_ids)
-
-    def delete_manga(
-        self,
-        user_id: str,
-        manga_id: str,
-        group_id: Optional[str],
-        private: bool,
-        operation_context: Optional[OperationContext] = None,
-    ) -> None:
-        """
-        删除指定ID的漫画PDF文件
-
-        Args:
-            user_id: 用户ID，用于回复删除状态
-            manga_id: 漫画ID，指定要删除的漫画
-            group_id: 群ID，用于在群聊中发送消息
-            private: 是否为私聊，决定消息发送的目标
-
-        Raises:
-            FileNotFoundError: 当下载目录不存在时
-        """
-        operation_task_id = None
-        context = operation_context or OperationContext.qq(user_id, group_id)
-        if self.operation_task_service is not None:
-            operation_task = self.operation_task_service.create(
-                task_type="delete",
-                context=context,
-                manga_id=manga_id,
-            )
-            operation_task_id = operation_task.id
-            self.operation_task_service.start(operation_task_id, "deleting")
-
-        if self.is_download_active(manga_id):
-            if self.operation_task_service is not None and operation_task_id:
-                self.operation_task_service.fail(
-                    operation_task_id,
-                    "download_conflict",
-                    "漫画正在下载中，无法删除",
-                    context=context,
-                )
-            error_msg = f"❌ 漫画ID {manga_id} 正在下载中，无法删除"
-            self.message_sender(user_id, error_msg, group_id, private)
-            return
-
-        if self.send_conflict_checker is not None and self.send_conflict_checker(
-            manga_id
-        ):
-            if self.operation_task_service is not None and operation_task_id:
-                self.operation_task_service.fail(
-                    operation_task_id,
-                    "send_conflict",
-                    "漫画文件正在发送中，无法删除",
-                    context=context,
-                )
-            error_msg = f"❌ 漫画ID {manga_id} 的文件正在发送中，无法删除"
-            self.message_sender(user_id, error_msg, group_id, private)
-            return
-
-        download_path = str(self.config["MANGA_DOWNLOAD_PATH"])
-
-        if not os.path.exists(download_path):
-            if self.operation_task_service is not None and operation_task_id:
-                self.operation_task_service.fail(
-                    operation_task_id,
-                    "delete_directory_missing",
-                    "FileNotFoundError",
-                    context=context,
-                )
-            error_msg = "❌ 下载目录不存在！\n快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
-            self.message_sender(user_id, error_msg, group_id, private)
-            raise FileNotFoundError(f"下载目录不存在: {download_path}")
-
-        pdf_paths: List[str] = []
-        for file_name in os.listdir(download_path):
-            if file_name.endswith(".pdf") and (
-                file_name.startswith(f"{manga_id}-") or file_name == f"{manga_id}.pdf"
-            ):
-                pdf_paths.append(os.path.join(download_path, file_name))
-
-        if not pdf_paths:
-            if self.operation_task_service is not None and operation_task_id:
-                self.operation_task_service.fail(
-                    operation_task_id,
-                    "file_not_found",
-                    "FileNotFoundError",
-                    context=context,
-                )
-            response = f"❌（｀Δ´）！ 未找到漫画ID {manga_id} 的PDF文件"
-            self.message_sender(user_id, response, group_id, private)
-            return
-
-        try:
-            if self.manga_repo is not None:
-                self.manga_repo.mark_manga_deleting(manga_id)
-            deleted_count = 0
-            for pdf_path in pdf_paths:
-                os.remove(pdf_path)
-                self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")
-                deleted_count += 1
-
-            # 同步删除数据库中的漫画元数据、PDF文件记录及标签记录
-            self.delete_manga_records(manga_id)
-            if self.task_log_repo is not None:
-                try:
-                    self.task_log_repo.add(
-                        task_type="delete",
-                        status="success",
-                        manga_id=manga_id,
-                        user_id=user_id,
-                        group_id=group_id or "",
-                        private=private,
-                        message=f"删除{deleted_count}个PDF文件",
-                    )
-                except Exception as e:
-                    self.logger.error(f"记录删除任务日志失败: {e}")
-
-            response = (
-                f"✅ദ്ദി˶>ω<)✧ 漫画ID {manga_id} 的{deleted_count}个PDF文件已成功删除！"
-            )
-            self.message_sender(user_id, response, group_id, private)
-            if self.operation_task_service is not None and operation_task_id:
-                self.operation_task_service.succeed(
-                    operation_task_id,
-                    metadata={"file_count": deleted_count},
-                    context=context,
-                )
-        except Exception as e:
-            self.logger.error(f"删除漫画PDF文件失败: {e}")
-            if self.operation_task_service is not None and operation_task_id:
-                self.operation_task_service.fail(
-                    operation_task_id,
-                    "delete_failed",
-                    type(e).__name__,
-                    context=context,
-                )
-            error_msg = f"❌ 删除失败：{str(e)}\n快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
-            self.message_sender(user_id, error_msg, group_id, private)
-            raise
-
-    def delete_manga_records(self, manga_id: str) -> None:
-        """删除指定漫画的元数据、PDF 文件记录及标签记录
-
-        漫画文件记录由 MangaRepository 的级联关系一并删除。该方法供单个删除
-        与批量删除共同调用，仓储异常会继续抛出，防止磁盘与数据库状态静默失配。
-
-        Args:
-            manga_id: 要清理数据库记录的漫画ID
-        """
-        if self.manga_repo is not None:
-            self.manga_repo.delete(manga_id)
-        if self.tag_repo is not None:
-            self.tag_repo.delete_by_manga_id(manga_id)
-
-    def mark_manga_deleting(self, manga_id: str) -> None:
-        """标记漫画关联文件为删除中，供批量删除在删文件前调用。"""
-        if self.manga_repo is not None:
-            self.manga_repo.mark_manga_deleting(manga_id)

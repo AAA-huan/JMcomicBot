@@ -13,6 +13,9 @@ from src.database.repositories.reading_progress_repository import (
     ReadingProgressRepository,
 )
 from src.database.repositories.scan_record_repository import ScanRecordRepository
+from src.database.repositories.setting_history_repository import (
+    SettingHistoryRepository,
+)
 from src.database.repositories.setting_repository import SettingRepository
 from src.database.repositories.task_log_repository import TaskLogRepository
 from src.database.repositories.user_group_repository import UserGroupRepository
@@ -30,6 +33,7 @@ __all__ = [
     "PermissionRepository",
     "ReadingProgressRepository",
     "ScanRecordRepository",
+    "SettingHistoryRepository",
     "SettingRepository",
     "TaskLogRepository",
     "TaskEventRepository",
