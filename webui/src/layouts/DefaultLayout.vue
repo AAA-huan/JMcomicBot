@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onBeforeUnmount, onMounted, ref } from 'vue'
+import { onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useDisplay } from 'vuetify'
 import { useRoute, useRouter } from 'vue-router'
 
@@ -36,6 +36,20 @@ const system = useSystemStore()
 const theme = useThemeStore()
 
 const drawer = ref(false)
+
+// 桌面端侧栏常驻展开，移动端默认收起并按需打开
+watch(
+  mobile,
+  (isMobile) => {
+    drawer.value = !isMobile
+  },
+  { immediate: true },
+)
+
+/** 移动端点击导航后关闭抽屉；桌面端侧栏保持展开。 */
+function closeDrawerOnMobile(): void {
+  if (mobile.value) drawer.value = false
+}
 let eventClient: EventClient | null = null
 
 const pageTitle = (): string =>
@@ -115,7 +129,7 @@ async function handleLogout(): Promise<void> {
           :to="item.to"
           :prepend-icon="item.icon"
           :title="item.title"
-          @click="drawer = false"
+          @click="closeDrawerOnMobile"
         />
       </v-list>
     </v-navigation-drawer>

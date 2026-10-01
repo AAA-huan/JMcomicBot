@@ -36,7 +36,8 @@ export default defineConfig({
   webServer: {
     command: 'bash e2e/start-backend.sh',
     url: `${BASE_URL}/api/v1/auth/status`,
-    reuseExistingServer: !process.env.CI,
+    // E2E 始终使用干净的服务与数据，避免复用旧进程导致状态串扰
+    reuseExistingServer: false,
     timeout: 120_000,
     stdout: 'ignore',
     stderr: 'pipe',
