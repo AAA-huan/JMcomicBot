@@ -4,8 +4,9 @@ from dataclasses import asdict
 from typing import Annotated, Callable, Optional
 
 from fastapi import APIRouter, Depends, Query, Request, status
+from fastapi.responses import FileResponse
 
-from src.service import BackupConflictError
+from src.service import BackupConflictError, BackupDownloadError
 from src.service.web_auth_service import AuthenticatedSession
 from src.web.api.common import build_operation_context
 from src.web.dependencies import WebDependencies
@@ -72,6 +73,26 @@ def create_maintenance_router(
         except ValueError as error:
             raise ApiError(400, "INVALID_QUERY", str(error)) from error
         return asdict(page_result)
+
+    @router.get("/maintenance/backups/{backup_id}/download")
+    def download_backup(
+        backup_id: int,
+        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> FileResponse:
+        """下载已登记的备份文件；路径由数据库记录解析，不接受客户端路径。"""
+        try:
+            path = dependencies.database_maintenance_service.resolve_backup_file(
+                backup_id
+            )
+        except BackupDownloadError as error:
+            status_code = 500 if error.error_code == "BACKUP_PATH_INVALID" else 404
+            raise ApiError(status_code, error.error_code, error.message) from error
+        return FileResponse(
+            path,
+            media_type="application/octet-stream",
+            filename=path.name,
+            headers={"X-Content-Type-Options": "nosniff"},
+        )
 
     @router.post("/maintenance/backups", status_code=status.HTTP_201_CREATED)
     def create_backup(

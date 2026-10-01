@@ -24,6 +24,15 @@ class BackupConflictError(Exception):
     """同一秒内已存在同名备份时抛出，供接口层返回冲突。"""
 
 
+class BackupDownloadError(Exception):
+    """备份不可下载时抛出；error_code 供接口层映射为稳定错误码。"""
+
+    def __init__(self, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.message = message
+
+
 @dataclass(frozen=True)
 class BackupView:  # pylint: disable=too-many-instance-attributes
     """可安全返回浏览器的备份记录视图，不包含绝对路径。"""
@@ -145,3 +154,22 @@ class DatabaseMaintenanceService:
             updated_at=record.updated_at,
             deleted_at=record.deleted_at,
         )
+
+    def resolve_backup_file(self, backup_id: int) -> Path:
+        """解析可下载的备份文件路径。
+
+        只接受数据库中的备份记录：路径必须解析后仍位于备份目录内且是
+        普通文件，符号链接逃逸、目录与未登记文件一律拒绝。
+
+        Raises:
+            BackupDownloadError: 记录不存在、状态不可下载、文件缺失或路径越界。
+        """
+        record = self.backup_repo.get(backup_id)
+        if record is None or record.status != "ready":
+            raise BackupDownloadError("BACKUP_NOT_FOUND", "未找到指定备份")
+        candidate = (self.backup_dir / record.relative_path).resolve()
+        if not candidate.is_relative_to(self.backup_dir):
+            raise BackupDownloadError("BACKUP_PATH_INVALID", "备份文件路径非法")
+        if not candidate.is_file():
+            raise BackupDownloadError("BACKUP_FILE_MISSING", "备份文件不存在")
+        return candidate

@@ -44,6 +44,10 @@ const createBackupLoading = ref(false)
 
 const backupPageSize = 10
 
+function downloadUrl(backupId: number): string {
+  return `/api/v1/maintenance/backups/${backupId}/download`
+}
+
 async function runScan(): Promise<void> {
   actionError.value = ''
   actionNotice.value = ''
@@ -252,6 +256,7 @@ onMounted(() => {
               <th>状态</th>
               <th class="text-no-wrap">结构版本</th>
               <th class="text-no-wrap">创建时间</th>
+              <th class="text-no-wrap">操作</th>
             </tr>
           </thead>
           <tbody>
@@ -269,6 +274,16 @@ onMounted(() => {
               </td>
               <td class="text-no-wrap">{{ backup.schema_version }}</td>
               <td class="text-no-wrap">{{ formatDateTime(backup.created_at) }}</td>
+              <td class="text-no-wrap">
+                <v-btn
+                  v-if="backup.status === 'ready'"
+                  icon="mdi-download"
+                  size="small"
+                  variant="text"
+                  :href="downloadUrl(backup.id)"
+                  aria-label="下载备份"
+                />
+              </td>
             </tr>
           </tbody>
         </v-table>
@@ -281,13 +296,23 @@ onMounted(() => {
             {{ formatBytes(backup.file_size_bytes) }} · {{ formatDateTime(backup.created_at) }}
           </v-list-item-subtitle>
           <template #append>
-            <v-chip
-              size="small"
-              variant="tonal"
-              :color="colorOf(BACKUP_STATUS_COLORS, backup.status)"
-            >
-              {{ labelOf(BACKUP_STATUS_LABELS, backup.status) }}
-            </v-chip>
+            <div class="d-flex align-center ga-1">
+              <v-chip
+                size="small"
+                variant="tonal"
+                :color="colorOf(BACKUP_STATUS_COLORS, backup.status)"
+              >
+                {{ labelOf(BACKUP_STATUS_LABELS, backup.status) }}
+              </v-chip>
+              <v-btn
+                v-if="backup.status === 'ready'"
+                icon="mdi-download"
+                size="small"
+                variant="text"
+                :href="downloadUrl(backup.id)"
+                aria-label="下载备份"
+              />
+            </div>
           </template>
         </v-list-item>
       </v-list>

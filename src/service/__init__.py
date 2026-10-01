@@ -4,6 +4,7 @@ from src.service.cleanup_service import CleanupService
 from src.service.contracts import DownloadNotifier, DownloadService, TaskService
 from src.service.database_maintenance_service import (
     BackupConflictError,
+    BackupDownloadError,
     BackupView,
     DatabaseMaintenanceService,
 )
@@ -33,6 +34,7 @@ from src.service.verify_service import VerifyService
 
 __all__ = [
     "BackupConflictError",
+    "BackupDownloadError",
     "BackupResult",
     "BackupView",
     "CachedGroup",

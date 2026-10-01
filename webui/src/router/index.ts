@@ -80,7 +80,7 @@ router.beforeEach(async (to) => {
   if (!auth.initialized && to.name !== 'setup') {
     return { name: 'setup' }
   }
-  if (auth.initialized && (to.name === 'login' || to.name === 'setup')) {
+  if (auth.authenticated && (to.name === 'login' || to.name === 'setup')) {
     return { name: 'dashboard' }
   }
   if (auth.initialized && !auth.authenticated && !to.meta.public) {
