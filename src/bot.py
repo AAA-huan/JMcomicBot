@@ -322,6 +322,7 @@ class MangaBot:
                     ),
                     web_host=web_host,
                     web_port=int(self.config_manager.config_dict["WEBUI_PORT"]),
+                    extra_origins=set(self.config_manager.webui_dev_origins),
                 ),
                 host=web_host,
                 port=int(self.config_manager.config_dict["WEBUI_PORT"]),

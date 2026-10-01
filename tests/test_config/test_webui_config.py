@@ -40,6 +40,30 @@ def test_webui_config_accepts_explicit_values(
     assert manager.get("WEBUI_SESSION_HOURS") == 48
 
 
+def test_webui_dev_origins_are_optional_and_validated(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """开发来源默认留空；配置时必须是完整的来源地址。"""
+    monkeypatch.delenv("WEBUI_DEV_ORIGINS", raising=False)
+    manager = ConfigManager()
+    manager.load_config()
+    assert manager.webui_dev_origins == []
+
+    monkeypatch.setenv(
+        "WEBUI_DEV_ORIGINS", "http://127.0.0.1:5173, http://localhost:5173"
+    )
+    manager = ConfigManager()
+    manager.load_config()
+    assert manager.webui_dev_origins == [
+        "http://127.0.0.1:5173",
+        "http://localhost:5173",
+    ]
+
+    monkeypatch.setenv("WEBUI_DEV_ORIGINS", "127.0.0.1:5173")
+    with pytest.raises(ValueError, match="完整的来源地址"):
+        ConfigManager().load_config()
+
+
 @pytest.mark.parametrize(
     ("name", "value", "message"),
     (

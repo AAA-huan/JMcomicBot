@@ -153,6 +153,11 @@ class ConfigManager:
             raise ValueError("WEBUI_HOST 不能为空")
         webui_port = _parse_int_config("WEBUI_PORT", 8000, 1, 65535)
         webui_session_hours = _parse_int_config("WEBUI_SESSION_HOURS", 24, 1, 24 * 30)
+        # 开发环境额外允许的页面来源（Vite 开发服务器），生产默认留空
+        webui_dev_origins = self._parse_id_list(os.getenv("WEBUI_DEV_ORIGINS", ""))
+        for origin in webui_dev_origins:
+            if not origin.startswith(("http://", "https://")):
+                raise ValueError(f"WEBUI_DEV_ORIGINS 必须是完整的来源地址: {origin}")
 
         self.config_dict: Dict[str, Union[str, int, float, bool]] = {
             "MANGA_DOWNLOAD_PATH": absolute_download_path,
@@ -188,6 +193,8 @@ class ConfigManager:
         self.delete_permission_user: List[str] = self._parse_id_list(
             os.getenv("DELETE_PERMISSION_USER", "")
         )
+        # WebUI 开发环境额外允许的页面来源
+        self.webui_dev_origins: List[str] = webui_dev_origins
         # 记录黑白名单配置信息
         self.logger.info(
             f"黑白名单配置加载完成 - "

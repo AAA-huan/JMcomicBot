@@ -77,7 +77,10 @@ class WebSecurityMiddleware(
         response.headers["X-Frame-Options"] = "DENY"
         response.headers["Referrer-Policy"] = "no-referrer"
         response.headers["Content-Security-Policy"] = (
-            "default-src 'self'; frame-ancestors 'none'"
+            "default-src 'self'; "
+            "style-src 'self' 'unsafe-inline'; "
+            "img-src 'self' data:; "
+            "frame-ancestors 'none'"
         )
         if request.url.path.startswith("/api/") or response.headers.get(
             "content-type", ""
@@ -140,7 +143,12 @@ class WebSecurityMiddleware(
         return self._add_security_headers(request, response)
 
 
-def allowed_web_origins(host: str, port: int) -> set[str]:
-    """生成当前 WebUI 监听地址允许的同源集合。"""
+def allowed_web_origins(
+    host: str, port: int, extra_origins: set[str] | None = None
+) -> set[str]:
+    """生成当前 WebUI 监听地址与方法允许的同源集合。"""
     hosts = {host, "127.0.0.1", "localhost", "[::1]"}
-    return {f"http://{item}:{port}" for item in hosts}
+    origins = {f"http://{item}:{port}" for item in hosts}
+    if extra_origins:
+        origins |= set(extra_origins)
+    return origins

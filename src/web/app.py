@@ -25,6 +25,7 @@ def create_web_app(
     web_host: str = "127.0.0.1",
     web_port: int = 8000,
     status_interval_seconds: float = 2.0,
+    extra_origins: set[str] | None = None,
 ) -> FastAPI:
     """创建 WebUI ASGI 应用，装配 API、事件推送与静态资源。"""
     static_root = Path(__file__).with_name("static")
@@ -33,7 +34,7 @@ def create_web_app(
     if not index_path.is_file() or not assets_root.is_dir():
         raise RuntimeError("WebUI 静态资源不完整，请重新安装正式发布包")
 
-    allowed_origins = allowed_web_origins(web_host, web_port)
+    allowed_origins = allowed_web_origins(web_host, web_port, extra_origins)
     broadcaster = StatusBroadcaster(
         dependencies.event_bus,
         dependencies.system_service.get_status,

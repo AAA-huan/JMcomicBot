@@ -1,8 +1,22 @@
 """Web API 错误格式、安全中间件和静态托管测试。"""
 
+from pathlib import Path
+
 from starlette.testclient import TestClient
 
 from tests.test_web.support import PASSWORD, create_client_for
+from src.web.security import allowed_web_origins
+
+
+def test_allowed_origins_include_configured_dev_origins() -> None:
+    """开发服务器来源应可通过配置加入白名单。"""
+    origins = allowed_web_origins(
+        "127.0.0.1", 8000, {"http://127.0.0.1:5173", "http://localhost:5173"}
+    )
+
+    assert "http://127.0.0.1:8000" in origins
+    assert "http://127.0.0.1:5173" in origins
+    assert "http://localhost:5173" in origins
 
 
 def _create_client(db_manager) -> TestClient:
@@ -102,12 +116,18 @@ def test_login_failures_are_rate_limited_by_direct_client(db_manager) -> None:
 
 
 def test_static_entry_and_assets_have_safe_cache_policy(db_manager) -> None:
+    static_root = Path(__file__).resolve().parents[2] / "src" / "web" / "static"
+    asset_files = sorted((static_root / "assets").glob("*.js"))
+    assert asset_files, "前端构建产物缺失，请先执行 npm run build"
+    asset_name = asset_files[0].name
+
     with _create_client(db_manager) as client:
         index = client.get("/library/100")
-        asset = client.get("/assets/placeholder.2b4c.css")
+        asset = client.get(f"/assets/{asset_name}")
 
     assert index.status_code == 200
-    assert "Web 后端已就绪" in index.text
+    assert '<div id="app">' in index.text
+    assert "JMcomicBot" in index.text
     assert index.headers["Cache-Control"] == "no-store"
     assert asset.status_code == 200
     assert asset.headers["Cache-Control"] == "public, max-age=31536000, immutable"
