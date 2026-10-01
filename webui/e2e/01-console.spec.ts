@@ -25,7 +25,7 @@ test('漫画库搜索、清空与危险操作确认', async ({ page }) => {
   await expect(page.getByText('共', { exact: false }).first()).toBeVisible()
 
   // 搜索已知测试数据标题
-  const searchBox = page.getByRole('textbox', { name: '搜索标题 / 作者' })
+  const searchBox = page.getByRole('textbox', { name: '搜索关键字' })
   await searchBox.fill('夜行')
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await expect(page.getByText('夜行测试录').first()).toBeVisible()

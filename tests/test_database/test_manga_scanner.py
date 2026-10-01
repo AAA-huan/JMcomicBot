@@ -38,6 +38,29 @@ class TestParsePdfFilename:
         assert entry.title == "示例(番外)漫画"
         assert entry.chapter_count == 3
 
+    def test_legacy_id_title_format(self) -> None:
+        """早期命名「漫画ID-标题.pdf」没有章节数后缀，也必须识别。"""
+        entry = parse_pdf_filename("626391-早期漫画标题.pdf")
+        assert entry is not None
+        assert entry.manga_id == "626391"
+        assert entry.title == "早期漫画标题"
+        assert entry.chapter_count == 0
+
+    def test_legacy_title_with_chapter_like_suffix(self) -> None:
+        """结尾不是标准「(N章)」的旧文件按标题处理，不误判章节数。"""
+        entry = parse_pdf_filename("630612-标题(4章)(1).pdf")
+        assert entry is not None
+        assert entry.manga_id == "630612"
+        assert entry.title == "标题(4章)(1)"
+        assert entry.chapter_count == 0
+
+    def test_uppercase_extension_is_supported(self) -> None:
+        """扩展名大小写不敏感。"""
+        entry = parse_pdf_filename("634804-大写扩展名.PDF")
+        assert entry is not None
+        assert entry.manga_id == "634804"
+        assert entry.title == "大写扩展名"
+
     def test_invalid_name(self) -> None:
         entry = parse_pdf_filename("readme.txt")
         assert entry is None

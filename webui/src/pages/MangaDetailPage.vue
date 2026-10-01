@@ -111,7 +111,7 @@ async function confirmDelete(): Promise<void> {
   actionError.value = ''
   try {
     await deleteManga(mangaId)
-    await router.replace({ name: 'library' })
+    await router.replace({ name: 'library', query: route.query })
   } catch (err) {
     actionError.value = errorMessage(err)
     deleteDialog.value = false
@@ -130,7 +130,7 @@ onMounted(load)
         icon="mdi-arrow-left"
         variant="text"
         aria-label="返回漫画库"
-        @click="router.push({ name: 'library' })"
+        @click="router.push({ name: 'library', query: route.query })"
       />
       <h1 class="text-h6 text-truncate">{{ manga?.title ?? '漫画详情' }}</h1>
     </div>

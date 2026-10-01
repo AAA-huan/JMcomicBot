@@ -67,6 +67,23 @@ def test_rejects_untrusted_host_and_origin(db_manager) -> None:
     assert invalid_origin.json()["code"] == "INVALID_ORIGIN"
 
 
+def test_write_request_access_log_is_debug(db_manager, monkeypatch) -> None:
+    """写操作产生 DEBUG 级 URL 访问日志（含直连 IP），GET 请求不记录。"""
+    messages: list[str] = []
+    monkeypatch.setattr(
+        "src.web.security.logger.debug", lambda message: messages.append(message)
+    )
+
+    with _create_client(db_manager) as client:
+        client.get("/api/v1/auth/status")
+        client.post("/api/v1/auth/setup", json={"password": "short"})
+
+    write_logs = [message for message in messages if message.startswith("写请求")]
+    assert len(write_logs) == 1
+    assert "POST /api/v1/auth/setup" in write_logs[0]
+    assert "IP 127.0.0.1" in write_logs[0]
+
+
 def test_state_change_requires_matching_csrf_token(db_manager) -> None:
     with _create_client(db_manager) as client:
         assert (

@@ -55,6 +55,23 @@ class TestManga:
         )
         assert manga_repo.count() == 2
 
+    def test_search_filters_by_tag(self, manga_repo: MangaRepository, tag_repo) -> None:
+        """标签过滤只返回命中标签的漫画，不匹配的记录被排除。"""
+        manga_repo.upsert(
+            manga_id="21", title="带标签", author="", chapter_count=1, page_count=1
+        )
+        manga_repo.upsert(
+            manga_id="22", title="无标签", author="", chapter_count=1, page_count=1
+        )
+        tag_repo.add("恋爱", "21")
+
+        matched, total = manga_repo.search(
+            page=1, page_size=20, search=None, status=None, tag="恋爱", sort="id_asc"
+        )
+
+        assert total == 1
+        assert [manga.id for manga in matched] == ["21"]
+
     def test_add_and_list_files(self, manga_repo: MangaRepository, tmp_path) -> None:
         pdf = tmp_path / "11-标题(3章).pdf"
         pdf.write_bytes(b"%PDF")

@@ -15,9 +15,14 @@ from src.database.models import ScanRecord
 from src.database.repositories import MangaRepository, ScanRecordRepository
 from src.logging.logger_config import logger
 
-# PDF 文件名正则：新格式为「漫画ID-标题(章节数章).pdf」，旧格式为「漫画ID.pdf」
-_NEW_FORMAT_PATTERN = re.compile(r"^(\d+)-(.+?)\((\d+)章\)\.pdf$")
-_OLD_FORMAT_PATTERN = re.compile(r"^(\d+)\.pdf$")
+# PDF 文件名正则：
+# - 新格式「漫画ID-标题(章节数章).pdf」
+# - 兼容格式「漫画ID-标题.pdf」（早期版本没有章节数后缀）
+# - 旧格式「漫画ID.pdf」
+# 扩展名大小写不敏感；标题原样保留。
+_NEW_FORMAT_PATTERN = re.compile(r"^(\d+)-(.+?)\((\d+)章\)\.pdf$", re.IGNORECASE)
+_ID_TITLE_FORMAT_PATTERN = re.compile(r"^(\d+)-(.+)\.pdf$", re.IGNORECASE)
+_OLD_FORMAT_PATTERN = re.compile(r"^(\d+)\.pdf$", re.IGNORECASE)
 
 # 扫描来源的路径标识：scan_record.path_label 只保存配置名称，绝不保存绝对路径
 DOWNLOAD_PATH_LABEL = "MANGA_DOWNLOAD_PATH"
@@ -76,6 +81,13 @@ def parse_pdf_filename(filename: str) -> Optional[MangaScanEntry]:
         )
         return MangaScanEntry(
             manga_id=manga_id, title=title, chapter_count=chapter_count
+        )
+
+    id_title_match = _ID_TITLE_FORMAT_PATTERN.match(base_name)
+    if id_title_match:
+        # 早期命名没有「(N章)」后缀，章节数留 0 由数据库既有值或后续校验补全
+        return MangaScanEntry(
+            manga_id=id_title_match.group(1), title=id_title_match.group(2)
         )
 
     old_match = _OLD_FORMAT_PATTERN.match(base_name)

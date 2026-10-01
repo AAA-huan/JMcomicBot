@@ -45,14 +45,37 @@ const loading = ref(false)
 const error = ref('')
 const selected = ref<string[]>([])
 
+const scopeOptions = [
+  { value: 'keyword', title: '标题 / 作者' },
+  { value: 'tag', title: '标签' },
+  { value: 'id', title: '漫画 ID' },
+]
+
+type SearchScope = 'keyword' | 'tag' | 'id'
+
 const filters = reactive({
-  search: '',
+  keyword: '',
+  scope: 'keyword' as SearchScope,
   status: '',
-  tag: '',
   sort: 'downloaded_at_desc',
   page: 1,
   pageSize: 20,
 })
+
+interface LibraryListCache {
+  key: string
+  items: Manga[]
+  total: number
+  pages: number
+}
+
+// 模块级列表缓存：从详情页返回时先展示缓存再后台刷新，避免重复等待
+const libraryListCache: LibraryListCache = {
+  key: '',
+  items: [],
+  total: 0,
+  pages: 0,
+}
 
 const actionError = ref('')
 const actionNotice = ref('')
@@ -73,9 +96,16 @@ const selectedCount = computed(() => selected.value.length)
 /** 从 URL 查询参数恢复筛选条件，保证刷新后视图不丢失。 */
 function readQuery(): void {
   const query = route.query
-  filters.search = typeof query.search === 'string' ? query.search : ''
+  const rawTag = typeof query.tag === 'string' ? query.tag : ''
+  const rawSearch = typeof query.search === 'string' ? query.search : ''
+  if (query.scope === 'tag' || query.scope === 'id') {
+    filters.scope = query.scope
+  } else {
+    // 兼容旧链接：只有 tag 参数时按标签范围处理
+    filters.scope = rawTag ? 'tag' : 'keyword'
+  }
+  filters.keyword = rawTag || rawSearch
   filters.status = typeof query.status === 'string' ? query.status : ''
-  filters.tag = typeof query.tag === 'string' ? query.tag : ''
   filters.sort = typeof query.sort === 'string' ? query.sort : 'downloaded_at_desc'
   const page = Number.parseInt(typeof query.page === 'string' ? query.page : '1', 10)
   filters.page = Number.isFinite(page) && page > 0 ? page : 1
@@ -86,26 +116,39 @@ function readQuery(): void {
   filters.pageSize = pageSizeOptions.includes(size) ? size : 20
 }
 
-async function load(): Promise<void> {
-  loading.value = true
+/** 当前查询参数的稳定字符串，用于判断模块级缓存是否可复用。 */
+function queryKey(): string {
+  return Object.entries(route.query)
+    .map(([key, value]) => `${key}=${String(value)}`)
+    .sort()
+    .join('&')
+}
+
+async function load(options: { silent?: boolean } = {}): Promise<void> {
+  const silent = options.silent === true
+  if (!silent) loading.value = true
   error.value = ''
   try {
     const result = await listMangas({
       page: filters.page,
       page_size: filters.pageSize,
-      search: filters.search || undefined,
+      search: filters.scope === 'tag' ? undefined : filters.keyword || undefined,
       status: filters.status || undefined,
-      tag: filters.tag || undefined,
+      tag: filters.scope === 'tag' ? filters.keyword || undefined : undefined,
       sort: filters.sort,
     })
     mangas.value = result.items
     total.value = result.total
     pages.value = result.pages
     selected.value = []
+    libraryListCache.key = queryKey()
+    libraryListCache.items = result.items
+    libraryListCache.total = result.total
+    libraryListCache.pages = result.pages
   } catch (err) {
     error.value = errorMessage(err)
   } finally {
-    loading.value = false
+    if (!silent) loading.value = false
   }
 }
 
@@ -124,11 +167,30 @@ function fileDownloadUrl(fileId: number): string {
 }
 
 function applySearch(): void {
-  updateQuery({ search: filters.search || undefined, page: 1 })
+  const keyword = filters.keyword.trim()
+  if (filters.scope === 'tag') {
+    updateQuery({
+      tag: keyword || undefined,
+      search: undefined,
+      scope: 'tag',
+      page: 1,
+    })
+    return
+  }
+  if (filters.scope === 'id') {
+    updateQuery({
+      search: keyword || undefined,
+      tag: undefined,
+      scope: 'id',
+      page: 1,
+    })
+    return
+  }
+  updateQuery({ search: keyword || undefined, tag: undefined, scope: undefined, page: 1 })
 }
 
 function clearSearch(): void {
-  filters.search = ''
+  filters.keyword = ''
   applySearch()
 }
 
@@ -225,6 +287,15 @@ watch(
   () => route.query,
   () => {
     readQuery()
+    if (libraryListCache.key !== '' && libraryListCache.key === queryKey()) {
+      // 缓存命中：先渲染旧数据消除等待感，再后台刷新保持一致
+      mangas.value = libraryListCache.items
+      total.value = libraryListCache.total
+      pages.value = libraryListCache.pages
+      void load({ silent: true })
+      return
+    }
+    mangas.value = []
     void load()
   },
   { immediate: true },
@@ -273,13 +344,21 @@ watch(
         <v-row dense>
           <v-col cols="12" md="4">
             <v-text-field
-              v-model="filters.search"
-              label="搜索标题 / 作者"
+              v-model="filters.keyword"
+              label="搜索关键字"
               prepend-inner-icon="mdi-magnify"
               clearable
               hide-details
               @keyup.enter="applySearch"
               @click:clear="clearSearch"
+            />
+          </v-col>
+          <v-col cols="6" md="2">
+            <v-select
+              v-model="filters.scope"
+              :items="scopeOptions"
+              label="搜索范围"
+              hide-details
             />
           </v-col>
           <v-col cols="6" md="2">
@@ -300,15 +379,7 @@ watch(
               @update:model-value="updateQuery({ sort: filters.sort, page: 1 })"
             />
           </v-col>
-          <v-col cols="12" md="2">
-            <v-text-field
-              v-model="filters.tag"
-              label="标签"
-              hide-details
-              @keyup.enter="updateQuery({ tag: filters.tag || undefined, page: 1 })"
-            />
-          </v-col>
-          <v-col cols="12" md="2" class="d-flex ga-2 align-center">
+          <v-col cols="6" md="2" class="d-flex ga-2 align-center">
             <v-btn color="primary" block prepend-icon="mdi-magnify" @click="applySearch">
               搜索
             </v-btn>
@@ -374,7 +445,7 @@ watch(
                 />
               </th>
               <th>标题</th>
-              <th>作者</th>
+              <th class="text-no-wrap">漫画 ID</th>
               <th class="text-no-wrap">章节 / 页数</th>
               <th>标签</th>
               <th>状态</th>
@@ -394,13 +465,16 @@ watch(
               <td>
                 <router-link
                   class="text-primary text-decoration-none"
-                  :to="{ name: 'manga-detail', params: { mangaId: manga.id } }"
+                  :to="{
+                    name: 'manga-detail',
+                    params: { mangaId: manga.id },
+                    query: route.query,
+                  }"
                 >
                   {{ manga.title }}
                 </router-link>
-                <div class="text-caption text-medium-emphasis">ID: {{ manga.id }}</div>
               </td>
-              <td>{{ manga.author || '—' }}</td>
+              <td class="text-no-wrap">{{ manga.id }}</td>
               <td class="text-no-wrap">{{ manga.chapter_count }} / {{ manga.page_count }}</td>
               <td>
                 <v-chip
@@ -467,7 +541,7 @@ watch(
             </template>
             <v-list-item-title class="text-wrap">{{ manga.title }}</v-list-item-title>
             <v-list-item-subtitle class="text-wrap">
-              {{ manga.author || '未知作者' }} · {{ manga.chapter_count }} 章 ·
+              ID {{ manga.id }} · {{ manga.chapter_count }} 章 ·
               {{ manga.page_count }} 页 · {{ formatDateTime(manga.downloaded_at) }}
             </v-list-item-subtitle>
             <div class="mt-1">
@@ -495,7 +569,11 @@ watch(
                   icon="mdi-chevron-right"
                   size="small"
                   variant="text"
-                  :to="{ name: 'manga-detail', params: { mangaId: manga.id } }"
+                  :to="{
+                    name: 'manga-detail',
+                    params: { mangaId: manga.id },
+                    query: route.query,
+                  }"
                   aria-label="查看详情"
                 />
                 <v-btn

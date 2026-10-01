@@ -3,7 +3,7 @@
 from collections import defaultdict, deque
 from secrets import compare_digest
 from threading import Lock
-from time import monotonic
+from time import monotonic, perf_counter
 from typing import Deque
 from urllib.parse import urlparse
 from uuid import uuid4
@@ -12,6 +12,7 @@ from fastapi import Request, status
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from starlette.responses import Response
 
+from src.logging.logger_config import logger
 from src.web.errors import error_response
 
 CSRF_COOKIE_NAME = "jmbot_csrf"
@@ -118,10 +119,38 @@ class WebSecurityMiddleware(
             response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
         return response
 
+    @staticmethod
+    def _log_write_request(
+        request: Request, response: Response, started_at: float
+    ) -> None:
+        """写操作的 URL 级访问记录：DEBUG 级别，只写入文件日志。
+
+        业务语义由审计事件的 INFO 日志承担，这里保留原始请求明细
+        （方法、路径、状态码、直连 IP 与耗时）供排查使用。
+        """
+        if request.method in _SAFE_METHODS:
+            return
+        if not request.url.path.startswith("/api/"):
+            return
+        client_ip = request.client.host if request.client is not None else "-"
+        elapsed_ms = (perf_counter() - started_at) * 1000
+        logger.debug(
+            f"写请求 {request.method} {request.url.path} → {response.status_code}"
+            f"（IP {client_ip}，{elapsed_ms:.0f}ms）"
+        )
+
     async def dispatch(
         self, request: Request, call_next: RequestResponseEndpoint
     ) -> Response:
+        started_at = perf_counter()
         request.state.request_id = str(uuid4())
+        response = await self._handle_request(request, call_next)
+        self._log_write_request(request, response, started_at)
+        return response
+
+    async def _handle_request(
+        self, request: Request, call_next: RequestResponseEndpoint
+    ) -> Response:
         host = request.url.hostname
         if not self.allow_any_host and host not in self.allowed_hosts:
             return self._add_security_headers(

@@ -41,7 +41,7 @@ function mangaFixture(id: string, title: string): Manga {
   }
 }
 
-async function mountPage() {
+async function mountPage(initialPath = '/library') {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -54,7 +54,7 @@ async function mountPage() {
       { path: '/tasks', name: 'tasks', component: { template: '<div />' } },
     ],
   })
-  await router.push('/library')
+  await router.push(initialPath)
   await router.isReady()
   const wrapper = mount(LibraryPage, {
     global: {
@@ -120,5 +120,38 @@ describe('LibraryPage', () => {
     const { wrapper } = await mountPage()
 
     expect(wrapper.text()).toContain('没有找到漫画')
+  })
+
+  it('按标签范围搜索时以 tag 参数请求', async () => {
+    vi.mocked(listMangas).mockResolvedValue({
+      items: [],
+      page: 1,
+      page_size: 20,
+      total: 0,
+      pages: 0,
+    })
+
+    await mountPage('/library?tag=恋爱&scope=tag')
+
+    expect(listMangas).toHaveBeenCalledWith(
+      expect.objectContaining({ tag: '恋爱', search: undefined }),
+    )
+  })
+
+  it('详情链接保留当前筛选参数', async () => {
+    vi.mocked(listMangas).mockResolvedValue({
+      items: [mangaFixture('100', '测试漫画')],
+      page: 1,
+      page_size: 20,
+      total: 1,
+      pages: 1,
+    })
+
+    const { wrapper } = await mountPage('/library?status=downloaded&sort=id_asc')
+    const detailLink = wrapper.find('a[href*="/library/100"]')
+
+    expect(detailLink.exists()).toBe(true)
+    expect(detailLink.attributes('href')).toContain('status=downloaded')
+    expect(detailLink.attributes('href')).toContain('sort=id_asc')
   })
 })

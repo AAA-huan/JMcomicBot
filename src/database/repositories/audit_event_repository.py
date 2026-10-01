@@ -8,6 +8,8 @@ from sqlalchemy import delete, func, select
 from src.database.models import AuditEvent
 from src.database.repositories._base import BaseRepository
 from src.database.repositories.operation_task_repository import serialize_metadata
+from src.logging.audit_messages import format_audit_message
+from src.logging.logger_config import logger
 
 _AUDIT_SOURCES = {"qq", "web", "system"}
 
@@ -90,7 +92,21 @@ class AuditEventRepository(BaseRepository):
             session.add(event)
             session.commit()
             session.refresh(event)
-            return event
+        # WebUI 操作在控制台输出一条业务语义日志，便于直观看到完成情况；
+        # QQ 与系统来源沿用各自模块的既有日志，避免重复刷屏。
+        if source == "web":
+            logger.info(
+                format_audit_message(
+                    event_type=event_type,
+                    source=source,
+                    result=result,
+                    target_type=target_type,
+                    target_id=target_id,
+                    client_ip=client_ip,
+                    error_code=error_code,
+                )
+            )
+        return event
 
     @staticmethod
     def _expired_condition(now: datetime, retention_days: int):
