@@ -51,6 +51,7 @@ from src.service.web_auth_service import WebAuthService
 from src.utils.helpers import cleanup_failed_downloads
 from src.utils.name_cache import NameCache
 from src.web import WebServer, create_web_app
+from src.web.events.bus import WebEventBus
 from src.web.dependencies import WebDependencies
 from src.websocket.client import WebSocketClient
 
@@ -100,10 +101,13 @@ class MangaBot:
         self.scan_record_repo = ScanRecordRepository(self.database_manager)
         self.setting_repo = SettingRepository(self.database_manager)
         self.setting_history_repo = SettingHistoryRepository(self.database_manager)
+        # WebSocket 事件总线：任务等业务线程发布，Web 连接订阅
+        self.event_bus = WebEventBus()
         self.operation_task_service = OperationTaskService(
             self.operation_task_repo,
             self.task_event_repo,
             self.audit_event_repo,
+            event_publisher=self.event_bus,
         )
         interrupted_count = self.operation_task_service.recover_interrupted()
         if interrupted_count:
@@ -314,6 +318,7 @@ class MangaBot:
                         database_maintenance_service=self.database_maintenance_service,
                         repair_service=self.repair_service,
                         scan_service=self.scan_service,
+                        event_bus=self.event_bus,
                     ),
                     web_host=web_host,
                     web_port=int(self.config_manager.config_dict["WEBUI_PORT"]),

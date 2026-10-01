@@ -1,5 +1,6 @@
 """操作任务应用服务，统一任务状态、事件和审计写入。"""
 
+from dataclasses import asdict
 from typing import Any, Dict, List, Optional
 
 from src.database.models import OperationTask
@@ -8,6 +9,7 @@ from src.database.repositories import (
     OperationTaskRepository,
     TaskEventRepository,
 )
+from src.service.events import NULL_EVENT_PUBLISHER, EventPublisher
 from src.service.operation_context import OperationContext
 from src.service.results import TaskResult
 
@@ -65,10 +67,17 @@ class OperationTaskService:
         task_repo: OperationTaskRepository,
         event_repo: TaskEventRepository,
         audit_repo: AuditEventRepository,
+        event_publisher: EventPublisher = NULL_EVENT_PUBLISHER,
     ) -> None:
         self.task_repo = task_repo
         self.event_repo = event_repo
         self.audit_repo = audit_repo
+        self.event_publisher = event_publisher
+
+    def _publish_task(self, task: TaskResult) -> TaskResult:
+        """发布任务状态事件，供 WebSocket 推送。"""
+        self.event_publisher.publish("task.updated", asdict(task))
+        return task
 
     @staticmethod
     def _to_result(task: OperationTask) -> TaskResult:
@@ -96,7 +105,7 @@ class OperationTaskService:
         if task_type == "download" and manga_id is not None:
             active = self.task_repo.find_active_download(manga_id)
             if active is not None:
-                return self._to_result(active)
+                return self._publish_task(self._to_result(active))
         task = self.task_repo.create(
             task_type,
             context.source,
@@ -114,13 +123,13 @@ class OperationTaskService:
             target_type="manga" if manga_id else task_type,
             target_id=manga_id or task.id,
         )
-        return self._to_result(task)
+        return self._publish_task(self._to_result(task))
 
     def start(self, task_id: str, stage: str) -> TaskResult:
         """将排队任务切换为运行中。"""
         task = self.task_repo.update_state(task_id, "running", stage)
         self.event_repo.append(task_id, f"{task.task_type}.started", stage)
-        return self._to_result(task)
+        return self._publish_task(self._to_result(task))
 
     def progress(
         self,
@@ -138,7 +147,7 @@ class OperationTaskService:
             progress=progress,
             metadata=metadata,
         )
-        return self._to_result(task)
+        return self._publish_task(self._to_result(task))
 
     def succeed(
         self,
@@ -168,7 +177,7 @@ class OperationTaskService:
             target_id=task.manga_id or task.id,
             metadata=metadata,
         )
-        return self._to_result(task)
+        return self._publish_task(self._to_result(task))
 
     def fail(
         self,
@@ -202,13 +211,13 @@ class OperationTaskService:
             target_id=task.manga_id or task.id,
             error_code=error_code,
         )
-        return self._to_result(task)
+        return self._publish_task(self._to_result(task))
 
     def cancel(self, task_id: str) -> TaskResult:
         """取消尚未开始的任务。"""
         task = self.task_repo.update_state(task_id, "cancelled", "cancelled")
         self.event_repo.append(task_id, f"{task.task_type}.cancelled", "cancelled")
-        return self._to_result(task)
+        return self._publish_task(self._to_result(task))
 
     def get(self, task_id: str) -> Optional[TaskResult]:
         """按任务 ID 返回任务快照，不存在时返回 None。"""

@@ -41,6 +41,7 @@ from src.service.system_service import SystemService
 from src.service.web_auth_service import WebAuthService
 from src.web.app import create_web_app
 from src.web.dependencies import WebDependencies
+from src.web.events.bus import WebEventBus
 
 PASSWORD = "correct-horse-battery-staple"
 
@@ -92,12 +93,14 @@ class WebTestContext:
         self,
         dependencies: WebDependencies,
         download_queue: FakeDownloadQueue,
+        event_bus: WebEventBus,
         shutdown_calls: List[object],
         reconnect_calls: List[bool],
         applied_settings: Dict[str, object],
     ) -> None:
         self.dependencies = dependencies
         self.download_queue = download_queue
+        self.event_bus = event_bus
         self.shutdown_calls = shutdown_calls
         self.reconnect_calls = reconnect_calls
         self.applied_settings = applied_settings
@@ -118,8 +121,12 @@ def build_web_context(  # pylint: disable=too-many-locals
     tag_repo = MangaTagRepository(db_manager)
     operation_task_repo = OperationTaskRepository(db_manager)
     audit_repo = AuditEventRepository(db_manager)
+    event_bus = WebEventBus()
     task_service = OperationTaskService(
-        operation_task_repo, TaskEventRepository(db_manager), audit_repo
+        operation_task_repo,
+        TaskEventRepository(db_manager),
+        audit_repo,
+        event_publisher=event_bus,
     )
     download_queue = FakeDownloadQueue(task_service)
 
@@ -212,10 +219,12 @@ def build_web_context(  # pylint: disable=too-many-locals
             task_service,
             download_root=str(download_root),
         ),
+        event_bus=event_bus,
     )
     return WebTestContext(
         dependencies=dependencies,
         download_queue=download_queue,
+        event_bus=event_bus,
         shutdown_calls=shutdown_calls,
         reconnect_calls=reconnect_calls,
         applied_settings=applied_settings,
@@ -232,11 +241,13 @@ def create_client_for(
 
 
 def create_test_client(
-    dependencies: WebDependencies, host: str = "127.0.0.1"
+    dependencies: WebDependencies,
+    host: str = "127.0.0.1",
+    status_interval_seconds: float = 2.0,
 ) -> TestClient:
     """构造带固定 Host 头的测试客户端。"""
     return TestClient(
-        create_web_app(dependencies),
+        create_web_app(dependencies, status_interval_seconds=status_interval_seconds),
         client=(host, 50000),
         headers={"Host": "127.0.0.1"},
     )

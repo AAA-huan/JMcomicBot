@@ -3,7 +3,7 @@
 from dataclasses import asdict
 from ipaddress import ip_address
 from secrets import token_urlsafe
-from typing import Annotated, Optional
+from typing import Annotated, Optional, Set
 
 from fastapi import (
     APIRouter,
@@ -24,6 +24,7 @@ from src.web.api.permission_routes import create_permission_router
 from src.web.api.setting_routes import create_setting_router
 from src.web.api.system_routes import create_system_router
 from src.web.api.task_routes import create_task_router
+from src.web.events.routes import create_events_router
 from src.web.dependencies import WebDependencies
 from src.web.errors import ApiError
 from src.web.security import CSRF_COOKIE_NAME, LoginRateLimiter
@@ -48,7 +49,9 @@ def _is_loopback(request: Request) -> bool:
 
 
 def create_api_router(  # pylint: disable=too-many-locals
-    dependencies: WebDependencies, login_rate_limiter: LoginRateLimiter
+    dependencies: WebDependencies,
+    login_rate_limiter: LoginRateLimiter,
+    allowed_origins: Set[str],
 ) -> APIRouter:
     """创建绑定既有应用服务的 v1 API 路由。"""
     router = APIRouter(prefix="/api/v1")
@@ -159,4 +162,5 @@ def create_api_router(  # pylint: disable=too-many-locals
     router.include_router(create_permission_router(dependencies, authenticate))
     router.include_router(create_setting_router(dependencies, authenticate))
     router.include_router(create_maintenance_router(dependencies, authenticate))
+    router.include_router(create_events_router(dependencies, allowed_origins))
     return router

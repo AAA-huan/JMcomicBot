@@ -14,6 +14,7 @@ from src.service import (
 from src.service.query_service import MangaQueryService, TaskQueryService
 from src.service.system_service import SystemService
 from src.service.web_auth_service import WebAuthService
+from src.web.events.bus import WebEventBus
 
 
 @dataclass(frozen=True)
@@ -31,3 +32,4 @@ class WebDependencies:  # pylint: disable=too-many-instance-attributes
     database_maintenance_service: DatabaseMaintenanceService
     repair_service: RepairService
     scan_service: ScanService
+    event_bus: WebEventBus
