@@ -306,3 +306,68 @@ def test_batch_delete_skips_active_download(
     assert pdf_path.exists()
     assert manga_repo.get(manga_id) is not None
     assert "正在下载中" in messages[-1]
+
+
+def test_delete_manga_skips_sending(tmp_path, manga_repo) -> None:
+    """文件正在发送中的漫画不应被删除，应返回冲突错误并保留文件。"""
+    manga_id = "350239"
+    pdf_path = tmp_path / f"{manga_id}-标题(1章).pdf"
+    pdf_path.write_bytes(b"%PDF")
+    _add_manga(manga_repo, manga_id, chapter_count=1)
+    manga_repo.add_file(manga_id, str(pdf_path))
+
+    download_manager = object.__new__(DownloadManager)
+    download_manager.manga_repo = manga_repo
+    download_manager.tag_repo = None
+    download_manager.queued_tasks = {}
+    download_manager.downloading_mangas = {}
+    download_manager.config = {"MANGA_DOWNLOAD_PATH": str(tmp_path)}
+    download_manager.logger = SimpleNamespace(
+        info=lambda *a: None, error=lambda *a: None
+    )
+    download_manager.task_log_repo = None
+    download_manager.operation_task_service = None
+    download_manager.cancelled_downloads = {}
+    download_manager.send_conflict_checker = lambda _manga_id: True
+
+    messages: List[str] = []
+    download_manager.message_sender = lambda *args: messages.append(args[1])
+
+    download_manager.delete_manga("10001", manga_id, None, True)
+
+    assert any("正在发送中" in m for m in messages)
+    assert pdf_path.exists()
+    assert manga_repo.get(manga_id) is not None
+
+
+def test_batch_delete_skips_sending(
+    tmp_path, manga_repo: MangaRepository, tag_repo: MangaTagRepository
+) -> None:
+    """批量删除应跳过正在发送中的漫画，保留其文件与记录。"""
+    manga_id = "350240"
+    pdf_path = tmp_path / f"{manga_id}-标题(1章).pdf"
+    pdf_path.write_bytes(b"%PDF")
+    _add_manga(manga_repo, manga_id, chapter_count=1)
+    manga_repo.add_file(manga_id, str(pdf_path))
+
+    download_manager = object.__new__(DownloadManager)
+    download_manager.manga_repo = manga_repo
+    download_manager.tag_repo = tag_repo
+    download_manager.queued_tasks = {}
+    download_manager.downloading_mangas = {}
+
+    messages: List[str] = []
+    executor = _build_executor(
+        str(tmp_path),
+        messages,
+        download_manager=download_manager,
+        manga_repo=manga_repo,
+        tag_repo=tag_repo,
+    )
+    executor.send_conflict_checker = lambda _manga_id: True
+
+    executor._delete_batch_mangas("10001", [manga_id], None, True)
+
+    assert pdf_path.exists()
+    assert manga_repo.get(manga_id) is not None
+    assert "正在发送中" in messages[-1]

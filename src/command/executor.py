@@ -42,6 +42,7 @@ class CommandExecutor:
         manga_repo: Optional[MangaRepository] = None,
         tag_repo: Optional[MangaTagRepository] = None,
         operation_task_service: Optional[TaskService] = None,
+        send_conflict_checker: Optional[Callable[[str], bool]] = None,
     ) -> None:
         """
         初始化命令执行器
@@ -72,6 +73,7 @@ class CommandExecutor:
         self.manga_repo = manga_repo
         self.tag_repo = tag_repo
         self.operation_task_service = operation_task_service
+        self.send_conflict_checker = send_conflict_checker
         self.command_parser = CommandParser()
         self.logger = logger
         self.SELF_ID: Optional[str] = None
@@ -1161,6 +1163,13 @@ class CommandExecutor:
             try:
                 if self.download_manager.is_download_active(manga_id):
                     results.append((manga_id, False, "正在下载中，已跳过"))
+                    continue
+
+                if (
+                    self.send_conflict_checker is not None
+                    and self.send_conflict_checker(manga_id)
+                ):
+                    results.append((manga_id, False, "正在发送中，已跳过"))
                     continue
 
                 download_path = str(self.config["MANGA_DOWNLOAD_PATH"])

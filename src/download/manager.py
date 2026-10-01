@@ -99,6 +99,7 @@ class DownloadManager:
         task_log_repo: Optional[TaskLogRepository] = None,
         tag_repo: Optional[MangaTagRepository] = None,
         operation_task_service: Optional[TaskService] = None,
+        send_conflict_checker: Optional[Callable[[str], bool]] = None,
     ) -> None:
         """
         初始化下载管理器
@@ -121,6 +122,7 @@ class DownloadManager:
         self.task_log_repo = task_log_repo
         self.tag_repo = tag_repo
         self.operation_task_service = operation_task_service
+        self.send_conflict_checker = send_conflict_checker
         self.download_queue: queue.Queue = queue.Queue()
         self.queue_running: bool = True
         self._stop_event: threading.Event = threading.Event()
@@ -620,6 +622,20 @@ class DownloadManager:
                     context=context,
                 )
             error_msg = f"❌ 漫画ID {manga_id} 正在下载中，无法删除"
+            self.message_sender(user_id, error_msg, group_id, private)
+            return
+
+        if self.send_conflict_checker is not None and self.send_conflict_checker(
+            manga_id
+        ):
+            if self.operation_task_service is not None and operation_task_id:
+                self.operation_task_service.fail(
+                    operation_task_id,
+                    "send_conflict",
+                    "漫画文件正在发送中，无法删除",
+                    context=context,
+                )
+            error_msg = f"❌ 漫画ID {manga_id} 的文件正在发送中，无法删除"
             self.message_sender(user_id, error_msg, group_id, private)
             return
 

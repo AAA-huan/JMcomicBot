@@ -117,6 +117,7 @@ class MangaBot:
             task_log_repo=self.task_log_repo,
             tag_repo=self.tag_repo,
             operation_task_service=self.operation_task_service,
+            send_conflict_checker=self.message_manager.is_manga_sending,
         )
         self.download_service = DownloadQueueService(self.download_manager)
         self.web_auth_service = WebAuthService(
@@ -151,6 +152,7 @@ class MangaBot:
             manga_repo=self.manga_repo,
             tag_repo=self.tag_repo,
             operation_task_service=self.operation_task_service,
+            send_conflict_checker=self.message_manager.is_manga_sending,
         )
 
         self.SELF_ID: Optional[str] = None

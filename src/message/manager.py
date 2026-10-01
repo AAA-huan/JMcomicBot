@@ -78,6 +78,16 @@ class MessageManager:
             "current_file": self._current_sending_file,
         }
 
+    def is_manga_sending(self, manga_id: str) -> bool:
+        """返回指定漫画是否有文件正在发送或排队发送。"""
+        current = self._current_sending_file
+        if current is not None and current.split("-", 1)[0] == manga_id:
+            return True
+        for task in list(self._file_queue.queue):
+            if os.path.basename(task.file_path).split("-", 1)[0] == manga_id:
+                return True
+        return False
+
     def set_websocket_client(self, ws_client: Optional[Any]) -> None:
         """
         设置WebSocket客户端

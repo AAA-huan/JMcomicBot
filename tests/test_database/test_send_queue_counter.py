@@ -2,8 +2,10 @@
 
 from typing import Any, Dict, List
 
+import queue
+
 from src.command.executor import CommandExecutor
-from src.message.manager import MessageManager
+from src.message.manager import MessageManager, SendTask
 from src.service import DownloadQueueService
 
 
@@ -120,3 +122,22 @@ def test_no_progress_pause_after_final_file(tmp_path, monkeypatch) -> None:
 
     assert not any("发送进度" in message for message in messages)
     assert sleep_calls == []
+
+
+def test_is_manga_sending_detects_current_and_queued() -> None:
+    """is_manga_sending 应识别正在发送与排队中的漫画文件。"""
+    manager = object.__new__(MessageManager)
+    manager._current_sending_file = "350236-标题(2章).pdf"
+    manager._file_queue = queue.Queue()
+    manager._file_queue.put(
+        SendTask(
+            user_id="10001",
+            file_path="/tmp/350234-标题(1章).pdf",
+            group_id=None,
+            private=True,
+        )
+    )
+
+    assert manager.is_manga_sending("350236") is True
+    assert manager.is_manga_sending("350234") is True
+    assert manager.is_manga_sending("350999") is False
