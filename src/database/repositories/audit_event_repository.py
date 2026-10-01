@@ -11,11 +11,14 @@ from src.database.repositories.operation_task_repository import serialize_metada
 _AUDIT_SOURCES = {"qq", "web", "system"}
 _AUDIT_METADATA_KEYS = {
     "changed_fields",
+    "cleaned_count",
     "duration_ms",
     "file_count",
+    "new_count",
     "page_count",
     "reason",
     "retry_count",
+    "updated_count",
 }
 
 

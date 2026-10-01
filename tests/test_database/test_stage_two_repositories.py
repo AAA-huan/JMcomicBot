@@ -346,3 +346,30 @@ def test_audit_event_names_align_to_spec(
         assert requested in event_types, f"缺失审计事件: {requested}"
         assert succeeded in event_types, f"缺失审计事件: {succeeded}"
         assert failed in event_types, f"缺失审计事件: {failed}"
+
+
+def test_scan_task_accepts_full_metadata(
+    operation_task_service, task_event_repo
+) -> None:
+    """扫描任务的 metadata 应支持完整扫描统计字段。"""
+    context = OperationContext.system()
+    task = operation_task_service.create("scan", context)
+    operation_task_service.start(task.id, "scanning")
+    operation_task_service.succeed(
+        task.id,
+        metadata={
+            "file_count": 12,
+            "new_count": 3,
+            "updated_count": 2,
+            "cleaned_count": 1,
+        },
+        context=context,
+    )
+
+    events = task_event_repo.list(task.id)
+    assert json.loads(events[-1].metadata_json) == {
+        "file_count": 12,
+        "new_count": 3,
+        "updated_count": 2,
+        "cleaned_count": 1,
+    }

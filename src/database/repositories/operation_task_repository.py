@@ -30,12 +30,15 @@ _TASK_STATUS_TRANSITIONS = {
     "interrupted": set(),
 }
 _TASK_EVENT_METADATA_KEYS = {
+    "cleaned_count",
     "duration_ms",
     "failed_count",
     "file_count",
+    "new_count",
     "page_count",
     "retry_count",
     "succeeded_count",
+    "updated_count",
 }
 _TASK_SUMMARIES = {
     "download": "下载漫画",

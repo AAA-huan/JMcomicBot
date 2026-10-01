@@ -103,7 +103,12 @@ def main() -> None:
         if operation_task is not None:
             task_service.succeed(
                 operation_task.id,
-                metadata={"file_count": result.scanned_files},
+                metadata={
+                    "file_count": result.scanned_files,
+                    "new_count": result.new_count,
+                    "updated_count": result.updated_count,
+                    "cleaned_count": result.deleted_count,
+                },
                 context=operation_context,
             )
         _print_result(result, dry_run=args.dry_run)
