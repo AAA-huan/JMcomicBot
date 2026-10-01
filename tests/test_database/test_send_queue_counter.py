@@ -53,7 +53,7 @@ def _build_executor(download_path: str, messages: List[str]) -> CommandExecutor:
         permission_manager=_PermissionManager(),
         download_service=DownloadQueueService(
             download_manager,
-            task_repository=SimpleNamespace(  # type: ignore[arg-type]
+            task_service=SimpleNamespace(  # type: ignore[arg-type]
                 find_active_download=lambda _manga_id: None
             ),
         ),

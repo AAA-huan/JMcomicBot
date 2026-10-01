@@ -6,13 +6,12 @@ from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 import pytest
 
-from scan_mangas import record_scan_result
 from src.database.models import utc_now
 from src.database.repositories import (
     OperationTaskRepository,
     ScanRecordRepository,
 )
-from src.utils.manga_scanner import DOWNLOAD_PATH_LABEL, ScanResult
+from src.utils.manga_scanner import DOWNLOAD_PATH_LABEL, ScanResult, record_scan_result
 
 
 @pytest.fixture()

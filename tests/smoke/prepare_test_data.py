@@ -55,7 +55,6 @@ PROJECT_ROOT = _find_project_root(os.path.dirname(os.path.abspath(__file__)))
 if PROJECT_ROOT not in sys.path:
     sys.path.insert(0, PROJECT_ROOT)
 
-from scan_mangas import record_scan_result
 from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
 from src.database.migrations import get_schema_revision
@@ -78,7 +77,11 @@ from src.service import (
     VerifyResult,
     VerifyService,
 )
-from src.utils.manga_scanner import scan_download_dir, sync_scanned_to_db
+from src.utils.manga_scanner import (
+    record_scan_result,
+    scan_download_dir,
+    sync_scanned_to_db,
+)
 
 _TITLES = [
     "夜行测试录",

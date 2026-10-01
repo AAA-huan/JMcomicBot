@@ -28,6 +28,9 @@ class BackupResult:
     task_id: str
     path: Path
     file_count: int
+    backup_id: int
+    filename: str
+    file_size_bytes: int
 
 
 @dataclass(frozen=True)
@@ -118,3 +121,11 @@ class MangaDeleteResult:
     @property
     def deleted_file_count(self) -> int:
         return sum(outcome.deleted_file_count for outcome in self.outcomes)
+
+
+@dataclass(frozen=True)
+class TaskCancellationResult:
+    """单个任务取消结果，status 为 cancelled/not_found/not_download/not_queued。"""
+
+    task_id: str
+    status: str

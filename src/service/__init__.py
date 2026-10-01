@@ -2,12 +2,20 @@
 
 from src.service.cleanup_service import CleanupService
 from src.service.contracts import DownloadNotifier, DownloadService, TaskService
-from src.service.database_maintenance_service import DatabaseMaintenanceService
+from src.service.database_maintenance_service import (
+    BackupConflictError,
+    BackupView,
+    DatabaseMaintenanceService,
+)
 from src.service.download_service import DownloadQueueService
 from src.service.manga_service import MangaService
 from src.service.operation_context import OperationContext
 from src.service.operation_task_service import OperationTaskService
-from src.service.permission_service import PermissionService
+from src.service.permission_service import (
+    CachedGroup,
+    CachedUser,
+    PermissionService,
+)
 from src.service.reading_progress_service import ReadingProgressService
 from src.service.repair_service import RepairService
 from src.service.results import (
@@ -15,14 +23,20 @@ from src.service.results import (
     DownloadCancellationResult,
     MangaDeleteOutcome,
     MangaDeleteResult,
+    TaskCancellationResult,
     TaskResult,
     VerifyResult,
 )
+from src.service.scan_service import ScanRunResult, ScanService
 from src.service.settings_service import SettingsService
 from src.service.verify_service import VerifyService
 
 __all__ = [
+    "BackupConflictError",
     "BackupResult",
+    "BackupView",
+    "CachedGroup",
+    "CachedUser",
     "CleanupService",
     "DatabaseMaintenanceService",
     "DownloadCancellationResult",
@@ -37,7 +51,10 @@ __all__ = [
     "PermissionService",
     "ReadingProgressService",
     "RepairService",
+    "ScanRunResult",
+    "ScanService",
     "SettingsService",
+    "TaskCancellationResult",
     "TaskResult",
     "TaskService",
     "VerifyResult",

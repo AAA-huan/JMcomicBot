@@ -13,7 +13,6 @@ import sys
 
 from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
-from src.database.models import ScanRecord
 from src.database.repositories import (
     AuditEventRepository,
     MangaRepository,
@@ -24,13 +23,7 @@ from src.database.repositories import (
 )
 from src.logging.logger_config import logger
 from src.service import OperationContext, OperationTaskService
-from src.utils.manga_scanner import (
-    DOWNLOAD_PATH_LABEL,
-    ScanResult,
-    enrich_metadata_from_jmcomic,
-    scan_download_dir,
-    sync_scanned_to_db,
-)
+from src.service.scan_service import ScanRunResult, ScanService
 
 
 def parse_args() -> argparse.Namespace:
@@ -49,21 +42,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-def record_scan_result(
-    scan_record_repo: ScanRecordRepository, task_id: str, result: ScanResult
-) -> ScanRecord:
-    """将扫描结果统计写入 scan_record，path_label 只保存配置名称。"""
-    return scan_record_repo.create(
-        task_id=task_id,
-        task_type="scan",
-        path_label=DOWNLOAD_PATH_LABEL,
-        file_count=result.scanned_files,
-        new_count=result.new_count,
-        updated_count=result.updated_count,
-        missing_count=result.marked_missing_count,
-    )
-
-
 def main() -> None:
     """扫描漫画并将元数据同步到数据库的主入口"""
     args = parse_args()
@@ -77,84 +55,50 @@ def main() -> None:
     logger.info(f"下载目录: {download_path}")
     if args.dry_run:
         logger.info("当前为预览模式(--dry-run)，不会写入数据库")
+    if args.enrich and args.dry_run:
+        logger.warning(
+            "--enrich 与 --dry-run 同时使用时，联网补全仍会写入 entry（不入库）"
+        )
 
-    try:
-        entries = scan_download_dir(download_path)
-    except FileNotFoundError as e:
-        logger.error(str(e))
-        sys.exit(1)
-
-    if not entries:
-        logger.info("没有扫描到漫画，无需同步")
-        sys.exit(0)
-
-    # 可选：联网补全作者/标签等元数据
-    if args.enrich:
-        if args.dry_run:
-            logger.warning(
-                "--enrich 与 --dry-run 同时使用时，联网补全仍会写入 entry（不入库）"
-            )
-        logger.info("正在联网补全漫画元数据，请稍候……")
-        enriched = enrich_metadata_from_jmcomic(entries)
-        logger.info(f"联网补全元数据完成：成功补全 {enriched} 个漫画")
-
-    # 初始化数据库并同步
     db_manager = DatabaseManager(db_path=db_path)
     db_manager.init_db()
-    repo = MangaRepository(db_manager, download_root=download_path)
-    tag_repo = MangaTagRepository(db_manager)
-    scan_record_repo = ScanRecordRepository(db_manager)
-    task_service = OperationTaskService(
-        OperationTaskRepository(db_manager),
-        TaskEventRepository(db_manager),
-        AuditEventRepository(db_manager),
-    )
-    operation_context = OperationContext.system()
-    operation_task = (
-        None if args.dry_run else task_service.create("scan", operation_context)
+    # 扫描入库流程与 WebUI 维护接口共用 ScanService，下载根目录必须传入
+    scan_service = ScanService(
+        MangaRepository(db_manager, download_root=download_path),
+        MangaTagRepository(db_manager),
+        ScanRecordRepository(db_manager),
+        OperationTaskService(
+            OperationTaskRepository(db_manager),
+            TaskEventRepository(db_manager),
+            AuditEventRepository(db_manager),
+        ),
+        download_root=download_path,
     )
 
     try:
-        if operation_task is not None:
-            task_service.start(operation_task.id, "scanning")
-        result = sync_scanned_to_db(
-            repo, entries, dry_run=args.dry_run, tag_repo=tag_repo
+        result = scan_service.run(
+            context=OperationContext.system(),
+            dry_run=args.dry_run,
+            enrich=args.enrich,
         )
-        if operation_task is not None:
-            # 正式统计落表：path_label 只保存配置名称，不保存绝对路径
-            record_scan_result(scan_record_repo, operation_task.id, result)
-            task_service.succeed(
-                operation_task.id,
-                metadata={
-                    "file_count": result.scanned_files,
-                    "new_count": result.new_count,
-                    "updated_count": result.updated_count,
-                    "missing_count": result.marked_missing_count,
-                },
-                context=operation_context,
-            )
-        _print_result(result, dry_run=args.dry_run)
-    except Exception as error:
-        if operation_task is not None:
-            task_service.fail(
-                operation_task.id,
-                "scan_failed",
-                type(error).__name__,
-                context=operation_context,
-            )
-        raise
+        _print_result(result)
+    except FileNotFoundError as error:
+        logger.error(str(error))
+        sys.exit(1)
+    except Exception as error:  # pylint: disable=broad-exception-caught
+        logger.error(f"扫描失败: {error}")
+        sys.exit(1)
     finally:
         db_manager.close()
 
 
-def _print_result(result, dry_run: bool) -> None:
+def _print_result(result: ScanRunResult) -> None:
     """打印扫描同步结果统计
 
     Args:
-        result: 扫描同步结果
-        dry_run: 是否为预览模式
+        result: 扫描服务返回的结果对象
     """
-    mode_desc = "预览：将新增" if dry_run else "完成：新增"
+    mode_desc = "预览：将新增" if result.dry_run else "完成：新增"
     lines = [
         f"📊 扫描同步{mode_desc}",
         f"  扫描到 PDF 文件: {result.scanned_files} 个",
@@ -162,7 +106,7 @@ def _print_result(result, dry_run: bool) -> None:
         f"  新增: {result.new_count} 本",
         f"  更新: {result.updated_count} 本",
     ]
-    if dry_run:
+    if result.dry_run:
         lines.append(f"  待清理残留: {result.pending_cleanup_count} 条")
     else:
         lines.append(f"  标记缺失: {result.marked_missing_count} 条")

@@ -27,7 +27,13 @@ def _build_repair_service(
         AuditEventRepository(db_manager),
     )
     return (
-        RepairService(manga_repo, tag_repo, scan_record_repo, task_service),
+        RepairService(
+            manga_repo,
+            tag_repo,
+            scan_record_repo,
+            task_service,
+            download_root=download_path,
+        ),
         manga_repo,
         tag_repo,
         scan_record_repo,
@@ -60,7 +66,7 @@ def test_repair_marks_orphan_manga_and_deletes_orphan_tags(
     )
     _prepare_orphans(db_manager, manga_repo, tag_repo, tmp_path)
 
-    cleaned = repair_service.repair(str(tmp_path))
+    cleaned = repair_service.repair()
 
     assert cleaned == 2  # 1 个孤儿漫画 + 1 个孤儿标签
     assert manga_repo.get("350260").status == "downloaded"
@@ -87,7 +93,7 @@ def test_preview_reports_diff_without_writes(db_manager, tmp_path) -> None:
     )
     _prepare_orphans(db_manager, manga_repo, tag_repo, tmp_path)
 
-    diff = repair_service.preview(str(tmp_path))
+    diff = repair_service.preview()
 
     assert diff.orphan_manga_ids == ("350261",)
     assert diff.orphan_tag_names == ("纯爱",)

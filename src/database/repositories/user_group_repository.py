@@ -2,7 +2,7 @@
 
 # pylint: disable=arguments-differ
 
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import select
 
@@ -12,7 +12,7 @@ from src.database.repositories._base import BaseRepository
 
 
 class UserGroupRepository(BaseRepository):
-    """用户/群组信息仓储，提供昵称与群名缓存的读写"""
+    """用户/群组信息仓储，提供昵称与群名的读写"""
 
     def __init__(self, db_manager: DatabaseManager) -> None:
         super().__init__(db_manager)
@@ -35,6 +35,30 @@ class UserGroupRepository(BaseRepository):
                 select(GroupInfo).order_by(GroupInfo.last_seen_at)
             ).all()
             return list(users) + list(groups)
+
+    def list_users(self, limit: int = 200) -> List[UserInfo]:
+        """按最近活跃时间倒序查询用户昵称缓存"""
+        if limit < 1:
+            raise ValueError("查询数量必须大于 0")
+        with self._get_session() as session:
+            statement = (
+                select(UserInfo)
+                .order_by(UserInfo.last_seen_at.desc(), UserInfo.id)
+                .limit(limit)
+            )
+            return list(session.scalars(statement).all())
+
+    def list_groups(self, limit: int = 200) -> List[GroupInfo]:
+        """按最近活跃时间倒序查询群组名称缓存"""
+        if limit < 1:
+            raise ValueError("查询数量必须大于 0")
+        with self._get_session() as session:
+            statement = (
+                select(GroupInfo)
+                .order_by(GroupInfo.last_seen_at.desc(), GroupInfo.id)
+                .limit(limit)
+            )
+            return list(session.scalars(statement).all())
 
     def get_user(self, user_id: str) -> Optional[UserInfo]:
         """按用户ID查询用户昵称记录"""

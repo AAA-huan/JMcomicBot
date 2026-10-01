@@ -1,5 +1,7 @@
 """阶段三批次 E：备份记录与一致性备份测试。"""
 
+from datetime import datetime
+
 import pytest
 
 from src.database.repositories import (
@@ -9,6 +11,7 @@ from src.database.repositories import (
     TaskEventRepository,
 )
 from src.service import (
+    BackupConflictError,
     DatabaseMaintenanceService,
     OperationContext,
     OperationTaskService,
@@ -97,6 +100,25 @@ def test_backup_failure_marks_record_and_task_failed(
         event.event_type for event in AuditEventRepository(db_manager).list()
     }
     assert "database.backup_failed" in audit_types
+
+
+def test_create_backup_rejects_duplicate_within_same_second(
+    tmp_path, db_manager, backup_repo, monkeypatch
+) -> None:
+    """同一秒重复创建应返回冲突，不产生第二条记录。"""
+    fixed_time = datetime(2026, 10, 1, 12, 0, 0)
+    monkeypatch.setattr(
+        "src.service.database_maintenance_service.utc_now", lambda: fixed_time
+    )
+    service = _build_service(db_manager, str(tmp_path / "backups"))
+
+    first = service.create_backup()
+    with pytest.raises(BackupConflictError):
+        service.create_backup()
+
+    assert first.path.exists()
+    assert len(backup_repo.list()) == 1
+    assert OperationTaskRepository(db_manager).list()[0].status == "succeeded"
 
 
 def test_backup_repository_validates_and_marks_deleted(backup_repo) -> None:

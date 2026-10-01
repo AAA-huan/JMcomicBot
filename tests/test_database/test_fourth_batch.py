@@ -50,7 +50,7 @@ def test_list_help_uses_real_page_example(tmp_path) -> None:
         permission_manager=_PermissionManager(),
         download_service=DownloadQueueService(
             download_manager,
-            task_repository=SimpleNamespace(  # type: ignore[arg-type]
+            task_service=SimpleNamespace(  # type: ignore[arg-type]
                 find_active_download=lambda _manga_id: None
             ),
         ),

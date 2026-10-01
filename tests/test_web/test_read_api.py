@@ -1,69 +1,23 @@
 """认证、系统状态、漫画和任务只读 API 集成测试。"""
 
-from argon2 import PasswordHasher
 from starlette.testclient import TestClient
 
-from src.database.models import utc_now
 from src.database.repositories import (
-    AuditEventRepository,
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
     WebAdminRepository,
-    WebSessionRepository,
 )
-from src.service.query_service import MangaQueryService, TaskQueryService
-from src.service.system_service import SystemService
-from src.service.web_auth_service import WebAuthService
-from src.web.app import create_web_app
-from src.web.dependencies import WebDependencies
-
-PASSWORD = "correct-horse-battery-staple"
+from tests.test_web.support import PASSWORD, create_client_for, setup_and_login
 
 
 def _create_client(db_manager, host: str = "127.0.0.1") -> TestClient:
-    manga_repository = MangaRepository(db_manager, download_root=db_manager.db_dir)
-    tag_repository = MangaTagRepository(db_manager)
-    task_repository = OperationTaskRepository(db_manager)
-    auth_service = WebAuthService(
-        WebAdminRepository(db_manager),
-        WebSessionRepository(db_manager),
-        AuditEventRepository(db_manager),
-        session_hours=24,
-        password_hasher=PasswordHasher(
-            time_cost=1,
-            memory_cost=8192,
-            parallelism=1,
-        ),
-    )
-    dependencies = WebDependencies(
-        auth_service=auth_service,
-        manga_query_service=MangaQueryService(manga_repository, tag_repository),
-        task_query_service=TaskQueryService(task_repository),
-        system_service=SystemService(
-            version="test-version",
-            started_at=utc_now(),
-            manga_repository=manga_repository,
-            connection_provider=lambda: True,
-            download_queue_provider=lambda: {"running": True, "queue_size": 2},
-            send_queue_provider=lambda: {"running": True, "queue_size": 1},
-        ),
-    )
-    return TestClient(
-        create_web_app(dependencies),
-        client=(host, 50000),
-        headers={"Host": "127.0.0.1"},
-    )
+    client, _context = create_client_for(db_manager, host)
+    return client
 
 
 def _setup_and_login(client: TestClient) -> None:
-    setup_response = client.post("/api/v1/auth/setup", json={"password": PASSWORD})
-    assert setup_response.status_code == 201
-    login_response = client.post("/api/v1/auth/login", json={"password": PASSWORD})
-    assert login_response.status_code == 200
-    cookie = login_response.headers["set-cookie"]
-    assert "HttpOnly" in cookie
-    assert "SameSite=strict" in cookie
+    setup_and_login(client)
 
 
 def test_authentication_flow_and_protected_status(db_manager) -> None:

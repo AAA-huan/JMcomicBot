@@ -11,7 +11,8 @@ from typing import Any, List, Optional
 import os
 import re
 
-from src.database.repositories import MangaRepository
+from src.database.models import ScanRecord
+from src.database.repositories import MangaRepository, ScanRecordRepository
 from src.logging.logger_config import logger
 
 # PDF 文件名正则：新格式为「漫画ID-标题(章节数章).pdf」，旧格式为「漫画ID.pdf」
@@ -236,6 +237,21 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
 def _count_scan_files(entries: List[MangaScanEntry]) -> int:
     """统计全部漫画条目的PDF文件总数"""
     return sum(len(entry.files) for entry in entries)
+
+
+def record_scan_result(
+    scan_record_repo: ScanRecordRepository, task_id: str, result: ScanResult
+) -> ScanRecord:
+    """将扫描结果统计写入 scan_record，path_label 只保存配置名称。"""
+    return scan_record_repo.create(
+        task_id=task_id,
+        task_type="scan",
+        path_label=DOWNLOAD_PATH_LABEL,
+        file_count=result.scanned_files,
+        new_count=result.new_count,
+        updated_count=result.updated_count,
+        missing_count=result.marked_missing_count,
+    )
 
 
 def _count_pending_cleanup(repo: MangaRepository, disk_ids: set[str]) -> int:

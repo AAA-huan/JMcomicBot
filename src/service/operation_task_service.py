@@ -1,6 +1,6 @@
 """操作任务应用服务，统一任务状态、事件和审计写入。"""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 from src.database.models import OperationTask
 from src.database.repositories import (
@@ -209,6 +209,22 @@ class OperationTaskService:
         task = self.task_repo.update_state(task_id, "cancelled", "cancelled")
         self.event_repo.append(task_id, f"{task.task_type}.cancelled", "cancelled")
         return self._to_result(task)
+
+    def get(self, task_id: str) -> Optional[TaskResult]:
+        """按任务 ID 返回任务快照，不存在时返回 None。"""
+        task = self.task_repo.get(task_id)
+        return self._to_result(task) if task is not None else None
+
+    def find_active_download(self, manga_id: str) -> Optional[TaskResult]:
+        """查找同漫画尚未结束的下载任务。"""
+        task = self.task_repo.find_active_download(manga_id)
+        return self._to_result(task) if task is not None else None
+
+    def list_active_downloads(self) -> List[TaskResult]:
+        """列出全部尚未结束的下载任务（queued/running）。"""
+        return [
+            self._to_result(task) for task in self.task_repo.list_active_downloads()
+        ]
 
     def recover_interrupted(self) -> int:
         """启动时中断全部遗留运行任务。"""

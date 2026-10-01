@@ -168,6 +168,19 @@ class OperationTaskRepository(BaseRepository):
             )
             return session.scalar(statement)
 
+    def list_active_downloads(self) -> List[OperationTask]:
+        """列出全部尚未结束的下载任务（queued/running），按创建时间排序。"""
+        with self._get_session() as session:
+            statement = (
+                select(OperationTask)
+                .where(
+                    OperationTask.task_type == "download",
+                    OperationTask.status.in_(("queued", "running")),
+                )
+                .order_by(OperationTask.created_at, OperationTask.id)
+            )
+            return list(session.scalars(statement).all())
+
     def update_state(
         self,
         task_id: str,

@@ -18,6 +18,7 @@ from src.database.repositories import (
     MangaTagRepository,
     OperationTaskRepository,
     PermissionRepository,
+    ScanRecordRepository,
     SettingHistoryRepository,
     SettingRepository,
     TaskEventRepository,
@@ -34,10 +35,14 @@ from src.permission.manager import PermissionManager
 from src.platform.compatibility import PlatformChecker
 from src.service import (
     CleanupService,
+    DatabaseMaintenanceService,
     DownloadQueueService,
     MangaService,
+    OperationContext,
     OperationTaskService,
     PermissionService,
+    RepairService,
+    ScanService,
     SettingsService,
 )
 from src.service.query_service import MangaQueryService, TaskQueryService
@@ -92,6 +97,7 @@ class MangaBot:
         self.web_admin_repo = WebAdminRepository(self.database_manager)
         self.web_session_repo = WebSessionRepository(self.database_manager)
         self.backup_repo = BackupRepository(self.database_manager)
+        self.scan_record_repo = ScanRecordRepository(self.database_manager)
         self.setting_repo = SettingRepository(self.database_manager)
         self.setting_history_repo = SettingHistoryRepository(self.database_manager)
         self.operation_task_service = OperationTaskService(
@@ -134,7 +140,9 @@ class MangaBot:
             seed_delete_permission_user=self.config_manager.delete_permission_user,
         )
         self.permission_service = PermissionService(
-            self.permission_manager, self.audit_event_repo
+            self.permission_manager,
+            self.audit_event_repo,
+            self.user_group_repo,
         )
 
         self.ws_client = WebSocketClient(self.config_manager.config_dict)
@@ -156,7 +164,27 @@ class MangaBot:
             send_conflict_checker=self.message_manager.is_manga_sending,
         )
         self.download_service = DownloadQueueService(
-            self.download_manager, self.operation_task_repo
+            self.download_manager, self.operation_task_service
+        )
+        self.scan_service = ScanService(
+            self.manga_repo,
+            self.tag_repo,
+            self.scan_record_repo,
+            self.operation_task_service,
+            download_root=str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]),
+        )
+        self.repair_service = RepairService(
+            self.manga_repo,
+            self.tag_repo,
+            self.scan_record_repo,
+            self.operation_task_service,
+            download_root=str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]),
+        )
+        self.database_maintenance_service = DatabaseMaintenanceService(
+            self.database_manager,
+            self.operation_task_service,
+            self.backup_repo,
+            backup_dir=str(self.config_manager.config_dict["BACKUP_PATH"]),
         )
         # 统一删除服务：QQ 删除命令与 Web 写接口共用同一套删除流程
         self.manga_service = MangaService(
@@ -185,6 +213,11 @@ class MangaBot:
             send_queue_provider=lambda: dict(
                 self.message_manager.get_send_queue_status()
             ),
+            reconnect_requester=self.ws_client.request_reconnect,
+            shutdown_requester=lambda context: self.request_shutdown(
+                "通过 WebUI 请求安全关闭", context=context
+            ),
+            audit_repository=self.audit_event_repo,
         )
 
         self.command_executor = CommandExecutor(
@@ -274,6 +307,13 @@ class MangaBot:
                         manga_query_service=self.manga_query_service,
                         task_query_service=self.task_query_service,
                         system_service=self.system_service,
+                        manga_service=self.manga_service,
+                        download_service=self.download_service,
+                        permission_service=self.permission_service,
+                        settings_service=self.settings_service,
+                        database_maintenance_service=self.database_maintenance_service,
+                        repair_service=self.repair_service,
+                        scan_service=self.scan_service,
                     ),
                     web_host=web_host,
                     web_port=int(self.config_manager.config_dict["WEBUI_PORT"]),
@@ -427,16 +467,27 @@ class MangaBot:
         signal.signal(signal.SIGTERM, signal.SIG_DFL)
         self.request_shutdown("收到终止信号")
 
-    def request_shutdown(self, reason: str = "") -> None:
-        """请求主循环退出，重复调用不会产生额外副作用"""
+    def request_shutdown(
+        self, reason: str = "", context: Optional[OperationContext] = None
+    ) -> None:
+        """请求主循环退出，重复调用不会产生额外副作用
+
+        Args:
+            reason: 关闭原因，写入日志与审计元数据
+            context: 操作来源上下文，缺省按系统来源记录
+        """
         if self._shutdown_event.is_set():
             return
         if reason:
             logger.info(f"请求关闭机器人: {reason}")
+        operation_context = context or OperationContext.system()
         self.audit_event_repo.record(
             event_type="bot.shutdown_requested",
-            source="system",
+            source=operation_context.source,
             result="accepted",
+            actor_user_id=operation_context.actor_user_id,
+            actor_group_id=operation_context.actor_group_id,
+            client_ip=operation_context.client_ip,
             target_type="bot",
             target_id="self",
             metadata={"reason": reason} if reason else None,

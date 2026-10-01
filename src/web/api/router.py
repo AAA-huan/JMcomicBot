@@ -1,4 +1,4 @@
-"""认证、系统状态、漫画和任务只读 API。"""
+"""认证 API 与 v1 路由组装。"""
 
 from dataclasses import asdict
 from ipaddress import ip_address
@@ -10,7 +10,6 @@ from fastapi import (
     Cookie,
     Depends,
     HTTPException,
-    Query,
     Request,
     Response,
     status,
@@ -18,11 +17,16 @@ from fastapi import (
 from pydantic import BaseModel, Field
 
 from src.service.web_auth_service import AuthenticatedSession
+from src.web.api.common import SESSION_COOKIE_NAME, build_authenticate
+from src.web.api.maintenance_routes import create_maintenance_router
+from src.web.api.manga_routes import create_manga_router
+from src.web.api.permission_routes import create_permission_router
+from src.web.api.setting_routes import create_setting_router
+from src.web.api.system_routes import create_system_router
+from src.web.api.task_routes import create_task_router
 from src.web.dependencies import WebDependencies
 from src.web.errors import ApiError
 from src.web.security import CSRF_COOKIE_NAME, LoginRateLimiter
-
-SESSION_COOKIE_NAME = "jmbot_session"
 
 
 class PasswordRequest(BaseModel):
@@ -43,22 +47,13 @@ def _is_loopback(request: Request) -> bool:
     return request.client is not None and ip_address(request.client.host).is_loopback
 
 
-def create_api_router(  # pylint: disable=too-many-locals,too-many-statements
+def create_api_router(  # pylint: disable=too-many-locals
     dependencies: WebDependencies, login_rate_limiter: LoginRateLimiter
 ) -> APIRouter:
     """创建绑定既有应用服务的 v1 API 路由。"""
     router = APIRouter(prefix="/api/v1")
     auth_service = dependencies.auth_service
-
-    def authenticate(
-        token: Annotated[Optional[str], Cookie(alias=SESSION_COOKIE_NAME)] = None,
-    ) -> AuthenticatedSession:
-        if token is None:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "尚未登录")
-        authenticated = auth_service.authenticate(token)
-        if authenticated is None:
-            raise HTTPException(status.HTTP_401_UNAUTHORIZED, "会话无效或已过期")
-        return authenticated
+    authenticate = build_authenticate(auth_service)
 
     @router.get("/auth/status")
     def auth_status(
@@ -158,89 +153,10 @@ def create_api_router(  # pylint: disable=too-many-locals,too-many-statements
         response.delete_cookie(CSRF_COOKIE_NAME, path="/")
         return {"authenticated": False}
 
-    @router.get("/system/status")
-    def system_status(
-        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
-    ) -> dict[str, object]:
-        return asdict(dependencies.system_service.get_status())
-
-    @router.get("/queues/download")
-    def download_queue(
-        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
-    ) -> dict[str, object]:
-        return dependencies.system_service.get_status().download_queue
-
-    @router.get("/queues/send")
-    def send_queue(
-        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
-    ) -> dict[str, object]:
-        return dependencies.system_service.get_status().send_queue
-
-    @router.get("/mangas")
-    def list_mangas(  # pylint: disable=too-many-arguments,too-many-positional-arguments
-        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
-        page: Annotated[int, Query(ge=1)] = 1,
-        page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-        search: Optional[str] = None,
-        manga_status: Annotated[Optional[str], Query(alias="status")] = None,
-        tag: Optional[str] = None,
-        sort: str = "downloaded_at_desc",
-    ) -> dict[str, object]:
-        try:
-            return asdict(
-                dependencies.manga_query_service.list(
-                    page, page_size, search, manga_status, tag, sort
-                )
-            )
-        except ValueError as error:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
-
-    @router.get("/mangas/{manga_id}")
-    def get_manga(
-        manga_id: str,
-        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
-    ) -> dict[str, object]:
-        manga = dependencies.manga_query_service.get(manga_id)
-        if manga is None:
-            raise ApiError(404, "MANGA_NOT_FOUND", "未找到指定漫画")
-        return asdict(manga)
-
-    @router.get("/mangas/{manga_id}/files")
-    def list_manga_files(
-        manga_id: str,
-        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
-    ) -> list[dict[str, object]]:
-        manga = dependencies.manga_query_service.get(manga_id)
-        if manga is None:
-            raise ApiError(404, "MANGA_NOT_FOUND", "未找到指定漫画")
-        return [asdict(item) for item in manga.files]
-
-    @router.get("/tasks")
-    def list_tasks(
-        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
-        page: Annotated[int, Query(ge=1)] = 1,
-        page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-        task_type: Optional[str] = None,
-        task_status: Annotated[Optional[str], Query(alias="status")] = None,
-        manga_id: Optional[str] = None,
-    ) -> dict[str, object]:
-        try:
-            return asdict(
-                dependencies.task_query_service.list(
-                    page, page_size, task_type, task_status, manga_id
-                )
-            )
-        except ValueError as error:
-            raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
-
-    @router.get("/tasks/{task_id}")
-    def get_task(
-        task_id: str,
-        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
-    ) -> dict[str, object]:
-        task = dependencies.task_query_service.get(task_id)
-        if task is None:
-            raise ApiError(404, "TASK_NOT_FOUND", "未找到指定任务")
-        return asdict(task)
-
+    router.include_router(create_system_router(dependencies, authenticate))
+    router.include_router(create_manga_router(dependencies, authenticate))
+    router.include_router(create_task_router(dependencies, authenticate))
+    router.include_router(create_permission_router(dependencies, authenticate))
+    router.include_router(create_setting_router(dependencies, authenticate))
+    router.include_router(create_maintenance_router(dependencies, authenticate))
     return router

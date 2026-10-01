@@ -2,7 +2,11 @@
 
 import pytest
 
-from src.database.repositories import AuditEventRepository, PermissionRepository
+from src.database.repositories import (
+    AuditEventRepository,
+    PermissionRepository,
+    UserGroupRepository,
+)
 from src.permission.manager import PermissionManager
 from src.service import OperationContext, PermissionService
 
@@ -10,7 +14,9 @@ from src.service import OperationContext, PermissionService
 def _build_service(db_manager) -> tuple[PermissionService, PermissionManager]:
     """构造使用真实仓储的权限服务，权限表为空时无预置名单。"""
     manager = PermissionManager(PermissionRepository(db_manager))
-    service = PermissionService(manager, AuditEventRepository(db_manager))
+    service = PermissionService(
+        manager, AuditEventRepository(db_manager), UserGroupRepository(db_manager)
+    )
     return service, manager
 
 

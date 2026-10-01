@@ -103,6 +103,40 @@ class WebSocketClient:
                 self.logger.error(error_msg)
                 raise RuntimeError(error_msg) from e
 
+    def request_reconnect(self) -> bool:
+        """请求断开并重建 NapCat 连接。
+
+        关闭当前连接后由库内重连或看门狗恢复；连接从未建立时直接发起连接。
+        返回是否已发出重连请求（正在关闭时返回 False）。
+
+        Returns:
+            bool: 是否已发出重连请求
+        """
+        if self._closing:
+            return False
+        with self._connect_lock:
+            current_ws = self.ws
+            run_thread = self.run_thread
+        if current_ws is not None:
+            self.logger.info("收到手动重连请求，正在断开当前连接")
+            current_ws.close()
+        if run_thread is not None and run_thread.is_alive():
+            # 旧连接线程退出后由看门狗（轮询间隔 10 秒）重建连接
+            return True
+        threading.Thread(
+            target=self._reconnect_worker,
+            daemon=True,
+            name="ws-manual-reconnect",
+        ).start()
+        return True
+
+    def _reconnect_worker(self) -> None:
+        """手动重连工作线程：失败仅记录，交由看门狗继续重试。"""
+        try:
+            self.connect()
+        except RuntimeError as error:
+            self.logger.error(f"手动重连失败: {error}")
+
     def start_reconnect_manager(self) -> None:
         """
         启动看门狗线程

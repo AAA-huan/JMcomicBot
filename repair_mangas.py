@@ -58,15 +58,16 @@ def main() -> None:
         AuditEventRepository(db_manager),
     )
     repair_service = RepairService(
-        MangaRepository(db_manager),
+        MangaRepository(db_manager, download_root=download_path),
         MangaTagRepository(db_manager),
         ScanRecordRepository(db_manager),
         task_service,
+        download_root=download_path,
     )
 
     try:
         if args.dry_run:
-            diff = repair_service.preview(download_path)
+            diff = repair_service.preview()
             logger.info(
                 f"预览：孤儿漫画 {len(diff.orphan_manga_ids)} 个，"
                 f"孤儿标签 {len(diff.orphan_tag_names)} 个"
@@ -79,9 +80,7 @@ def main() -> None:
                 "当前为预览模式，未执行任何写入；确认后可去掉 --dry-run 执行修复"
             )
             return
-        cleaned_count = repair_service.repair(
-            download_path, context=OperationContext.system()
-        )
+        cleaned_count = repair_service.repair(context=OperationContext.system())
         logger.info(f"修复完成：清理 {cleaned_count} 条孤儿记录")
     except Exception as error:
         logger.error(f"修复失败: {error}")

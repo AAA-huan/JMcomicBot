@@ -5,7 +5,7 @@ from typing import List, Optional
 
 import os
 
-from sqlalchemy import select
+from sqlalchemy import func, select
 
 from src.database.models import BackupRecord, utc_now
 from src.database.repositories._base import BaseRepository
@@ -50,6 +50,24 @@ class BackupRepository(BaseRepository):
                 .order_by(BackupRecord.created_at, BackupRecord.id)
             )
             return list(session.scalars(statement).all())
+
+    def count(self, status: Optional[str] = None) -> int:
+        """统计备份记录数量，可按状态过滤。"""
+        if status is not None and status not in _BACKUP_STATUSES:
+            raise ValueError(f"不支持的备份状态: {status}")
+        statement = select(func.count()).select_from(BackupRecord)
+        if status is not None:
+            statement = statement.where(BackupRecord.status == status)
+        with self._get_session() as session:
+            return int(session.scalar(statement) or 0)
+
+    def exists_relative_path(self, relative_path: str) -> bool:
+        """判断相对路径是否已登记，用于防重复创建。"""
+        with self._get_session() as session:
+            statement = select(BackupRecord.id).where(
+                BackupRecord.relative_path == relative_path
+            )
+            return session.scalar(statement) is not None
 
     def create(
         self,

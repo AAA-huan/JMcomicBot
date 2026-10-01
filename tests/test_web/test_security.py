@@ -1,58 +1,13 @@
 """Web API 错误格式、安全中间件和静态托管测试。"""
 
-from argon2 import PasswordHasher
 from starlette.testclient import TestClient
 
-from src.database.models import utc_now
-from src.database.repositories import (
-    AuditEventRepository,
-    MangaRepository,
-    MangaTagRepository,
-    OperationTaskRepository,
-    WebAdminRepository,
-    WebSessionRepository,
-)
-from src.service.query_service import MangaQueryService, TaskQueryService
-from src.service.system_service import SystemService
-from src.service.web_auth_service import WebAuthService
-from src.web.app import create_web_app
-from src.web.dependencies import WebDependencies
-
-PASSWORD = "correct-horse-battery-staple"
+from tests.test_web.support import PASSWORD, create_client_for
 
 
 def _create_client(db_manager) -> TestClient:
-    manga_repository = MangaRepository(db_manager, download_root=db_manager.db_dir)
-    dependencies = WebDependencies(
-        auth_service=WebAuthService(
-            WebAdminRepository(db_manager),
-            WebSessionRepository(db_manager),
-            AuditEventRepository(db_manager),
-            session_hours=24,
-            password_hasher=PasswordHasher(
-                time_cost=1,
-                memory_cost=8192,
-                parallelism=1,
-            ),
-        ),
-        manga_query_service=MangaQueryService(
-            manga_repository, MangaTagRepository(db_manager)
-        ),
-        task_query_service=TaskQueryService(OperationTaskRepository(db_manager)),
-        system_service=SystemService(
-            version="test-version",
-            started_at=utc_now(),
-            manga_repository=manga_repository,
-            connection_provider=lambda: False,
-            download_queue_provider=lambda: {},
-            send_queue_provider=lambda: {},
-        ),
-    )
-    return TestClient(
-        create_web_app(dependencies),
-        client=("127.0.0.1", 50000),
-        headers={"Host": "127.0.0.1"},
-    )
+    client, _context = create_client_for(db_manager)
+    return client
 
 
 def test_errors_use_stable_format_and_request_id(db_manager) -> None:

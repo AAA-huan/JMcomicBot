@@ -29,38 +29,36 @@ class RepairService:
     统一记录（library.repair_*）。
     """
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         manga_repo: MangaRepository,
         tag_repo: MangaTagRepository,
         scan_record_repo: ScanRecordRepository,
         operation_task_service: TaskService,
+        download_root: str,
     ) -> None:
         self.manga_repo = manga_repo
         self.tag_repo = tag_repo
         self.scan_record_repo = scan_record_repo
         self.operation_task_service = operation_task_service
+        self.download_root = download_root
 
-    def preview(self, download_path: str) -> RepairDiff:
+    def preview(self) -> RepairDiff:
         """扫描数据库与磁盘差异，返回待修复清单且不写入任何数据。"""
-        disk_ids = self._scan_disk_ids(download_path)
+        disk_ids = self._scan_disk_ids(self.download_root)
         db_ids = {manga.id for manga in self.manga_repo.get_all()}
         return RepairDiff(
             orphan_manga_ids=tuple(sorted(db_ids - disk_ids)),
             orphan_tag_names=tuple(self.tag_repo.list_orphan_tags()),
         )
 
-    def repair(
-        self,
-        download_path: str,
-        context: Optional[OperationContext] = None,
-    ) -> int:
+    def repair(self, context: Optional[OperationContext] = None) -> int:
         """执行孤儿清理，返回处理的孤儿数量。"""
         operation_context = context or OperationContext.system()
         task = self.operation_task_service.create("repair", operation_context)
         self.operation_task_service.start(task.id, "repairing")
         try:
-            diff = self.preview(download_path)
+            diff = self.preview()
             for manga_id in diff.orphan_manga_ids:
                 self.manga_repo.mark_manga_missing(manga_id)
             cleaned_tags = self.tag_repo.delete_orphan_tags()

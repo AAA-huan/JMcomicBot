@@ -7,6 +7,7 @@ from src.service.results import (
     DownloadCancellationResult,
     DownloadRequestItem,
     DownloadRequestResult,
+    TaskCancellationResult,
     TaskResult,
 )
 
@@ -68,6 +69,14 @@ class DownloadService(Protocol):
         """校验、去重并请求下载。"""
         raise NotImplementedError
 
+    def cancel_task(self, task_id: str) -> TaskCancellationResult:
+        """取消尚未开始的下载任务。"""
+        raise NotImplementedError
+
+    def cancel_queued_tasks(self) -> int:
+        """取消全部尚未开始的下载任务，返回取消数量。"""
+        raise NotImplementedError
+
 
 class TaskService(Protocol):
     """持久化操作任务的应用服务接口。"""
@@ -117,6 +126,18 @@ class TaskService(Protocol):
 
     def cancel(self, task_id: str) -> TaskResult:
         """取消尚未开始的任务。"""
+        raise NotImplementedError
+
+    def get(self, task_id: str) -> Optional[TaskResult]:
+        """按任务 ID 返回任务快照，不存在时返回 None。"""
+        raise NotImplementedError
+
+    def find_active_download(self, manga_id: str) -> Optional[TaskResult]:
+        """查找同漫画尚未结束的下载任务。"""
+        raise NotImplementedError
+
+    def list_active_downloads(self) -> List[TaskResult]:
+        """列出全部尚未结束的下载任务（queued/running）。"""
         raise NotImplementedError
 
     def recover_interrupted(self) -> int:

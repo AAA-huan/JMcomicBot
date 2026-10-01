@@ -1,13 +1,36 @@
-"""权限管理应用服务，统一四类名单的读写与审计。"""
+"""权限管理应用服务，统一四类名单的读写、缓存展示与审计。"""
 
+from dataclasses import dataclass
+from datetime import datetime
 from typing import Dict, Optional, Tuple
 
-from src.database.repositories import AuditEventRepository
+from src.database.models import GroupInfo, UserInfo
+from src.database.repositories import AuditEventRepository, UserGroupRepository
 from src.permission.manager import PermissionManager
 from src.service.operation_context import OperationContext
 
 # 审计目标前缀：权限名单记录以 permission 为 target_type
 _TARGET_TYPE = "permission"
+# 缓存展示的默认上限，避免一次返回过多历史身份
+DEFAULT_IDENTITY_LIMIT = 200
+
+
+@dataclass(frozen=True)
+class CachedUser:
+    """已缓存的 QQ 用户公开信息。"""
+
+    id: str
+    nickname: str
+    last_seen_at: datetime
+
+
+@dataclass(frozen=True)
+class CachedGroup:
+    """已缓存的 QQ 群公开信息。"""
+
+    id: str
+    group_name: str
+    last_seen_at: datetime
 
 
 class PermissionService:
@@ -17,9 +40,11 @@ class PermissionService:
         self,
         permission_manager: PermissionManager,
         audit_repository: AuditEventRepository,
+        user_group_repository: UserGroupRepository,
     ) -> None:
         self.permission_manager = permission_manager
         self.audit_repository = audit_repository
+        self.user_group_repository = user_group_repository
 
     def list(self) -> Dict[str, Tuple[str, ...]]:
         """返回四类名单的当前内存快照。"""
@@ -60,6 +85,20 @@ class PermissionService:
             self._record_change(normalized_scope, normalized_value, "removed", context)
         return changed
 
+    def list_cached_users(
+        self, limit: int = DEFAULT_IDENTITY_LIMIT
+    ) -> Tuple[CachedUser, ...]:
+        """按最近活跃时间返回已缓存的 QQ 用户。"""
+        users = self.user_group_repository.list_users(limit)
+        return tuple(self._to_cached_user(user) for user in users)
+
+    def list_cached_groups(
+        self, limit: int = DEFAULT_IDENTITY_LIMIT
+    ) -> Tuple[CachedGroup, ...]:
+        """按最近活跃时间返回已缓存的 QQ 群。"""
+        groups = self.user_group_repository.list_groups(limit)
+        return tuple(self._to_cached_group(group) for group in groups)
+
     def _record_change(
         self,
         scope: str,
@@ -79,6 +118,18 @@ class PermissionService:
             target_type=_TARGET_TYPE,
             target_id=f"{scope}:{value}",
             metadata={"action": action, "scope": scope},
+        )
+
+    @staticmethod
+    def _to_cached_user(user: UserInfo) -> CachedUser:
+        return CachedUser(
+            id=user.id, nickname=user.nickname, last_seen_at=user.last_seen_at
+        )
+
+    @staticmethod
+    def _to_cached_group(group: GroupInfo) -> CachedGroup:
+        return CachedGroup(
+            id=group.id, group_name=group.group_name, last_seen_at=group.last_seen_at
         )
 
     @staticmethod
