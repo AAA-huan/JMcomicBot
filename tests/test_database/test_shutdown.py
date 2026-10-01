@@ -85,13 +85,23 @@ def test_shutdown_request_unblocks_main_loop(db_manager) -> None:
     bot.web_server = None
     bot.connect_websocket = lambda: None
     bot.start_reconnect_manager = lambda: None
-    runner = threading.Thread(target=bot.run)
+    bot.start_cleanup_scheduler = lambda: None
+    run_errors: List[BaseException] = []
+
+    def run_bot() -> None:
+        try:
+            bot.run()
+        except BaseException as error:  # pylint: disable=broad-exception-caught
+            run_errors.append(error)
+
+    runner = threading.Thread(target=run_bot)
     runner.start()
 
     bot.request_shutdown("测试关闭")
     runner.join(timeout=0.5)
 
     assert not runner.is_alive()
+    assert run_errors == []
 
 
 def test_shutdown_request_records_audit(db_manager) -> None:
@@ -143,6 +153,8 @@ def test_bot_close_is_idempotent_and_continues_after_error() -> None:
     bot._shutdown_event = threading.Event()
     bot._close_lock = threading.Lock()
     bot._resources_closed = False
+    bot._cleanup_thread = None
+    bot._cleanup_stop_event = threading.Event()
     bot.web_server = SimpleNamespace(stop=lambda: calls.append("web") or True)
     bot.ws_client = SimpleNamespace(close=fail_websocket)
     bot.message_manager = SimpleNamespace(stop=lambda: calls.append("message") or True)
@@ -156,3 +168,22 @@ def test_bot_close_is_idempotent_and_continues_after_error() -> None:
 
     assert calls == ["web", "websocket", "message", "download", "database"]
     assert bot._shutdown_event.is_set()
+
+
+def test_run_cleanup_once_cleans_sessions_and_swallows_errors() -> None:
+    """单次清理应同时清理过期会话，且异常只记录不抛出"""
+    calls: List[str] = []
+    bot = object.__new__(MangaBot)
+    bot.cleanup_service = SimpleNamespace(cleanup=lambda: calls.append("cleanup") or 3)
+    bot.web_auth_service = SimpleNamespace(
+        cleanup_expired_sessions=lambda: calls.append("sessions") or 2
+    )
+
+    bot._run_cleanup_once()
+    assert calls == ["cleanup", "sessions"]
+
+    def fail_cleanup() -> int:
+        raise RuntimeError("清理失败")
+
+    bot.cleanup_service = SimpleNamespace(cleanup=fail_cleanup)
+    bot._run_cleanup_once()

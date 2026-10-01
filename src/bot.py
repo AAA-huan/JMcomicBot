@@ -285,12 +285,17 @@ class MangaBot:
     def _cleanup_loop(self) -> None:
         """每日清理循环，由停止事件周期唤醒。"""
         while not self._cleanup_stop_event.wait(24 * 3600):
-            try:
-                cleaned = self.cleanup_service.cleanup()
-                if cleaned:
-                    logger.info(f"过期数据清理完成：共清理 {cleaned} 条")
-            except Exception as error:  # pylint: disable=broad-exception-caught
-                logger.error(f"过期数据清理失败: {error}")
+            self._run_cleanup_once()
+
+    def _run_cleanup_once(self) -> None:
+        """执行一次过期任务、审计与 Web 会话清理；失败仅记录，不中断调度。"""
+        try:
+            self.cleanup_service.cleanup()
+            expired_sessions = self.web_auth_service.cleanup_expired_sessions()
+            if expired_sessions:
+                logger.info(f"已清理过期 Web 会话：{expired_sessions} 个")
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            logger.error(f"过期数据清理失败: {error}")
 
     def run(self) -> None:
         """运行机器人主函数"""
