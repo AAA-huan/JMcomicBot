@@ -1,5 +1,6 @@
 """应用服务层，协调文件系统、仓储和跨表业务流程。"""
 
+from src.service.cleanup_service import CleanupService
 from src.service.contracts import DownloadService, TaskService
 from src.service.database_maintenance_service import DatabaseMaintenanceService
 from src.service.download_service import DownloadQueueService
@@ -10,6 +11,7 @@ from src.service.results import BackupResult, DownloadCancellationResult, TaskRe
 
 __all__ = [
     "BackupResult",
+    "CleanupService",
     "DatabaseMaintenanceService",
     "DownloadCancellationResult",
     "DownloadQueueService",

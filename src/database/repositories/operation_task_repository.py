@@ -1,11 +1,12 @@
 """持久化操作任务与任务事件仓储。"""
 
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
 
 import json
 
-from sqlalchemy import func, select, update
+from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import selectinload
 
 from src.database.models import OperationTask, TaskEvent, utc_now
@@ -208,6 +209,30 @@ class OperationTaskRepository(BaseRepository):
                 update(OperationTask)
                 .where(OperationTask.status == "running")
                 .values(status="interrupted", updated_at=now, finished_at=now)
+            )
+            session.commit()
+            return result.rowcount or 0
+
+    def delete_expired(self, now: datetime, retention_days: int) -> int:
+        """删除已完成超过保留期且处于终态的任务，级联删除任务事件。
+
+        queued/running 任务永不清理；interrupted 按失败任务处理。
+
+        Args:
+            now: 当前时间
+            retention_days: 保留天数
+
+        Returns:
+            int: 删除的任务数量
+        """
+        cutoff = now - timedelta(days=retention_days)
+        terminal_statuses = {"succeeded", "failed", "cancelled", "interrupted"}
+        with self._get_session() as session:
+            result = session.execute(
+                delete(OperationTask).where(
+                    OperationTask.status.in_(terminal_statuses),
+                    OperationTask.finished_at < cutoff,
+                )
             )
             session.commit()
             return result.rowcount or 0

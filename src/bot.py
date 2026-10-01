@@ -29,7 +29,7 @@ from src.logging.logger_config import logger
 from src.message.manager import MessageManager
 from src.permission.manager import PermissionManager
 from src.platform.compatibility import PlatformChecker
-from src.service import DownloadQueueService, OperationTaskService
+from src.service import CleanupService, DownloadQueueService, OperationTaskService
 from src.service.query_service import MangaQueryService, TaskQueryService
 from src.service.system_service import SystemService
 from src.service.web_auth_service import WebAuthService
@@ -89,6 +89,13 @@ class MangaBot:
         interrupted_count = self.operation_task_service.recover_interrupted()
         if interrupted_count:
             logger.warning(f"启动时已中断 {interrupted_count} 个遗留运行任务")
+
+        self.cleanup_service = CleanupService(
+            self.operation_task_repo,
+            self.audit_event_repo,
+        )
+        self._cleanup_thread: Optional[threading.Thread] = None
+        self._cleanup_stop_event: threading.Event = threading.Event()
 
         # 挂载名称缓存持久化仓储
         NameCache.get_instance().attach_user_group_repo(self.user_group_repo)
@@ -250,6 +257,41 @@ class MangaBot:
         """启动WebSocket重连管理线程"""
         self.ws_client.start_reconnect_manager()
 
+    def start_cleanup_scheduler(self) -> None:
+        """启动每日过期数据清理线程（幂等）。"""
+        if self._cleanup_thread is not None and self._cleanup_thread.is_alive():
+            return
+        self._cleanup_stop_event.clear()
+        self._cleanup_thread = threading.Thread(
+            target=self._cleanup_loop,
+            daemon=True,
+            name="cleanup-retention",
+        )
+        self._cleanup_thread.start()
+        logger.info("过期数据清理线程已启动（每天一次）")
+
+    def stop_cleanup_scheduler(self, timeout: float = 1.0) -> bool:
+        """停止清理线程并立即唤醒其等待。"""
+        self._cleanup_stop_event.set()
+        if self._cleanup_thread is not None:
+            self._cleanup_thread.join(timeout=timeout)
+            stopped = not self._cleanup_thread.is_alive()
+        else:
+            stopped = True
+        if stopped:
+            logger.info("过期数据清理线程已停止")
+        return stopped
+
+    def _cleanup_loop(self) -> None:
+        """每日清理循环，由停止事件周期唤醒。"""
+        while not self._cleanup_stop_event.wait(24 * 3600):
+            try:
+                cleaned = self.cleanup_service.cleanup()
+                if cleaned:
+                    logger.info(f"过期数据清理完成：共清理 {cleaned} 条")
+            except Exception as error:  # pylint: disable=broad-exception-caught
+                logger.error(f"过期数据清理失败: {error}")
+
     def run(self) -> None:
         """运行机器人主函数"""
         logger.info("JMComic下载机器人启动中...")
@@ -258,6 +300,7 @@ class MangaBot:
             self.web_server.start()
         self.connect_websocket()
         self.start_reconnect_manager()
+        self.start_cleanup_scheduler()
 
         self._shutdown_event.wait()
 
@@ -351,6 +394,7 @@ class MangaBot:
                 ("WebSocket", self.ws_client.close),
                 ("文件发送队列", self.message_manager.stop),
                 ("下载队列", self.download_manager.stop),
+                ("过期清理线程", self.stop_cleanup_scheduler),
                 ("SQLite数据库", self.database_manager.close),
             )
         )

@@ -1,5 +1,6 @@
 """重要操作审计事件仓储。"""
 
+from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select
@@ -9,6 +10,23 @@ from src.database.repositories._base import BaseRepository
 from src.database.repositories.operation_task_repository import serialize_metadata
 
 _AUDIT_SOURCES = {"qq", "web", "system"}
+
+# 长期保留的审计事件前缀：删除、权限、配置、安全、迁移类
+_LONG_RETENTION_PREFIXES = (
+    "manga.deleted",
+    "manga.delete_",
+    "permission.changed",
+    "setting.changed",
+    "bot.shutdown_",
+    "migrat",
+)
+
+
+def _is_long_retention(event_type: str) -> bool:
+    """判断审计事件类型是否应长期保留。"""
+    return any(event_type.startswith(prefix) for prefix in _LONG_RETENTION_PREFIXES)
+
+
 _AUDIT_METADATA_KEYS = {
     "changed_fields",
     "cleaned_count",
@@ -72,3 +90,28 @@ class AuditEventRepository(BaseRepository):
             session.commit()
             session.refresh(event)
             return event
+
+    def delete_expired(self, now: datetime, retention_days: int) -> int:
+        """删除超过保留期的普通审计事件，长期保留类型除外。
+
+        Args:
+            now: 当前时间
+            retention_days: 保留天数
+
+        Returns:
+            int: 删除的审计事件数量
+        """
+        cutoff = now - timedelta(days=retention_days)
+        with self._get_session() as session:
+            candidates = session.scalars(
+                select(AuditEvent).where(AuditEvent.created_at < cutoff)
+            ).all()
+            removed = [
+                event
+                for event in candidates
+                if not _is_long_retention(event.event_type)
+            ]
+            for event in removed:
+                session.delete(event)
+            session.commit()
+            return len(removed)
