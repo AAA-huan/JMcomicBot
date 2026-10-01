@@ -1,1 +1,0 @@
-import{_ as o}from"./PagePlaceholder.vue_vue_type_script_setup_true_lang-CaixdxiQ.js";import{d as e,c as t,o as c}from"./index-DQIdblOD.js";import"./VCard-BU4gu9YK.js";const _=e({__name:"PermissionsPage",setup(n){return(i,r)=>(c(),t(o,{title:"权限管理",description:"群白名单、私聊白名单、全局黑名单与删除权限用户将在批次 E 实现。",icon:"mdi-account-lock-outline"}))}});export{_ as default};

@@ -1,1 +1,0 @@
-import{_ as e}from"./PagePlaceholder.vue_vue_type_script_setup_true_lang-CaixdxiQ.js";import{d as o,c as t,o as n}from"./index-DQIdblOD.js";import"./VCard-BU4gu9YK.js";const m=o({__name:"SettingsPage",setup(c){return(i,r)=>(n(),t(e,{title:"配置",description:"结构化配置分组展示与即时生效修改将在批次 E 实现，敏感值只显示「已设置」。",icon:"mdi-cog-outline"}))}});export{m as default};

@@ -1,1 +1,0 @@
-import{_ as e}from"./PagePlaceholder.vue_vue_type_script_setup_true_lang-CaixdxiQ.js";import{d as o,c as a,o as t}from"./index-DQIdblOD.js";import"./VCard-BU4gu9YK.js";const _=o({__name:"MangaDetailPage",setup(n){return(i,r)=>(t(),a(e,{title:"漫画详情",description:"元数据、关联 PDF 与文件状态将在批次 E 实现，PDF 阅读器属于阶段 3。",icon:"mdi-book-open-page-variant-outline"}))}});export{_ as default};

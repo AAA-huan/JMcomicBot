@@ -4,6 +4,7 @@ import { useDisplay } from 'vuetify'
 import { useRoute, useRouter } from 'vue-router'
 
 import { EventClient } from '@/api/events'
+import { emitEvent } from '@/api/eventStream'
 import { useAuthStore } from '@/stores/auth'
 import { useSystemStore } from '@/stores/system'
 import { useThemeStore } from '@/stores/theme'
@@ -61,7 +62,10 @@ const themeLabel = (): string =>
 onMounted(async () => {
   await system.refresh()
   eventClient = new EventClient({
-    onEvent: (event) => system.applyEvent(event),
+    onEvent: (event) => {
+      system.applyEvent(event)
+      emitEvent(event)
+    },
     onOpen: () => {
       // 重连成功必须重新拉取完整 REST 快照
       system.eventsConnected = true

@@ -37,7 +37,14 @@ export function patchManga(mangaId: string, fields: MangaMetadataPatch): Promise
   })
 }
 
-export function deleteManga(mangaId: string): Promise<{ deleted: boolean }> {
+export interface MangaDeleteResult {
+  task_id: string
+  manga_id: string
+  deleted: boolean
+  deleted_file_count: number
+}
+
+export function deleteManga(mangaId: string): Promise<MangaDeleteResult> {
   return apiRequest(`/mangas/${encodeURIComponent(mangaId)}`, { method: 'DELETE' })
 }
 

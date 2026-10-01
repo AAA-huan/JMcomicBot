@@ -1,1 +1,0 @@
-import{_ as o}from"./PagePlaceholder.vue_vue_type_script_setup_true_lang-CaixdxiQ.js";import{d as e,c as r,o as t}from"./index-DQIdblOD.js";import"./VCard-BU4gu9YK.js";const m=e({__name:"LibraryPage",setup(a){return(c,i)=>(t(),r(o,{title:"漫画库",description:"搜索、筛选、分页、元数据修改与批量删除将在批次 E 实现。",icon:"mdi-bookshelf"}))}});export{m as default};

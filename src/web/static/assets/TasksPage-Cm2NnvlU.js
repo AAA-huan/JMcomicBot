@@ -1,1 +1,0 @@
-import{_ as o}from"./PagePlaceholder.vue_vue_type_script_setup_true_lang-CaixdxiQ.js";import{d as e,c as t,o as a}from"./index-DQIdblOD.js";import"./VCard-BU4gu9YK.js";const m=e({__name:"TasksPage",setup(n){return(r,s)=>(a(),t(o,{title:"下载任务",description:"任务列表、进度推送、取消排队任务与新建下载将在批次 E 实现。",icon:"mdi-download-outline"}))}});export{m as default};

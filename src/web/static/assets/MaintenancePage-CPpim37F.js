@@ -1,1 +1,0 @@
-import{_ as e}from"./PagePlaceholder.vue_vue_type_script_setup_true_lang-CaixdxiQ.js";import{d as o,c as t,o as n}from"./index-DQIdblOD.js";import"./VCard-BU4gu9YK.js";const m=o({__name:"MaintenancePage",setup(a){return(c,r)=>(n(),t(e,{title:"维护",description:"扫描、修复与一致性备份将在批次 E 实现，备份下载属于批次 F。",icon:"mdi-tools"}))}});export{m as default};

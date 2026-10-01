@@ -1,9 +1,22 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue'
+import { computed, onMounted, ref } from 'vue'
 
 import { errorMessage } from '@/api/client'
+import { useEventSubscription } from '@/api/eventStream'
 import { reconnectNapcat, requestShutdown } from '@/api/system'
+import { listTasks } from '@/api/tasks'
+import ConfirmDialog from '@/components/ConfirmDialog.vue'
+import EmptyState from '@/components/EmptyState.vue'
 import { useSystemStore } from '@/stores/system'
+import type { OperationTask } from '@/types/api'
+import { formatDateTime, formatUptime } from '@/utils/format'
+import {
+  colorOf,
+  labelOf,
+  TASK_STATUS_COLORS,
+  TASK_STATUS_LABELS,
+  TASK_TYPE_LABELS,
+} from '@/utils/labels'
 
 const system = useSystemStore()
 
@@ -13,19 +26,27 @@ const reconnecting = ref(false)
 const shutdownDialog = ref(false)
 const shuttingDown = ref(false)
 
+const recentTasks = ref<OperationTask[]>([])
+const tasksLoading = ref(false)
+const tasksError = ref('')
+
 const status = computed(() => system.status)
 
-function formatUptime(seconds: number): string {
-  const days = Math.floor(seconds / 86400)
-  const hours = Math.floor((seconds % 86400) / 3600)
-  const minutes = Math.floor((seconds % 3600) / 60)
-  if (days > 0) return `${days} 天 ${hours} 小时`
-  if (hours > 0) return `${hours} 小时 ${minutes} 分钟`
-  return `${minutes} 分钟`
+async function loadRecentTasks(): Promise<void> {
+  tasksLoading.value = true
+  tasksError.value = ''
+  try {
+    const result = await listTasks({ page: 1, page_size: 5 })
+    recentTasks.value = result.items
+  } catch (err) {
+    tasksError.value = errorMessage(err)
+  } finally {
+    tasksLoading.value = false
+  }
 }
 
 async function handleRefresh(): Promise<void> {
-  await system.refresh()
+  await Promise.all([system.refresh(), loadRecentTasks()])
 }
 
 async function handleReconnect(): Promise<void> {
@@ -57,6 +78,21 @@ async function confirmShutdown(): Promise<void> {
     shuttingDown.value = false
   }
 }
+
+// 任务事件到达后防抖刷新最近任务
+let refreshTimer: number | null = null
+useEventSubscription((event) => {
+  if (event.type !== 'task.updated') return
+  if (refreshTimer !== null) window.clearTimeout(refreshTimer)
+  refreshTimer = window.setTimeout(() => {
+    refreshTimer = null
+    void loadRecentTasks()
+  }, 600)
+})
+
+onMounted(() => {
+  void loadRecentTasks()
+})
 </script>
 
 <template>
@@ -75,7 +111,9 @@ async function confirmShutdown(): Promise<void> {
       type="error"
       variant="tonal"
       density="comfortable"
+      closable
       class="mb-4"
+      @click:close="actionError = ''"
     >
       {{ actionError }}
     </v-alert>
@@ -84,7 +122,9 @@ async function confirmShutdown(): Promise<void> {
       type="success"
       variant="tonal"
       density="comfortable"
+      closable
       class="mb-4"
+      @click:close="notice = ''"
     >
       {{ notice }}
     </v-alert>
@@ -106,6 +146,9 @@ async function confirmShutdown(): Promise<void> {
       >
         重连 NapCat
       </v-btn>
+      <v-btn variant="tonal" prepend-icon="mdi-bookshelf" to="/library">漫画库</v-btn>
+      <v-btn variant="tonal" prepend-icon="mdi-download-outline" to="/tasks">下载任务</v-btn>
+      <v-spacer />
       <v-btn
         variant="tonal"
         color="error"
@@ -146,40 +189,91 @@ async function confirmShutdown(): Promise<void> {
           >
             {{ status?.napcat_connected ? '已连接' : '未连接' }}
           </div>
+          <div class="text-caption text-medium-emphasis">
+            实时推送：{{ system.eventsConnected ? '已连接' : '已断开（自动重连中）' }}
+          </div>
         </v-card>
       </v-col>
       <v-col cols="12" sm="6" md="4">
         <v-card class="pa-4 h-100">
           <div class="text-caption text-medium-emphasis">下载队列</div>
-          <div class="text-h6">{{ status?.download_queue.queue_size ?? '—' }} 个待处理</div>
+          <div class="text-h6">
+            {{ status?.download_queue.queue_size ?? '—' }} 个待处理
+          </div>
         </v-card>
       </v-col>
       <v-col cols="12" sm="6" md="4">
         <v-card class="pa-4 h-100">
           <div class="text-caption text-medium-emphasis">发送队列</div>
-          <div class="text-h6">{{ status?.send_queue.queue_size ?? '—' }} 个待处理</div>
+          <div class="text-h6">
+            {{ status?.send_queue.queue_size ?? '—' }} 个待处理
+          </div>
         </v-card>
       </v-col>
     </v-row>
 
-    <v-dialog v-model="shutdownDialog" max-width="420">
-      <v-card>
-        <v-card-title>确认安全关闭？</v-card-title>
-        <v-card-text>
-          机器人将停止接收新请求并安全关闭 WebUI 与后台队列。关闭后需要手动重新启动。
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn variant="text" @click="shutdownDialog = false">取消</v-btn>
-          <v-btn
-            color="error"
-            :loading="shuttingDown"
-            @click="confirmShutdown"
-          >
-            确认关闭
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
+    <v-card class="mt-1">
+      <v-card-title class="text-subtitle-1 d-flex align-center">
+        最近任务
+        <v-spacer />
+        <v-btn
+          size="small"
+          variant="text"
+          prepend-icon="mdi-refresh"
+          :loading="tasksLoading"
+          @click="loadRecentTasks"
+        >
+          刷新
+        </v-btn>
+      </v-card-title>
+      <v-divider />
+      <v-alert
+        v-if="tasksError"
+        type="error"
+        variant="tonal"
+        density="comfortable"
+        class="ma-3"
+      >
+        {{ tasksError }}
+      </v-alert>
+      <EmptyState
+        v-else-if="!tasksLoading && recentTasks.length === 0"
+        icon="mdi-clipboard-text-outline"
+        title="还没有任务记录"
+        description="在漫画库发起下载后，任务进度会显示在这里。"
+      />
+      <v-list v-else lines="two">
+        <v-list-item
+          v-for="task in recentTasks"
+          :key="task.id"
+          :to="{ name: 'tasks', query: { manga_id: task.manga_id ?? undefined } }"
+        >
+          <v-list-item-title class="text-wrap">
+            {{ labelOf(TASK_TYPE_LABELS, task.task_type) }} · {{ task.summary }}
+          </v-list-item-title>
+          <v-list-item-subtitle class="text-wrap">
+            {{ formatDateTime(task.updated_at) }}
+          </v-list-item-subtitle>
+          <template #append>
+            <v-chip
+              size="small"
+              variant="tonal"
+              :color="colorOf(TASK_STATUS_COLORS, task.status)"
+            >
+              {{ labelOf(TASK_STATUS_LABELS, task.status) }}
+            </v-chip>
+          </template>
+        </v-list-item>
+      </v-list>
+    </v-card>
+
+    <ConfirmDialog
+      v-model="shutdownDialog"
+      title="确认安全关闭？"
+      text="机器人将停止接收新请求并安全关闭 WebUI 与后台队列。关闭后需要手动重新启动。"
+      confirm-text="确认关闭"
+      :loading="shuttingDown"
+      @confirm="confirmShutdown"
+    />
   </div>
 </template>
