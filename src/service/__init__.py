@@ -6,8 +6,15 @@ from src.service.database_maintenance_service import DatabaseMaintenanceService
 from src.service.download_service import DownloadQueueService
 from src.service.operation_context import OperationContext
 from src.service.operation_task_service import OperationTaskService
+from src.service.reading_progress_service import ReadingProgressService
 from src.service.repair_service import RepairService
-from src.service.results import BackupResult, DownloadCancellationResult, TaskResult
+from src.service.results import (
+    BackupResult,
+    DownloadCancellationResult,
+    TaskResult,
+    VerifyResult,
+)
+from src.service.verify_service import VerifyService
 
 __all__ = [
     "BackupResult",
@@ -18,7 +25,10 @@ __all__ = [
     "DownloadService",
     "OperationContext",
     "OperationTaskService",
+    "ReadingProgressService",
     "RepairService",
     "TaskResult",
     "TaskService",
+    "VerifyResult",
+    "VerifyService",
 ]

@@ -36,3 +36,16 @@ class DownloadCancellationResult:
 
     cancelled_ids: Tuple[str, ...]
     cancelled_count: int
+
+
+@dataclass(frozen=True)
+class VerifyResult:
+    """文件校验任务的汇总结果。"""
+
+    task_id: str
+    file_count: int
+    ready_count: int
+    missing_count: int
+    corrupted_count: int
+    invalid_path_count: int
+    error_count: int

@@ -26,7 +26,9 @@ _LONG_RETENTION_PREFIXES = (
 _AUDIT_METADATA_KEYS = {
     "changed_fields",
     "cleaned_count",
+    "corrupted_count",
     "duration_ms",
+    "failed_count",
     "file_count",
     "missing_count",
     "new_count",

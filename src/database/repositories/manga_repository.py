@@ -2,6 +2,7 @@
 
 # pylint: disable=arguments-differ, too-many-positional-arguments
 
+from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
@@ -322,6 +323,17 @@ class MangaRepository(BaseRepository):
             )
             return list(session.scalars(stmt).all())
 
+    def list_verifiable_files(self) -> List[MangaFile]:
+        """查询参与校验的 PDF 文件记录（排除正在删除或已删除）。"""
+        statuses = ("ready", "missing", "corrupted", "invalid_path")
+        with self._get_session() as session:
+            stmt = (
+                select(MangaFile)
+                .where(MangaFile.status.in_(statuses))
+                .order_by(MangaFile.id)
+            )
+            return list(session.scalars(stmt).all())
+
     def update_file_status(self, file_id: int, status: str) -> bool:
         """更新 PDF 文件状态并返回是否找到目标文件。"""
         if status not in _VALID_FILE_STATUSES:
@@ -333,6 +345,41 @@ class MangaRepository(BaseRepository):
                 return False
             manga_file.status = status
             manga_file.updated_at = utc_now()
+            session.commit()
+            return True
+
+    def apply_file_verification(  # pylint: disable=too-many-arguments
+        self,
+        file_id: int,
+        status: str,
+        file_size_bytes: int,
+        file_mtime: Optional[datetime],
+        sha256: Optional[str],
+        verified_at: Optional[datetime],
+    ) -> bool:
+        """写入单次文件校验结果，返回是否找到目标文件。
+
+        文件读取与哈希必须在调用本方法前完成，事务内不做文件 I/O。
+        """
+        if status not in _VALID_FILE_STATUSES:
+            raise ValueError(f"不支持的文件状态: {status}")
+
+        with self._get_session() as session:
+            manga_file = session.get(MangaFile, file_id)
+            if manga_file is None:
+                return False
+            manga_file.status = status
+            manga_file.file_size_bytes = file_size_bytes
+            manga_file.file_mtime = file_mtime
+            manga_file.sha256 = sha256
+            manga_file.last_verified_at = verified_at
+            manga_file.updated_at = utc_now()
+            # 校验通过且文件恢复时同步恢复漫画状态，避免文件正常但漫画仍标记缺失
+            if status == "ready":
+                manga = session.get(Manga, manga_file.manga_id)
+                if manga is not None and manga.status == "missing_file":
+                    manga.status = "downloaded"
+                    manga.updated_at = utc_now()
             session.commit()
             return True
 

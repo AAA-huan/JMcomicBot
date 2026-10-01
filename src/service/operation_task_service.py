@@ -39,6 +39,11 @@ _AUDIT_EVENT_NAMES: Dict[str, Dict[str, str]] = {
         "succeeded": "library.repair_completed",
         "failed": "library.repair_failed",
     },
+    "verify": {
+        "requested": "library.verify_requested",
+        "succeeded": "library.verify_completed",
+        "failed": "library.verify_failed",
+    },
 }
 
 
