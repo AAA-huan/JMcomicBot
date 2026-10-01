@@ -29,7 +29,15 @@ function mangaFixture(id: string, title: string): Manga {
     downloaded_at: '2026-10-01T00:00:00',
     updated_at: '2026-10-01T00:00:00',
     tags: ['标签'],
-    files: [],
+    files: [
+      {
+        id: Number(id),
+        display_name: `${title}.pdf`,
+        file_size_bytes: 1024,
+        page_count: 10,
+        status: 'ready',
+      },
+    ],
   }
 }
 
@@ -82,6 +90,13 @@ describe('LibraryPage', () => {
     )
     expect(wrapper.text()).toContain('测试漫画')
     expect(wrapper.text()).toContain('共 2 条')
+    // 行内下载按钮指向 PDF 文件接口，而不是重新创建下载任务
+    expect(
+      wrapper.find('a[href="/api/v1/files/100/content"]').exists(),
+    ).toBe(true)
+    expect(
+      wrapper.find('a[href="/api/v1/files/200/content"]').exists(),
+    ).toBe(true)
   })
 
   it('加载失败展示中文错误与重试入口', async () => {

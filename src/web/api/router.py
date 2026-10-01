@@ -21,6 +21,7 @@ from src.service.web_auth_service import (
     AuthenticatedSession,
 )
 from src.web.api.common import SESSION_COOKIE_NAME, build_authenticate
+from src.web.api.file_routes import create_file_router
 from src.web.api.maintenance_routes import create_maintenance_router
 from src.web.api.manga_routes import create_manga_router
 from src.web.api.permission_routes import create_permission_router
@@ -162,6 +163,7 @@ def create_api_router(  # pylint: disable=too-many-locals
 
     router.include_router(create_system_router(dependencies, authenticate))
     router.include_router(create_manga_router(dependencies, authenticate))
+    router.include_router(create_file_router(dependencies, authenticate))
     router.include_router(create_task_router(dependencies, authenticate))
     router.include_router(create_permission_router(dependencies, authenticate))
     router.include_router(create_setting_router(dependencies, authenticate))

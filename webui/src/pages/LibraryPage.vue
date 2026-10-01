@@ -119,6 +119,10 @@ function updateQuery(patch: Record<string, string | number | undefined>): void {
   void router.push({ query })
 }
 
+function fileDownloadUrl(fileId: number): string {
+  return `/api/v1/files/${fileId}/content`
+}
+
 function applySearch(): void {
   updateQuery({ search: filters.search || undefined, page: 1 })
 }
@@ -422,11 +426,20 @@ watch(
               <td class="text-no-wrap">{{ formatDateTime(manga.downloaded_at) }}</td>
               <td class="text-no-wrap">
                 <v-btn
-                  icon="mdi-download"
+                  v-if="manga.files.length > 0"
+                  icon="mdi-file-download-outline"
                   size="small"
                   variant="text"
-                  aria-label="请求下载"
-                  @click="requestDownloadIds([manga.id])"
+                  :href="fileDownloadUrl(manga.files[0].id)"
+                  aria-label="下载 PDF"
+                />
+                <v-btn
+                  v-else
+                  icon="mdi-file-download-outline"
+                  size="small"
+                  variant="text"
+                  disabled
+                  aria-label="没有可下载的文件"
                 />
                 <v-btn
                   icon="mdi-delete"
@@ -486,11 +499,20 @@ watch(
                   aria-label="查看详情"
                 />
                 <v-btn
-                  icon="mdi-download"
+                  v-if="manga.files.length > 0"
+                  icon="mdi-file-download-outline"
                   size="small"
                   variant="text"
-                  aria-label="请求下载"
-                  @click="requestDownloadIds([manga.id])"
+                  :href="fileDownloadUrl(manga.files[0].id)"
+                  aria-label="下载 PDF"
+                />
+                <v-btn
+                  v-else
+                  icon="mdi-file-download-outline"
+                  size="small"
+                  variant="text"
+                  disabled
+                  aria-label="没有可下载的文件"
                 />
                 <v-btn
                   icon="mdi-delete"

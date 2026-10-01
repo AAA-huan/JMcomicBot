@@ -84,6 +84,10 @@ async function submitEdit(): Promise<void> {
   }
 }
 
+function fileDownloadUrl(fileId: number): string {
+  return `/api/v1/files/${fileId}/content`
+}
+
 async function handleDownload(): Promise<void> {
   actionError.value = ''
   notice.value = ''
@@ -266,6 +270,7 @@ onMounted(load)
                 <th>页数</th>
                 <th>大小</th>
                 <th>状态</th>
+                <th class="text-no-wrap">操作</th>
               </tr>
             </thead>
             <tbody>
@@ -282,6 +287,24 @@ onMounted(load)
                     {{ labelOf(FILE_STATUS_LABELS, file.status) }}
                   </v-chip>
                 </td>
+                <td class="text-no-wrap">
+                  <v-btn
+                    v-if="file.status === 'ready'"
+                    icon="mdi-file-download-outline"
+                    size="small"
+                    variant="text"
+                    :href="fileDownloadUrl(file.id)"
+                    aria-label="下载 PDF"
+                  />
+                  <v-btn
+                    v-else
+                    icon="mdi-file-download-outline"
+                    size="small"
+                    variant="text"
+                    disabled
+                    aria-label="文件不可下载"
+                  />
+                </td>
               </tr>
             </tbody>
           </v-table>
@@ -294,20 +317,38 @@ onMounted(load)
               {{ file.page_count }} 页 · {{ formatBytes(file.file_size_bytes) }}
             </v-list-item-subtitle>
             <template #append>
-              <v-chip
-                size="small"
-                variant="tonal"
-                :color="colorOf(FILE_STATUS_COLORS, file.status)"
-              >
-                {{ labelOf(FILE_STATUS_LABELS, file.status) }}
-              </v-chip>
+              <div class="d-flex align-center ga-1">
+                <v-chip
+                  size="small"
+                  variant="tonal"
+                  :color="colorOf(FILE_STATUS_COLORS, file.status)"
+                >
+                  {{ labelOf(FILE_STATUS_LABELS, file.status) }}
+                </v-chip>
+                <v-btn
+                  v-if="file.status === 'ready'"
+                  icon="mdi-file-download-outline"
+                  size="small"
+                  variant="text"
+                  :href="fileDownloadUrl(file.id)"
+                  aria-label="下载 PDF"
+                />
+                <v-btn
+                  v-else
+                  icon="mdi-file-download-outline"
+                  size="small"
+                  variant="text"
+                  disabled
+                  aria-label="文件不可下载"
+                />
+              </div>
             </template>
           </v-list-item>
         </v-list>
 
         <v-divider />
         <v-card-text class="text-caption text-medium-emphasis">
-          PDF 在线阅读与阅读进度将在阶段 3 提供。
+          可下载 PDF 到本地；在线阅读与阅读进度将在阶段 3 提供。
         </v-card-text>
       </v-card>
     </template>

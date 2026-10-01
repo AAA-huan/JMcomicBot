@@ -334,6 +334,18 @@ class MangaRepository(BaseRepository):
             session.refresh(manga_file)
             return manga_file
 
+    def get_file(self, file_id: int) -> Optional[MangaFile]:
+        """按主键查询 PDF 文件记录
+
+        Args:
+            file_id: 文件记录ID
+
+        Returns:
+            Optional[MangaFile]: 文件记录，不存在时返回 None
+        """
+        with self._get_session() as session:
+            return session.get(MangaFile, file_id)
+
     def list_files(self, manga_id: str) -> List[MangaFile]:
         """查询指定漫画的 PDF 文件记录列表
 

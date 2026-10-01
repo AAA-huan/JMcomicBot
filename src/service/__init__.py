@@ -9,7 +9,7 @@ from src.service.database_maintenance_service import (
     DatabaseMaintenanceService,
 )
 from src.service.download_service import DownloadQueueService
-from src.service.manga_service import MangaService
+from src.service.manga_service import MangaFileDownloadError, MangaService
 from src.service.operation_context import OperationContext
 from src.service.operation_task_service import OperationTaskService
 from src.service.permission_service import (
@@ -47,6 +47,7 @@ __all__ = [
     "DownloadService",
     "MangaDeleteOutcome",
     "MangaDeleteResult",
+    "MangaFileDownloadError",
     "MangaService",
     "OperationContext",
     "OperationTaskService",

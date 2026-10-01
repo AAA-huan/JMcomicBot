@@ -33,6 +33,15 @@ _DELETE_ERROR_MESSAGES = {
 }
 
 
+class MangaFileDownloadError(Exception):
+    """漫画文件不可下载；error_code 供接口层映射为稳定错误码。"""
+
+    def __init__(self, error_code: str, message: str) -> None:
+        super().__init__(message)
+        self.error_code = error_code
+        self.message = message
+
+
 class MangaService:
     """漫画元数据与删除的应用服务，QQ 命令与 Web API 共用。"""
 
@@ -53,6 +62,28 @@ class MangaService:
         self.download_root = download_root
         self.download_conflict_checker = download_conflict_checker
         self.send_conflict_checker = send_conflict_checker
+
+    def resolve_file_for_download(self, file_id: int) -> tuple[Path, str]:
+        """解析可下载的 PDF 文件路径与建议文件名。
+
+        校验记录存在、相对路径已登记、解析后仍位于下载根目录内、扩展名为
+        .pdf 且是普通文件；路径只来自数据库记录，不接受客户端指定。
+
+        Raises:
+            MangaFileDownloadError: 记录不存在、路径越界、非 PDF 或文件缺失。
+        """
+        manga_file = self.manga_repository.get_file(file_id)
+        if manga_file is None or not manga_file.relative_path:
+            raise MangaFileDownloadError("FILE_NOT_FOUND", "未找到指定文件")
+        root = Path(self.download_root).resolve()
+        candidate = (root / manga_file.relative_path).resolve()
+        if not candidate.is_relative_to(root):
+            raise MangaFileDownloadError("FILE_PATH_INVALID", "文件路径非法")
+        if candidate.suffix.lower() != ".pdf":
+            raise MangaFileDownloadError("FILE_TYPE_INVALID", "只允许下载 PDF 文件")
+        if not candidate.is_file():
+            raise MangaFileDownloadError("FILE_MISSING", "文件不存在")
+        return candidate, manga_file.display_name or candidate.name
 
     def patch_metadata(
         self,
