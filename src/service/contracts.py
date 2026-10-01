@@ -71,6 +71,7 @@ class TaskService(Protocol):
         error_code: str,
         error_message: str,
         context: Optional[OperationContext] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> TaskResult:
         """标记任务失败。"""
         raise NotImplementedError

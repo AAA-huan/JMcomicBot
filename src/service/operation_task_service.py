@@ -171,6 +171,7 @@ class OperationTaskService:
         error_code: str,
         error_message: str,
         context: Optional[OperationContext] = None,
+        metadata: Optional[Dict[str, Any]] = None,
     ) -> TaskResult:
         """以脱敏错误摘要结束任务。"""
         task = self.task_repo.update_state(
@@ -180,7 +181,9 @@ class OperationTaskService:
             error_code=error_code,
             error_message=error_message,
         )
-        self.event_repo.append(task_id, f"{task.task_type}.failed", "failed")
+        self.event_repo.append(
+            task_id, f"{task.task_type}.failed", "failed", metadata=metadata
+        )
         self.audit_repo.record(
             event_type=_audit_event_name(task.task_type, "failed"),
             source=task.source,

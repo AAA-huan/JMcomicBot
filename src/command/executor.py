@@ -1208,9 +1208,21 @@ class CommandExecutor:
             succeeded_count = sum(
                 1 for _manga_id, succeeded, _message in results if succeeded
             )
-            self.operation_task_service.succeed(
-                operation_task_id, metadata={"file_count": succeeded_count}
-            )
+            failed_count = len(results) - succeeded_count
+            if failed_count == 0:
+                self.operation_task_service.succeed(
+                    operation_task_id, metadata={"file_count": succeeded_count}
+                )
+            else:
+                self.operation_task_service.fail(
+                    operation_task_id,
+                    "batch_delete_partial_failure",
+                    f"{failed_count} 个漫画删除失败",
+                    metadata={
+                        "succeeded_count": succeeded_count,
+                        "failed_count": failed_count,
+                    },
+                )
 
     def _handle_egg(self, user_id, args, group_id, private):
         """这才是真正的新宿之战，五条老师没有输！！！！！"""

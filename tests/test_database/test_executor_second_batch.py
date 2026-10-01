@@ -3,10 +3,22 @@
 from types import SimpleNamespace
 from typing import Any, Callable, Dict, List, Optional
 
+import pytest
+
 from src.command.executor import CommandExecutor
-from src.database.repositories import MangaRepository, MangaTagRepository
+from src.database.repositories import (
+    AuditEventRepository,
+    MangaRepository,
+    MangaTagRepository,
+    OperationTaskRepository,
+    TaskEventRepository,
+)
 from src.download.manager import DownloadManager
-from src.service import DownloadQueueService
+from src.service import (
+    DownloadQueueService,
+    OperationContext,
+    OperationTaskService,
+)
 
 
 class _PermissionManager:
@@ -84,6 +96,16 @@ def _add_manga(manga_repo: MangaRepository, manga_id: str, chapter_count: int) -
         author="作者",
         chapter_count=chapter_count,
         page_count=100,
+    )
+
+
+@pytest.fixture()
+def operation_task_service(db_manager) -> OperationTaskService:
+    """构造持久化操作任务服务。"""
+    return OperationTaskService(
+        OperationTaskRepository(db_manager),
+        TaskEventRepository(db_manager),
+        AuditEventRepository(db_manager),
     )
 
 
@@ -371,3 +393,45 @@ def test_batch_delete_skips_sending(
     assert pdf_path.exists()
     assert manga_repo.get(manga_id) is not None
     assert "正在发送中" in messages[-1]
+
+
+def test_batch_delete_partial_failure_marks_task_failed(
+    tmp_path,
+    db_manager,
+    manga_repo: MangaRepository,
+    tag_repo: MangaTagRepository,
+    operation_task_service,
+) -> None:
+    """批量删除部分失败时，任务应标记为失败并记录成功数。"""
+    good_id = "350250"
+    busy_id = "350251"
+    for manga_id in (good_id, busy_id):
+        pdf_path = tmp_path / f"{manga_id}-标题(1章).pdf"
+        pdf_path.write_bytes(b"%PDF")
+        _add_manga(manga_repo, manga_id, chapter_count=1)
+        manga_repo.add_file(manga_id, str(pdf_path))
+
+    download_manager = object.__new__(DownloadManager)
+    download_manager.manga_repo = manga_repo
+    download_manager.tag_repo = tag_repo
+    download_manager.queued_tasks = {}
+    download_manager.downloading_mangas = {busy_id: True}
+
+    messages: List[str] = []
+    executor = _build_executor(
+        str(tmp_path),
+        messages,
+        download_manager=download_manager,
+        manga_repo=manga_repo,
+        tag_repo=tag_repo,
+    )
+    executor.operation_task_service = operation_task_service
+
+    executor._delete_batch_mangas("10001", [good_id, busy_id], None, True)
+
+    tasks = OperationTaskRepository(db_manager).list()
+    assert len(tasks) == 1
+    assert tasks[0].status == "failed"
+    assert (tmp_path / f"{good_id}-标题(1章).pdf").exists() is False
+    assert (tmp_path / f"{busy_id}-标题(1章).pdf").exists() is True
+    assert manga_repo.get(busy_id) is not None

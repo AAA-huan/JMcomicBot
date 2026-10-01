@@ -31,9 +31,11 @@ _TASK_STATUS_TRANSITIONS = {
 }
 _TASK_EVENT_METADATA_KEYS = {
     "duration_ms",
+    "failed_count",
     "file_count",
     "page_count",
     "retry_count",
+    "succeeded_count",
 }
 _TASK_SUMMARIES = {
     "download": "下载漫画",
