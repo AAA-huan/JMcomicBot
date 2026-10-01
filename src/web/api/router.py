@@ -16,7 +16,10 @@ from fastapi import (
 )
 from pydantic import BaseModel, Field
 
-from src.service.web_auth_service import AuthenticatedSession
+from src.service.web_auth_service import (
+    MINIMUM_PASSWORD_LENGTH,
+    AuthenticatedSession,
+)
 from src.web.api.common import SESSION_COOKIE_NAME, build_authenticate
 from src.web.api.maintenance_routes import create_maintenance_router
 from src.web.api.manga_routes import create_manga_router
@@ -31,16 +34,16 @@ from src.web.security import CSRF_COOKIE_NAME, LoginRateLimiter
 
 
 class PasswordRequest(BaseModel):
-    """管理员密码请求。"""
+    """管理员密码请求；与 WebAuthService 共用最小长度。"""
 
-    password: str = Field(min_length=12, max_length=1024)
+    password: str = Field(min_length=MINIMUM_PASSWORD_LENGTH, max_length=1024)
 
 
 class PasswordChangeRequest(BaseModel):
     """管理员修改密码请求。"""
 
     old_password: str = Field(min_length=1, max_length=1024)
-    new_password: str = Field(min_length=12, max_length=1024)
+    new_password: str = Field(min_length=MINIMUM_PASSWORD_LENGTH, max_length=1024)
 
 
 def _is_loopback(request: Request) -> bool:
@@ -52,6 +55,7 @@ def create_api_router(  # pylint: disable=too-many-locals
     dependencies: WebDependencies,
     login_rate_limiter: LoginRateLimiter,
     allowed_origins: Set[str],
+    allow_any_host: bool = False,
 ) -> APIRouter:
     """创建绑定既有应用服务的 v1 API 路由。"""
     router = APIRouter(prefix="/api/v1")
@@ -162,5 +166,7 @@ def create_api_router(  # pylint: disable=too-many-locals
     router.include_router(create_permission_router(dependencies, authenticate))
     router.include_router(create_setting_router(dependencies, authenticate))
     router.include_router(create_maintenance_router(dependencies, authenticate))
-    router.include_router(create_events_router(dependencies, allowed_origins))
+    router.include_router(
+        create_events_router(dependencies, allowed_origins, allow_any_host)
+    )
     return router

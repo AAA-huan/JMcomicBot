@@ -16,7 +16,7 @@ from src.database.repositories.web_auth_repository import (
     WebSessionRepository,
 )
 
-MINIMUM_PASSWORD_LENGTH = 12
+MINIMUM_PASSWORD_LENGTH = 6
 
 
 @dataclass(frozen=True)

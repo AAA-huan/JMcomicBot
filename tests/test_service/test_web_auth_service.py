@@ -68,6 +68,15 @@ def test_setup_rejects_duplicate_admin_and_short_password(db_manager) -> None:
         raise AssertionError("重复初始化管理员应被拒绝")
 
 
+def test_setup_accepts_minimum_length_password(db_manager) -> None:
+    """恰好达到最小长度（6 位）的密码应被接受。"""
+    service = _create_service(db_manager)
+
+    service.setup("123456")
+
+    assert service.is_initialized() is True
+
+
 def test_login_rejects_wrong_password(db_manager) -> None:
     service = _create_service(db_manager)
     service.setup("correct-secure-password")

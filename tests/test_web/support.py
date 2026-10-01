@@ -244,12 +244,24 @@ def create_test_client(
     dependencies: WebDependencies,
     host: str = "127.0.0.1",
     status_interval_seconds: float = 2.0,
+    web_host: str = "127.0.0.1",
+    web_port: int = 8000,
+    host_header: str = "127.0.0.1",
 ) -> TestClient:
-    """构造带固定 Host 头的测试客户端。"""
+    """构造带固定 Host 头的测试客户端。
+
+    web_host 用于模拟 WEBUI_HOST 配置（0.0.0.0 表示局域网模式）；
+    host_header 决定请求携带的 Host 头。
+    """
     return TestClient(
-        create_web_app(dependencies, status_interval_seconds=status_interval_seconds),
+        create_web_app(
+            dependencies,
+            web_host=web_host,
+            web_port=web_port,
+            status_interval_seconds=status_interval_seconds,
+        ),
         client=(host, 50000),
-        headers={"Host": "127.0.0.1"},
+        headers={"Host": host_header},
     )
 
 

@@ -16,8 +16,8 @@ const error = ref('')
 
 async function submit(): Promise<void> {
   error.value = ''
-  if (password.value.length < 12) {
-    error.value = '密码至少需要 12 个字符'
+  if (password.value.length < 6) {
+    error.value = '密码至少需要 6 个字符'
     return
   }
   if (password.value !== confirmPassword.value) {
@@ -41,7 +41,7 @@ async function submit(): Promise<void> {
   <v-card class="pa-4 pa-sm-6">
     <h2 class="text-h6 mb-1">首次设置管理员</h2>
     <p class="text-body-2 text-medium-emphasis mb-4">
-      只能从本机（127.0.0.1）完成初始化。密码至少 12 个字符，请妥善保管。
+      只能从本机（127.0.0.1）完成初始化。密码至少 6 个字符，请妥善保管。
     </p>
 
     <v-alert

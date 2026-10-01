@@ -1,6 +1,7 @@
 """WebSocket客户端管理器，负责WebSocket连接和重连管理"""
 
 from typing import Any, Callable, Dict, List, Optional
+from urllib.parse import urlparse
 
 import json
 import threading
@@ -19,6 +20,26 @@ RECONNECT_INTERVAL: int = 5
 
 # 看门狗轮询间隔（秒）
 WATCHDOG_INTERVAL: int = 10
+
+
+def _validate_ws_url(url: str) -> Optional[str]:
+    """校验 NapCat WebSocket 地址；合法返回 None，否则返回中文错误说明。
+
+    配置中的占位符（如 ws://localhost:port/qq）必须在连接前拦截，避免
+    后台线程反复抛出难以定位的堆栈并刷屏。
+    """
+    if not url.strip():
+        return "NAPCAT_WS_URL 未配置，请填写 NapCat WebSocket 地址（例如 ws://127.0.0.1:3001/qq）"
+    parsed = urlparse(url)
+    if parsed.scheme not in ("ws", "wss"):
+        return f"NAPCAT_WS_URL 必须以 ws:// 或 wss:// 开头：{url}"
+    if not parsed.hostname:
+        return f"NAPCAT_WS_URL 缺少主机名：{url}"
+    try:
+        parsed.port
+    except ValueError:
+        return f"NAPCAT_WS_URL 的端口不是合法数字：{url}"
+    return None
 
 
 class WebSocketClient:
@@ -45,6 +66,11 @@ class WebSocketClient:
         self._connect_lock: threading.Lock = threading.Lock()
         # 主动关闭标记，设置后看门狗不再重建连接
         self._closing: bool = False
+        # 连接地址在实例生命周期内不变，构造时一次性校验
+        self._configuration_error: Optional[str] = _validate_ws_url(
+            str(config.get("NAPCAT_WS_URL", ""))
+        )
+        self._configuration_error_logged: bool = False
 
     def connect(self) -> None:
         """
@@ -59,6 +85,18 @@ class WebSocketClient:
             RuntimeError: 当连接失败时
         """
         with self._connect_lock:
+            if self._configuration_error is not None:
+                # 配置错误属于启动问题，只在首次明确提示，不反复刷堆栈
+                if not self._configuration_error_logged:
+                    self.logger.error(
+                        f"NapCat 连接配置无效：{self._configuration_error}"
+                    )
+                    self.logger.error(
+                        "已跳过 NapCat 连接，WebUI 与其他功能不受影响；"
+                        "请在 .env 修正 NAPCAT_WS_URL 后重启机器人"
+                    )
+                    self._configuration_error_logged = True
+                return
             if self.is_connected():
                 self.logger.debug("WebSocket已连接，跳过重复连接")
                 return
@@ -181,7 +219,8 @@ class WebSocketClient:
         """看门狗线程：仅在run_forever线程退出且非主动关闭时重建连接"""
         while not self._watchdog_stop_event.wait(WATCHDOG_INTERVAL):
 
-            if self._closing:
+            if self._closing or self._configuration_error is not None:
+                # 配置无效时不重试，避免无意义的重连与日志刷屏
                 continue
 
             run_alive = False

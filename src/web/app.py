@@ -17,6 +17,7 @@ from src.web.security import (
     LoginRateLimiter,
     WebSecurityMiddleware,
     allowed_web_origins,
+    allows_any_host,
 )
 
 
@@ -35,6 +36,7 @@ def create_web_app(
         raise RuntimeError("WebUI 静态资源不完整，请重新安装正式发布包")
 
     allowed_origins = allowed_web_origins(web_host, web_port, extra_origins)
+    allow_any_host = allows_any_host(web_host)
     broadcaster = StatusBroadcaster(
         dependencies.event_bus,
         dependencies.system_service.get_status,
@@ -65,10 +67,13 @@ def create_web_app(
         WebSecurityMiddleware,
         allowed_hosts={web_host, "127.0.0.1", "localhost", "::1"},
         allowed_origins=allowed_origins,
+        allow_any_host=allow_any_host,
     )
     install_error_handlers(app)
     app.include_router(
-        create_api_router(dependencies, LoginRateLimiter(), allowed_origins)
+        create_api_router(
+            dependencies, LoginRateLimiter(), allowed_origins, allow_any_host
+        )
     )
     app.mount("/assets", StaticFiles(directory=assets_root), name="assets")
 

@@ -10,6 +10,7 @@ from src.logging.logger_config import logger
 from src.web.api.common import SESSION_COOKIE_NAME
 from src.web.dependencies import WebDependencies
 from src.web.events.bus import EventSubscriber, build_event
+from src.web.security import origin_is_trusted
 
 # 自定义关闭码：客户端需在重连前重新登录
 WS_UNAUTHORIZED_CODE = 4401
@@ -34,7 +35,9 @@ async def _send_events(websocket: WebSocket, subscriber: EventSubscriber) -> Non
 
 
 def create_events_router(
-    dependencies: WebDependencies, allowed_origins: Set[str]
+    dependencies: WebDependencies,
+    allowed_origins: Set[str],
+    allow_any_host: bool = False,
 ) -> APIRouter:
     """创建 WebSocket 事件推送路由，认证与 Origin 在握手阶段校验。"""
     router = APIRouter(tags=["事件"])
@@ -44,7 +47,12 @@ def create_events_router(
     @router.websocket("/events")
     async def events(websocket: WebSocket) -> None:
         origin = websocket.headers.get("origin")
-        if origin is not None and origin not in allowed_origins:
+        if origin is not None and not origin_is_trusted(
+            origin,
+            websocket.headers.get("host"),
+            allowed_origins,
+            allow_any_host,
+        ):
             await websocket.close(code=WS_FORBIDDEN_ORIGIN_CODE)
             return
         token = websocket.cookies.get(SESSION_COOKIE_NAME)

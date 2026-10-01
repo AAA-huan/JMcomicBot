@@ -5,6 +5,12 @@ import pytest
 from src.config.manager import ConfigManager
 
 
+@pytest.fixture(autouse=True)
+def _isolate_dotenv(monkeypatch: pytest.MonkeyPatch) -> None:
+    """配置测试只读取显式设置的环境变量，不读取开发者本地的 .env。"""
+    monkeypatch.setattr("src.config.manager.load_dotenv", lambda *args, **kwargs: None)
+
+
 def test_webui_config_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     for name in (
         "WEBUI_ENABLED",

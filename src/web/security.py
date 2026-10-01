@@ -5,6 +5,7 @@ from secrets import compare_digest
 from threading import Lock
 from time import monotonic
 from typing import Deque
+from urllib.parse import urlparse
 from uuid import uuid4
 
 from fastapi import Request, status
@@ -17,6 +18,30 @@ CSRF_COOKIE_NAME = "jmbot_csrf"
 CSRF_HEADER_NAME = "X-CSRF-Token"
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 _CSRF_EXEMPT_PATHS = {"/api/v1/auth/setup", "/api/v1/auth/login"}
+
+
+def allows_any_host(host: str) -> bool:
+    """监听所有网卡（0.0.0.0/::）时返回 True，用于放宽 Host 校验。"""
+    return host in {"0.0.0.0", "::"}
+
+
+def origin_is_trusted(
+    origin: str,
+    host_header: str | None,
+    allowed_origins: set[str],
+    allow_any_host: bool,
+) -> bool:
+    """校验请求来源是否可信。
+
+    静态白名单始终有效；局域网模式下额外允许与请求 Host 完全一致的同源
+    来源，既支持手机/其它设备访问，又拒绝其它站点的跨站请求。
+    """
+    if origin in allowed_origins:
+        return True
+    if not allow_any_host or not host_header:
+        return False
+    parsed = urlparse(origin)
+    return bool(parsed.netloc) and parsed.netloc == host_header
 
 
 class LoginRateLimiter:
@@ -64,10 +89,13 @@ class WebSecurityMiddleware(
         app,
         allowed_hosts: set[str],
         allowed_origins: set[str],
+        allow_any_host: bool = False,
     ) -> None:
         super().__init__(app)
         self.allowed_hosts = allowed_hosts
         self.allowed_origins = allowed_origins
+        # 绑定所有网卡时放行任意 Host；来源仍要求同源或命中白名单
+        self.allow_any_host = allow_any_host
 
     @staticmethod
     def _add_security_headers(request: Request, response: Response) -> Response:
@@ -95,7 +123,7 @@ class WebSecurityMiddleware(
     ) -> Response:
         request.state.request_id = str(uuid4())
         host = request.url.hostname
-        if host not in self.allowed_hosts:
+        if not self.allow_any_host and host not in self.allowed_hosts:
             return self._add_security_headers(
                 request,
                 error_response(
@@ -108,7 +136,12 @@ class WebSecurityMiddleware(
 
         if request.method not in _SAFE_METHODS:
             origin = request.headers.get("origin")
-            if origin is not None and origin not in self.allowed_origins:
+            if origin is not None and not origin_is_trusted(
+                origin,
+                request.headers.get("host"),
+                self.allowed_origins,
+                self.allow_any_host,
+            ):
                 return self._add_security_headers(
                     request,
                     error_response(
