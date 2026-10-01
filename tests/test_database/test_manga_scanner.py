@@ -186,7 +186,7 @@ class TestSyncScannedToDb:
         assert manga_repo.count() == 2
 
         result = sync_scanned_to_db(manga_repo, entries)
-        assert result.deleted_count == 0
+        assert result.marked_missing_count == 1
         assert manga_repo.count() == 2
         missing = manga_repo.get("999999")
         assert missing is not None
@@ -258,7 +258,7 @@ class TestSyncScannedToDbTagCleanup:
 
         result = sync_scanned_to_db(manga_repo, entries, tag_repo=tag_repo)
 
-        assert result.deleted_count == 0
+        assert result.marked_missing_count == 1
         assert len(tag_repo.get_by_tag("萌系")) == 1
 
     def test_enrich_entry_writes_tags(

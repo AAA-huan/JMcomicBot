@@ -3,7 +3,7 @@
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 
-from sqlalchemy import select
+from sqlalchemy import delete, func, select
 
 from src.database.models import AuditEvent
 from src.database.repositories._base import BaseRepository
@@ -18,13 +18,9 @@ _LONG_RETENTION_PREFIXES = (
     "permission.changed",
     "setting.changed",
     "bot.shutdown_",
+    "web.login_",
     "migrat",
 )
-
-
-def _is_long_retention(event_type: str) -> bool:
-    """判断审计事件类型是否应长期保留。"""
-    return any(event_type.startswith(prefix) for prefix in _LONG_RETENTION_PREFIXES)
 
 
 _AUDIT_METADATA_KEYS = {
@@ -32,6 +28,7 @@ _AUDIT_METADATA_KEYS = {
     "cleaned_count",
     "duration_ms",
     "file_count",
+    "missing_count",
     "new_count",
     "page_count",
     "reason",
@@ -91,27 +88,65 @@ class AuditEventRepository(BaseRepository):
             session.refresh(event)
             return event
 
-    def delete_expired(self, now: datetime, retention_days: int) -> int:
-        """删除超过保留期的普通审计事件，长期保留类型除外。
+    @staticmethod
+    def _expired_condition(now: datetime, retention_days: int):
+        """构造超过保留期且不属长期保留类型的过滤条件。"""
+        cutoff = now - timedelta(days=retention_days)
+        return (
+            AuditEvent.created_at < cutoff,
+            *(
+                ~AuditEvent.event_type.startswith(prefix, autoescape=True)
+                for prefix in _LONG_RETENTION_PREFIXES
+            ),
+        )
+
+    def count_expired(self, now: datetime, retention_days: int) -> int:
+        """统计达到保留期且不属长期保留类型的审计事件数量。
 
         Args:
             now: 当前时间
             retention_days: 保留天数
 
         Returns:
+            int: 待清理的审计事件数量
+        """
+        with self._get_session() as session:
+            return int(
+                session.scalar(
+                    select(func.count())  # pylint: disable=not-callable
+                    .select_from(AuditEvent)
+                    .where(*self._expired_condition(now, retention_days))
+                )
+                or 0
+            )
+
+    def delete_expired(
+        self, now: datetime, retention_days: int, batch_size: int = 200
+    ) -> int:
+        """分批删除超过保留期的普通审计事件，长期保留类型除外。
+
+        Args:
+            now: 当前时间
+            retention_days: 保留天数
+            batch_size: 每批删除的审计事件数量，必须大于 0
+
+        Returns:
             int: 删除的审计事件数量
         """
-        cutoff = now - timedelta(days=retention_days)
-        with self._get_session() as session:
-            candidates = session.scalars(
-                select(AuditEvent).where(AuditEvent.created_at < cutoff)
-            ).all()
-            removed = [
-                event
-                for event in candidates
-                if not _is_long_retention(event.event_type)
-            ]
-            for event in removed:
-                session.delete(event)
-            session.commit()
-            return len(removed)
+        if batch_size <= 0:
+            raise ValueError("清理批次大小必须大于 0")
+        removed_total = 0
+        while True:
+            with self._get_session() as session:
+                event_ids = session.scalars(
+                    select(AuditEvent.id)
+                    .where(*self._expired_condition(now, retention_days))
+                    .limit(batch_size)
+                ).all()
+                if not event_ids:
+                    return removed_total
+                result = session.execute(
+                    delete(AuditEvent).where(AuditEvent.id.in_(event_ids))
+                )
+                session.commit()
+                removed_total += result.rowcount or 0

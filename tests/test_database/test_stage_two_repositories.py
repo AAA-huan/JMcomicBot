@@ -363,7 +363,7 @@ def test_scan_task_accepts_full_metadata(
             "file_count": 12,
             "new_count": 3,
             "updated_count": 2,
-            "cleaned_count": 1,
+            "missing_count": 1,
         },
         context=context,
     )
@@ -373,49 +373,64 @@ def test_scan_task_accepts_full_metadata(
         "file_count": 12,
         "new_count": 3,
         "updated_count": 2,
-        "cleaned_count": 1,
+        "missing_count": 1,
     }
 
 
 def test_delete_expired_tasks_removes_only_terminal_finished(
     db_manager, operation_task_repo
 ) -> None:
-    """delete_expired 应删除终态且超过保留期的任务，保留运行中任务。"""
-    old_task = operation_task_repo.create("download", "qq", "10001")
-    with db_manager.get_session() as session:
-        stored = session.get(type(old_task), old_task.id)
-        stored.status = "succeeded"
-        stored.finished_at = utc_now() - timedelta(days=200)
-        session.commit()
+    """delete_expired 应分批删除终态且超过保留期的任务，保留运行中任务。"""
+    expired_ids = []
+    for _ in range(3):
+        expired_task = operation_task_repo.create("download", "qq", "10001")
+        with db_manager.get_session() as session:
+            stored = session.get(type(expired_task), expired_task.id)
+            stored.status = "succeeded"
+            stored.finished_at = utc_now() - timedelta(days=200)
+            session.commit()
+        expired_ids.append(expired_task.id)
     running_task = operation_task_repo.create("download", "qq", "10002")
     with db_manager.get_session() as session:
         stored = session.get(type(running_task), running_task.id)
         stored.status = "running"
         session.commit()
 
-    removed = operation_task_repo.delete_expired(utc_now(), 180)
+    assert operation_task_repo.count_expired(utc_now(), 180) == 3
+    removed = operation_task_repo.delete_expired(utc_now(), 180, batch_size=1)
 
-    assert removed == 1
-    assert operation_task_repo.get(old_task.id) is None
+    assert removed == 3
+    for expired_id in expired_ids:
+        assert operation_task_repo.get(expired_id) is None
     assert operation_task_repo.get(running_task.id) is not None
+
+
+def test_delete_expired_rejects_invalid_batch_size(operation_task_repo) -> None:
+    """批次大小非法时清理应明确报错，而不是静默全表删除。"""
+    with pytest.raises(ValueError, match="批次大小"):
+        operation_task_repo.delete_expired(utc_now(), 180, batch_size=0)
 
 
 def test_delete_expired_audit_keeps_long_retention(
     db_manager, audit_event_repo
 ) -> None:
-    """delete_expired 应删除普通过期审计，保留长期类型。"""
+    """delete_expired 应分批删除普通过期审计，保留删除与安全类长期类型。"""
     audit_event_repo.record(
         event_type="download.completed", source="qq", result="succeeded"
     )
     audit_event_repo.record(event_type="manga.deleted", source="qq", result="succeeded")
+    audit_event_repo.record(
+        event_type="web.login_failed", source="web", result="failed"
+    )
     with db_manager.get_session() as session:
         session.execute(
             update(AuditEvent).values(created_at=utc_now() - timedelta(days=400))
         )
         session.commit()
 
-    removed = audit_event_repo.delete_expired(utc_now(), 365)
+    assert audit_event_repo.count_expired(utc_now(), 365) == 1
+    removed = audit_event_repo.delete_expired(utc_now(), 365, batch_size=1)
 
     assert removed == 1
     remaining = {event.event_type for event in audit_event_repo.list()}
-    assert remaining == {"manga.deleted"}
+    assert remaining == {"manga.deleted", "web.login_failed"}

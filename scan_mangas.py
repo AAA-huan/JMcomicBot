@@ -107,7 +107,7 @@ def main() -> None:
                     "file_count": result.scanned_files,
                     "new_count": result.new_count,
                     "updated_count": result.updated_count,
-                    "cleaned_count": result.deleted_count,
+                    "missing_count": result.marked_missing_count,
                 },
                 context=operation_context,
             )
@@ -143,7 +143,7 @@ def _print_result(result, dry_run: bool) -> None:
     if dry_run:
         lines.append(f"  待清理残留: {result.pending_cleanup_count} 条")
     else:
-        lines.append(f"  清理残留: {result.deleted_count} 条")
+        lines.append(f"  标记缺失: {result.marked_missing_count} 条")
     logger.info("\n".join(lines))
 
 

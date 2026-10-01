@@ -48,7 +48,7 @@ class ScanResult:
     new_count: int = 0
     updated_count: int = 0
     pending_cleanup_count: int = 0
-    deleted_count: int = 0
+    marked_missing_count: int = 0
 
 
 def parse_pdf_filename(filename: str) -> Optional[MangaScanEntry]:
@@ -223,7 +223,7 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
         for manga_id in sorted(orphan_ids):
             logger.info(f"标记缺失文件: 漫画ID {manga_id} 的PDF文件已不存在")
             repo.mark_manga_missing(manga_id)
-        result.deleted_count = 0
+        result.marked_missing_count = len(orphan_ids)
     else:
         result.pending_cleanup_count = _count_pending_cleanup(repo, disk_ids)
 

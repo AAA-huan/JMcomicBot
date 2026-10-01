@@ -35,6 +35,7 @@ _TASK_EVENT_METADATA_KEYS = {
     "duration_ms",
     "failed_count",
     "file_count",
+    "missing_count",
     "new_count",
     "page_count",
     "retry_count",
@@ -213,29 +214,68 @@ class OperationTaskRepository(BaseRepository):
             session.commit()
             return result.rowcount or 0
 
-    def delete_expired(self, now: datetime, retention_days: int) -> int:
-        """删除已完成超过保留期且处于终态的任务，级联删除任务事件。
+    @staticmethod
+    def _expired_condition(now: datetime, retention_days: int):
+        """构造终态且超过保留期的任务过滤条件。"""
+        cutoff = now - timedelta(days=retention_days)
+        terminal_statuses = {"succeeded", "failed", "cancelled", "interrupted"}
+        return (
+            OperationTask.status.in_(terminal_statuses),
+            OperationTask.finished_at < cutoff,
+        )
 
-        queued/running 任务永不清理；interrupted 按失败任务处理。
+    def count_expired(self, now: datetime, retention_days: int) -> int:
+        """统计达到保留期且处于终态的任务数量。
 
         Args:
             now: 当前时间
             retention_days: 保留天数
 
         Returns:
+            int: 待清理的任务数量
+        """
+        with self._get_session() as session:
+            return int(
+                session.scalar(
+                    select(func.count())  # pylint: disable=not-callable
+                    .select_from(OperationTask)
+                    .where(*self._expired_condition(now, retention_days))
+                )
+                or 0
+            )
+
+    def delete_expired(
+        self, now: datetime, retention_days: int, batch_size: int = 200
+    ) -> int:
+        """分批删除已完成超过保留期且处于终态的任务，级联删除任务事件。
+
+        queued/running 任务永不清理；interrupted 按失败任务处理。
+
+        Args:
+            now: 当前时间
+            retention_days: 保留天数
+            batch_size: 每批删除的任务数量，必须大于 0
+
+        Returns:
             int: 删除的任务数量
         """
-        cutoff = now - timedelta(days=retention_days)
-        terminal_statuses = {"succeeded", "failed", "cancelled", "interrupted"}
-        with self._get_session() as session:
-            result = session.execute(
-                delete(OperationTask).where(
-                    OperationTask.status.in_(terminal_statuses),
-                    OperationTask.finished_at < cutoff,
+        if batch_size <= 0:
+            raise ValueError("清理批次大小必须大于 0")
+        removed_total = 0
+        while True:
+            with self._get_session() as session:
+                task_ids = session.scalars(
+                    select(OperationTask.id)
+                    .where(*self._expired_condition(now, retention_days))
+                    .limit(batch_size)
+                ).all()
+                if not task_ids:
+                    return removed_total
+                result = session.execute(
+                    delete(OperationTask).where(OperationTask.id.in_(task_ids))
                 )
-            )
-            session.commit()
-            return result.rowcount or 0
+                session.commit()
+                removed_total += result.rowcount or 0
 
 
 class TaskEventRepository(BaseRepository):
