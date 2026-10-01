@@ -18,6 +18,9 @@ from src.logging.logger_config import logger
 _NEW_FORMAT_PATTERN = re.compile(r"^(\d+)-(.+?)\((\d+)章\)\.pdf$")
 _OLD_FORMAT_PATTERN = re.compile(r"^(\d+)\.pdf$")
 
+# 扫描来源的路径标识：scan_record.path_label 只保存配置名称，绝不保存绝对路径
+DOWNLOAD_PATH_LABEL = "MANGA_DOWNLOAD_PATH"
+
 
 @dataclass
 class MangaScanEntry:

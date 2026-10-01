@@ -18,6 +18,7 @@ from src.database.repositories import (
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
+    ScanRecordRepository,
     TaskEventRepository,
 )
 from src.logging.logger_config import logger
@@ -59,6 +60,7 @@ def main() -> None:
     repair_service = RepairService(
         MangaRepository(db_manager),
         MangaTagRepository(db_manager),
+        ScanRecordRepository(db_manager),
         task_service,
     )
 

@@ -13,16 +13,20 @@ import sys
 
 from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
+from src.database.models import ScanRecord
 from src.database.repositories import (
     AuditEventRepository,
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
+    ScanRecordRepository,
     TaskEventRepository,
 )
 from src.logging.logger_config import logger
 from src.service import OperationContext, OperationTaskService
 from src.utils.manga_scanner import (
+    DOWNLOAD_PATH_LABEL,
+    ScanResult,
     enrich_metadata_from_jmcomic,
     scan_download_dir,
     sync_scanned_to_db,
@@ -43,6 +47,21 @@ def parse_args() -> argparse.Namespace:
         help="扫描后联网补全作者/标签等元数据",
     )
     return parser.parse_args()
+
+
+def record_scan_result(
+    scan_record_repo: ScanRecordRepository, task_id: str, result: ScanResult
+) -> ScanRecord:
+    """将扫描结果统计写入 scan_record，path_label 只保存配置名称。"""
+    return scan_record_repo.create(
+        task_id=task_id,
+        task_type="scan",
+        path_label=DOWNLOAD_PATH_LABEL,
+        file_count=result.scanned_files,
+        new_count=result.new_count,
+        updated_count=result.updated_count,
+        missing_count=result.marked_missing_count,
+    )
 
 
 def main() -> None:
@@ -84,6 +103,7 @@ def main() -> None:
     db_manager.init_db()
     repo = MangaRepository(db_manager)
     tag_repo = MangaTagRepository(db_manager)
+    scan_record_repo = ScanRecordRepository(db_manager)
     task_service = OperationTaskService(
         OperationTaskRepository(db_manager),
         TaskEventRepository(db_manager),
@@ -101,6 +121,8 @@ def main() -> None:
             repo, entries, dry_run=args.dry_run, tag_repo=tag_repo
         )
         if operation_task is not None:
+            # 正式统计落表：path_label 只保存配置名称，不保存绝对路径
+            record_scan_result(scan_record_repo, operation_task.id, result)
             task_service.succeed(
                 operation_task.id,
                 metadata={

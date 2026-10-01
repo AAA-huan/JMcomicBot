@@ -3,10 +3,14 @@
 from dataclasses import dataclass
 from typing import Optional
 
-from src.database.repositories import MangaRepository, MangaTagRepository
+from src.database.repositories import (
+    MangaRepository,
+    MangaTagRepository,
+    ScanRecordRepository,
+)
 from src.service.contracts import TaskService
 from src.service.operation_context import OperationContext
-from src.utils.manga_scanner import scan_download_dir
+from src.utils.manga_scanner import DOWNLOAD_PATH_LABEL, scan_download_dir
 
 
 @dataclass(frozen=True)
@@ -29,10 +33,12 @@ class RepairService:
         self,
         manga_repo: MangaRepository,
         tag_repo: MangaTagRepository,
+        scan_record_repo: ScanRecordRepository,
         operation_task_service: TaskService,
     ) -> None:
         self.manga_repo = manga_repo
         self.tag_repo = tag_repo
+        self.scan_record_repo = scan_record_repo
         self.operation_task_service = operation_task_service
 
     def preview(self, download_path: str) -> RepairDiff:
@@ -59,6 +65,15 @@ class RepairService:
                 self.manga_repo.mark_manga_missing(manga_id)
             cleaned_tags = self.tag_repo.delete_orphan_tags()
             cleaned_count = len(diff.orphan_manga_ids) + cleaned_tags
+            # 正式统计落表：missing_count 为标记缺失的漫画数，
+            # repaired_count 为清理条目总数（孤儿漫画 + 孤儿标签）
+            self.scan_record_repo.create(
+                task_id=task.id,
+                task_type="repair",
+                path_label=DOWNLOAD_PATH_LABEL,
+                missing_count=len(diff.orphan_manga_ids),
+                repaired_count=cleaned_count,
+            )
             self.operation_task_service.succeed(
                 task.id,
                 metadata={"cleaned_count": cleaned_count},
