@@ -12,7 +12,7 @@ from sqlalchemy.orm import selectinload
 from src.database.models import OperationTask, TaskEvent, utc_now
 from src.database.repositories._base import BaseRepository
 
-_TASK_TYPES = {"download", "scan", "repair", "delete", "backup"}
+_TASK_TYPES = {"download", "scan", "repair", "delete", "backup", "verify"}
 _TASK_SOURCES = {"qq", "web", "system"}
 _TASK_STATUSES = {
     "queued",
@@ -32,6 +32,7 @@ _TASK_STATUS_TRANSITIONS = {
 }
 _TASK_EVENT_METADATA_KEYS = {
     "cleaned_count",
+    "corrupted_count",
     "duration_ms",
     "failed_count",
     "file_count",
@@ -48,6 +49,7 @@ _TASK_SUMMARIES = {
     "repair": "修复漫画资料",
     "delete": "删除漫画",
     "backup": "备份数据库",
+    "verify": "校验漫画文件",
 }
 
 

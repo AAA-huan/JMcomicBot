@@ -7,6 +7,7 @@ from sqlalchemy import (
     Boolean,
     CheckConstraint,
     DateTime,
+    Float,
     ForeignKey,
     Index,
     Integer,
@@ -100,9 +101,37 @@ class MangaFile(Base):
     last_verified_at: Mapped[Optional[datetime]] = mapped_column(
         DateTime, nullable=True
     )
+    file_mtime: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True, comment="文件修改时间，用于识别文件变化"
+    )
     deleted_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
 
     manga: Mapped["Manga"] = relationship(back_populates="files")
+
+
+class ReadingProgress(Base):
+    """PDF 阅读进度表，记录每本 PDF 当前阅读位置；页码从 1 开始。"""
+
+    __tablename__ = "reading_progress"
+    __table_args__ = (Index("ix_reading_progress_updated", "updated_at"),)
+
+    manga_file_id: Mapped[int] = mapped_column(
+        ForeignKey("manga_file.id", ondelete="CASCADE"),
+        primary_key=True,
+        comment="PDF文件ID",
+    )
+    page_number: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=1, comment="当前页码"
+    )
+    page_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="PDF总页数"
+    )
+    percent: Mapped[float] = mapped_column(
+        Float, nullable=False, default=0.0, comment="阅读百分比"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utc_now, comment="更新时间"
+    )
 
 
 class Tag(Base):
@@ -187,7 +216,7 @@ class OperationTask(Base):
     __tablename__ = "operation_task"
     __table_args__ = (
         CheckConstraint(
-            "task_type IN ('download', 'scan', 'repair', 'delete', 'backup')",
+            "task_type IN ('download', 'scan', 'repair', 'delete', 'backup', 'verify')",
             name="ck_operation_task_type",
         ),
         CheckConstraint(
@@ -266,6 +295,99 @@ class TaskEvent(Base):
     )
 
     task: Mapped["OperationTask"] = relationship(back_populates="events")
+
+
+class ScanRecord(Base):
+    """扫描、修复和校验任务共用的正式统计记录。"""
+
+    __tablename__ = "scan_record"
+    __table_args__ = (
+        CheckConstraint(
+            "task_type IN ('scan', 'repair', 'verify')",
+            name="ck_scan_record_task_type",
+        ),
+        Index("ix_scan_record_task_id", "task_id"),
+        Index("ix_scan_record_created", "created_at", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    task_id: Mapped[str] = mapped_column(
+        ForeignKey("operation_task.id", ondelete="CASCADE"),
+        nullable=False,
+        comment="所属任务ID",
+    )
+    task_type: Mapped[str] = mapped_column(
+        String(32), nullable=False, comment="任务类型: scan/repair/verify"
+    )
+    path_label: Mapped[str] = mapped_column(
+        String(128), nullable=False, comment="路径标识，只保存配置名称"
+    )
+    file_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="扫描文件数"
+    )
+    new_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="新增数"
+    )
+    updated_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="更新数"
+    )
+    missing_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="缺失数"
+    )
+    repaired_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="修复数"
+    )
+    corrupted_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="损坏数"
+    )
+    error_count: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="错误数"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utc_now, comment="记录时间"
+    )
+
+
+class BackupRecord(Base):
+    """数据库备份记录，长期保留行，文件删除后仅标记 deleted。"""
+
+    __tablename__ = "backup_record"
+    __table_args__ = (
+        CheckConstraint(
+            "status IN ('creating', 'ready', 'failed', 'deleted')",
+            name="ck_backup_record_status",
+        ),
+        UniqueConstraint("relative_path", name="uq_backup_record_relative_path"),
+        Index("ix_backup_record_status_created", "status", "created_at"),
+        Index("ix_backup_record_created", "created_at", "id"),
+    )
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    filename: Mapped[str] = mapped_column(String(512), nullable=False, comment="文件名")
+    relative_path: Mapped[str] = mapped_column(
+        String(1024), nullable=False, comment="相对 BACKUP_PATH 的路径"
+    )
+    file_size_bytes: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="文件字节数"
+    )
+    sha256: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, comment="文件SHA-256"
+    )
+    schema_version: Mapped[str] = mapped_column(
+        String(64), nullable=False, comment="备份时 schema 版本"
+    )
+    status: Mapped[str] = mapped_column(
+        String(32), nullable=False, comment="creating/ready/failed/deleted"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utc_now, comment="创建时间"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utc_now, comment="更新时间"
+    )
+    deleted_at: Mapped[Optional[datetime]] = mapped_column(
+        DateTime, nullable=True, comment="文件删除时间"
+    )
 
 
 class AuditEvent(Base):

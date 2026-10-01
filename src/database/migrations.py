@@ -14,7 +14,7 @@ from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
 
-CURRENT_SCHEMA_VERSION = 21
+CURRENT_SCHEMA_VERSION = 22
 
 
 def prepare_legacy_file_paths(engine: Engine, download_root: str | None) -> None:
@@ -93,6 +93,15 @@ def upgrade_schema(engine: Engine, download_root: str | None = None) -> None:
         backup_database(engine, f"{database_path}.pre-migration.bak")
     prepare_legacy_file_paths(engine, download_root)
     command.upgrade(config, "head")
+
+
+def get_schema_revision(engine: Engine) -> str:
+    """返回数据库当前 Alembic revision；未应用迁移时明确报错。"""
+    with engine.connect() as connection:
+        revision = MigrationContext.configure(connection).get_current_revision()
+    if not revision:
+        raise RuntimeError("数据库未应用任何 Alembic 迁移，无法确定 schema 版本")
+    return revision
 
 
 def ensure_schema_version(engine: Engine) -> None:
