@@ -311,3 +311,28 @@ class TestDatabaseManager:
         assert "ix_manga_status_downloaded" in manga_details
         assert "normalized_name=?" in tag_details
         assert "ix_manga_tag_tag_id_manga_id" in tag_details
+
+    def test_task_and_audit_queries_use_expected_indexes(
+        self, db_manager: DatabaseManager
+    ) -> None:
+        """任务列表与审计查询应命中阶段 2 规定的索引。"""
+        with db_manager.get_session() as session:
+            task_plan = session.execute(
+                text(
+                    "EXPLAIN QUERY PLAN SELECT id FROM operation_task "
+                    "WHERE status = 'succeeded' "
+                    "ORDER BY created_at DESC, id LIMIT 20"
+                )
+            ).all()
+            audit_plan = session.execute(
+                text(
+                    "EXPLAIN QUERY PLAN SELECT id FROM audit_event "
+                    "WHERE event_type = 'download.completed' "
+                    "ORDER BY created_at DESC, id LIMIT 20"
+                )
+            ).all()
+
+        task_details = " ".join(str(row[-1]) for row in task_plan)
+        audit_details = " ".join(str(row[-1]) for row in audit_plan)
+        assert "ix_operation_task_status_created" in task_details
+        assert "ix_audit_event_type_created" in audit_details
