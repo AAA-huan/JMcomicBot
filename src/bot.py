@@ -13,6 +13,7 @@ from src.database.database import DatabaseManager
 from src.database.models import utc_now
 from src.database.repositories import (
     AuditEventRepository,
+    BackupRepository,
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
@@ -81,6 +82,7 @@ class MangaBot:
         self.audit_event_repo = AuditEventRepository(self.database_manager)
         self.web_admin_repo = WebAdminRepository(self.database_manager)
         self.web_session_repo = WebSessionRepository(self.database_manager)
+        self.backup_repo = BackupRepository(self.database_manager)
         self.operation_task_service = OperationTaskService(
             self.operation_task_repo,
             self.task_event_repo,
@@ -93,6 +95,8 @@ class MangaBot:
         self.cleanup_service = CleanupService(
             self.operation_task_repo,
             self.audit_event_repo,
+            self.backup_repo,
+            backup_dir=str(self.config_manager.config_dict["BACKUP_PATH"]),
         )
         self._cleanup_thread: Optional[threading.Thread] = None
         self._cleanup_stop_event: threading.Event = threading.Event()

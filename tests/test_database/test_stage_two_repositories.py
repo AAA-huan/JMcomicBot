@@ -9,6 +9,7 @@ from sqlalchemy import inspect, update
 from src.database.models import AuditEvent, utc_now
 from src.database.repositories import (
     AuditEventRepository,
+    BackupRepository,
     OperationTaskRepository,
     TaskEventRepository,
 )
@@ -267,20 +268,25 @@ def test_failed_download_returns_persisted_result(
 def test_database_backup_uses_task_service(
     tmp_path, db_manager, operation_task_service, operation_task_repo
 ) -> None:
-    """正式备份入口应生成可读取备份并完成持久化任务。"""
-    service = DatabaseMaintenanceService(db_manager, operation_task_service)
-    destination = tmp_path / "backup" / "main.db"
+    """正式备份入口应生成可读取备份并完成持久化任务与备份记录。"""
+    backup_repo = BackupRepository(db_manager)
+    backup_dir = tmp_path / "backup"
+    service = DatabaseMaintenanceService(
+        db_manager, operation_task_service, backup_repo, backup_dir=str(backup_dir)
+    )
 
-    result = service.create_backup(str(destination))
+    result = service.create_backup()
 
     assert isinstance(result, BackupResult)
-    assert result.path == destination
+    assert result.path.parent == backup_dir.resolve()
     assert result.file_count == 1
     assert result.task_id
-    assert destination.read_bytes().startswith(b"SQLite format 3\x00")
+    assert result.path.read_bytes().startswith(b"SQLite format 3\x00")
     tasks = operation_task_repo.list()
     assert tasks[0].task_type == "backup"
     assert tasks[0].status == "succeeded"
+    records = backup_repo.list()
+    assert [record.status for record in records] == ["ready"]
 
 
 def test_web_context_records_source_actor_and_client_ip(

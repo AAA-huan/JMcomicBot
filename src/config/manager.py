@@ -137,6 +137,12 @@ class ConfigManager:
             db_path = os.path.expanduser(db_path)
         absolute_db_path = os.path.abspath(db_path)
 
+        # 获取数据库备份目录配置，处理方式与 DB_PATH 一致
+        backup_path = os.getenv("BACKUP_PATH", "./data/backups")
+        if backup_path.startswith("~"):
+            backup_path = os.path.expanduser(backup_path)
+        absolute_backup_path = os.path.abspath(backup_path)
+
         # 获取数据库SQL日志开关
         db_echo_str = os.getenv("DB_ECHO", "false").lower()
         db_echo = db_echo_str in ("true", "1", "yes", "on")
@@ -160,6 +166,7 @@ class ConfigManager:
             "SEND_RETRY_TIMEOUT": send_retry_timeout,
             "RESEND_CONFIRM_TIMEOUT": resend_confirm_timeout,
             "DB_PATH": absolute_db_path,
+            "BACKUP_PATH": absolute_backup_path,
             "DB_ECHO": db_echo,
             "WEBUI_ENABLED": webui_enabled,
             "WEBUI_HOST": webui_host,
