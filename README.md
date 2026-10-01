@@ -2,7 +2,7 @@
 
 <div align="center">
 
-[![Python Version](https://img.shields.io/badge/python-3.7+-blue.svg)](https://www.python.org/downloads/)
+[![Python Version](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License](https://img.shields.io/badge/license-MIT-green.svg)](LICENSE)
 [![Platform](https://img.shields.io/badge/platform-Windows%20%7C%20Linux%20%7C%20Android-lightgrey.svg)](README.md)
 
@@ -29,6 +29,7 @@
 - 📄 **格式转换** - 自动将图片转换为PDF格式，便于阅读
 - 📱 **跨平台** - 支持Windows、Linux、Android
 - 🌐 **WebUI 控制台** - 可选启用，在手机/电脑浏览器里管理漫画库、下载任务、权限与配置
+- 🗄️ **数据库维护** - 版本化迁移、任务与审计、备份 / 扫描 / 修复 / 文件校验
 
 ### 🔧 命令大全
 
@@ -51,7 +52,7 @@
 
 ## 🌐 WebUI 控制台（可选）
 
-机器人内置单管理员 Web 控制台，可在手机或电脑浏览器中浏览漫画库、管理下载任务、维护权限与配置、执行扫描 / 修复 / 备份。默认只监听本机回环地址。
+机器人内置单管理员 Web 控制台，可在手机或电脑浏览器中浏览漫画库、管理下载任务、维护权限与配置、执行扫描 / 修复 / 备份。默认只监听本机回环地址；任务与队列状态通过 WebSocket 实时刷新。前端构建产物随项目发布，生产环境无需安装 Node.js。
 
 ### 访问与首次设置
 
@@ -120,7 +121,7 @@ uv run python main.py
 ### 📋 环境要求
 
 - 🪟 **Windows 10 或更高版本**
-- 🐍 **Python >= 3.7**（推荐 Python 3.8+）
+- 🐍 **Python >= 3.12**
 - 💾 **至少 4GB 可用存储空间**（根据下载漫画数量调整）
 - 🌐 **稳定的网络连接**（支持代理配置）
 
@@ -152,7 +153,7 @@ git clone https://github.com/AAA-huan/JMcomicBot.git .
 ##### 1. 安装 Python 环境
 - 访问 [Python官网](https://www.python.org/downloads/) 下载最新版Python
 - 安装时务必勾选「Add Python to PATH」选项
-- 推荐安装 Python 3.8 或更高版本
+- 必须安装 Python 3.12 或更高版本（项目依赖要求）
 
 ##### 2. 创建虚拟环境
 ```bash
@@ -296,7 +297,7 @@ LOW_MEMORY_MODE=false
 
 ### 📋 环境要求
 
-- 🐍 Python >= 3.7
+- 🐍 Python >= 3.12
 - 🐧 **Ubuntu 18.04 或更高版本（推荐）**
 - 💾 至少 4GB 可用存储空间
 - 🌐 稳定的网络连接
@@ -475,7 +476,7 @@ Ctrl+C
 
 - 📱 **Android 7.0+ 系统（推荐）**
 - 💾 至少 4GB 可用存储空间（Ubuntu系统需要更多空间）
-- 🐍 Python >= 3.7
+- 🐍 Python >= 3.12
 - 🌐 稳定的网络连接
 
 ### 🚀 部署步骤
@@ -760,7 +761,8 @@ uv run python verify_mangas.py --id 350234  # 仅校验指定漫画（可重复�
   记录行长期保留并标记 `deleted`；
 - 校验只标记状态（`missing` / `corrupted` / `invalid_path`），不会自动删除或重新下载，
   删除请走删除命令，重新下载请走下载命令；
-- 任务与审计默认分别保留 180 天与 365 天，删除、权限、配置、安全类审计长期保留。
+- 任务与审计默认分别保留 180 天与 365 天，删除、权限、配置、安全类审计长期保留；
+- 以上扫描 / 修复 / 备份 / 校验操作也可在 WebUI「维护」页完成（需登录，默认仅本机可访问）。
 
 ---
 ## 📄 许可证
