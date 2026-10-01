@@ -1177,6 +1177,7 @@ class CommandExecutor:
                     results.append((manga_id, False, "未找到PDF文件"))
                     continue
 
+                self.download_manager.mark_manga_deleting(manga_id)
                 for pdf_path in pdf_paths:
                     os.remove(pdf_path)
                     self.logger.info(f"成功删除漫画PDF文件: {pdf_path}")

@@ -701,3 +701,8 @@ class DownloadManager:
             self.manga_repo.delete(manga_id)
         if self.tag_repo is not None:
             self.tag_repo.delete_by_manga_id(manga_id)
+
+    def mark_manga_deleting(self, manga_id: str) -> None:
+        """标记漫画关联文件为删除中，供批量删除在删文件前调用。"""
+        if self.manga_repo is not None:
+            self.manga_repo.mark_manga_deleting(manga_id)
