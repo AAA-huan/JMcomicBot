@@ -556,6 +556,10 @@ class DownloadManager:
         self.logger.info(f"漫画ID {manga_id} 不在下载队列中，无需取消")
         return False
 
+    def is_download_active(self, manga_id: str) -> bool:
+        """返回指定漫画是否存在排队或运行中的下载任务。"""
+        return manga_id in self.queued_tasks or manga_id in self.downloading_mangas
+
     def cancel_all_downloads(self) -> int:
         """取消所有排队中尚未开始的下载任务
 
@@ -606,6 +610,18 @@ class DownloadManager:
             )
             operation_task_id = operation_task.id
             self.operation_task_service.start(operation_task_id, "deleting")
+
+        if self.is_download_active(manga_id):
+            if self.operation_task_service is not None and operation_task_id:
+                self.operation_task_service.fail(
+                    operation_task_id,
+                    "download_conflict",
+                    "漫画正在下载中，无法删除",
+                    context=context,
+                )
+            error_msg = f"❌ 漫画ID {manga_id} 正在下载中，无法删除"
+            self.message_sender(user_id, error_msg, group_id, private)
+            return
 
         download_path = str(self.config["MANGA_DOWNLOAD_PATH"])
 

@@ -1159,6 +1159,10 @@ class CommandExecutor:
 
         for manga_id in manga_ids:
             try:
+                if self.download_manager.is_download_active(manga_id):
+                    results.append((manga_id, False, "正在下载中，已跳过"))
+                    continue
+
                 download_path = str(self.config["MANGA_DOWNLOAD_PATH"])
 
                 if not os.path.exists(download_path):

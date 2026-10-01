@@ -213,6 +213,8 @@ def test_batch_delete_cleans_database(
     download_manager = object.__new__(DownloadManager)
     download_manager.manga_repo = manga_repo
     download_manager.tag_repo = tag_repo
+    download_manager.queued_tasks = {}
+    download_manager.downloading_mangas = {}
 
     messages: List[str] = []
     executor = _build_executor(
@@ -230,3 +232,77 @@ def test_batch_delete_cleans_database(
     assert tag_repo.get_by_tag("纯爱") == []
     assert list(tmp_path.glob("*.pdf")) == []
     assert "成功：2" in messages[-1]
+
+
+def test_is_download_active_reports_queued_and_downloading() -> None:
+    """is_download_active 应识别排队中和下载中的漫画。"""
+    manager = object.__new__(DownloadManager)
+    manager.queued_tasks = {"111": ("10001", None, True)}
+    manager.downloading_mangas = {"222": True}
+
+    assert manager.is_download_active("111") is True
+    assert manager.is_download_active("222") is True
+    assert manager.is_download_active("333") is False
+
+
+def test_delete_manga_skips_active_download(tmp_path, manga_repo) -> None:
+    """正在下载中的漫画不应被删除，应返回冲突错误并保留文件。"""
+    manga_id = "350238"
+    pdf_path = tmp_path / f"{manga_id}-标题(1章).pdf"
+    pdf_path.write_bytes(b"%PDF")
+    _add_manga(manga_repo, manga_id, chapter_count=1)
+    manga_repo.add_file(manga_id, str(pdf_path))
+
+    download_manager = object.__new__(DownloadManager)
+    download_manager.manga_repo = manga_repo
+    download_manager.tag_repo = None
+    download_manager.queued_tasks = {}
+    download_manager.downloading_mangas = {manga_id: True}
+    download_manager.config = {"MANGA_DOWNLOAD_PATH": str(tmp_path)}
+    download_manager.logger = SimpleNamespace(
+        info=lambda *a: None, error=lambda *a: None
+    )
+    download_manager.task_log_repo = None
+    download_manager.operation_task_service = None
+    download_manager.cancelled_downloads = {}
+
+    messages: List[str] = []
+    download_manager.message_sender = lambda *args: messages.append(args[1])
+
+    download_manager.delete_manga("10001", manga_id, None, True)
+
+    assert any("正在下载中" in m for m in messages)
+    assert pdf_path.exists()
+    assert manga_repo.get(manga_id) is not None
+
+
+def test_batch_delete_skips_active_download(
+    tmp_path, manga_repo: MangaRepository, tag_repo: MangaTagRepository
+) -> None:
+    """批量删除应跳过正在下载中的漫画，保留其文件与记录。"""
+    manga_id = "350238"
+    pdf_path = tmp_path / f"{manga_id}-标题(1章).pdf"
+    pdf_path.write_bytes(b"%PDF")
+    _add_manga(manga_repo, manga_id, chapter_count=1)
+    manga_repo.add_file(manga_id, str(pdf_path))
+
+    download_manager = object.__new__(DownloadManager)
+    download_manager.manga_repo = manga_repo
+    download_manager.tag_repo = tag_repo
+    download_manager.queued_tasks = {}
+    download_manager.downloading_mangas = {manga_id: True}
+
+    messages: List[str] = []
+    executor = _build_executor(
+        str(tmp_path),
+        messages,
+        download_manager=download_manager,
+        manga_repo=manga_repo,
+        tag_repo=tag_repo,
+    )
+
+    executor._delete_batch_mangas("10001", [manga_id], None, True)
+
+    assert pdf_path.exists()
+    assert manga_repo.get(manga_id) is not None
+    assert "正在下载中" in messages[-1]
