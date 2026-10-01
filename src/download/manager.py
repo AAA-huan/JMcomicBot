@@ -641,6 +641,8 @@ class DownloadManager:
             return
 
         try:
+            if self.manga_repo is not None:
+                self.manga_repo.mark_manga_deleting(manga_id)
             deleted_count = 0
             for pdf_path in pdf_paths:
                 os.remove(pdf_path)

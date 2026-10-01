@@ -209,6 +209,23 @@ class TestManga:
         with pytest.raises(ValueError, match="不支持的文件状态"):
             manga_repo.update_file_status(manga_file.id, "unknown")
 
+    def test_mark_manga_deleting_updates_file_status(
+        self, manga_repo: MangaRepository, tmp_path
+    ) -> None:
+        pdf = tmp_path / "29-标题(1章).pdf"
+        pdf.write_bytes(b"%PDF")
+        manga_repo.upsert(
+            manga_id="29", title="标题", author="", chapter_count=1, page_count=1
+        )
+        manga_repo.add_file("29", str(pdf))
+
+        assert manga_repo.mark_manga_deleting("29") is True
+        assert manga_repo.mark_manga_deleting("missing-id") is False
+
+        files = manga_repo.list_files("29")
+        assert len(files) == 1
+        assert files[0].status == "deleting"
+
     def test_resolve_file_path_rejects_path_escape(self, db_manager, tmp_path) -> None:
         download_root = tmp_path / "downloads"
         download_root.mkdir()

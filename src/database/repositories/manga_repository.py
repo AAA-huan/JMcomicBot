@@ -350,6 +350,22 @@ class MangaRepository(BaseRepository):
             session.commit()
             return True
 
+    def mark_manga_deleting(self, manga_id: str) -> bool:
+        """将漫画关联文件标记为删除中，表示删除流程已开始。
+
+        删除流程先标记 deleting 再执行磁盘删除，便于并发方识别
+        正在被删除的文件；标记不删除任何数据库记录。
+        """
+        with self._get_session() as session:
+            manga = session.get(Manga, manga_id)
+            if manga is None:
+                return False
+            for manga_file in manga.files:
+                manga_file.status = "deleting"
+                manga_file.updated_at = utc_now()
+            session.commit()
+            return True
+
     def resolve_file_path(self, file_id: int, download_root: str) -> Path:
         """解析登记文件路径并校验其位于下载根目录内。"""
         root = Path(download_root).resolve()
