@@ -132,6 +132,14 @@ export interface DownloadRequestResult {
   duplicate_count: number
 }
 
+export interface ReadingProgress {
+  file_id: number
+  page_number: number
+  page_count: number
+  percent: number
+  updated_at: string | null
+}
+
 export interface ScanResultView {
   task_id: string | null
   scanned_files: number

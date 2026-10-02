@@ -39,6 +39,11 @@ function readCookie(name: string): string | null {
   return null
 }
 
+/** 读取 CSRF Token，供 keepalive 等自定义 fetch 请求复用。 */
+export function readCsrfToken(): string | null {
+  return readCookie(CSRF_COOKIE)
+}
+
 export interface RequestOptions {
   method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   body?: unknown

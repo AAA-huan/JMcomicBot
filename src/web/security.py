@@ -109,6 +109,7 @@ class WebSecurityMiddleware(
             "default-src 'self'; "
             "style-src 'self' 'unsafe-inline'; "
             "img-src 'self' data:; "
+            "worker-src 'self'; "
             "frame-ancestors 'none'"
         )
         if request.url.path.startswith("/api/") or response.headers.get(

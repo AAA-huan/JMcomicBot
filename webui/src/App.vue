@@ -5,15 +5,18 @@ import { useTheme } from 'vuetify'
 
 import BlankLayout from '@/layouts/BlankLayout.vue'
 import DefaultLayout from '@/layouts/DefaultLayout.vue'
+import ReaderLayout from '@/layouts/ReaderLayout.vue'
 import { useThemeStore } from '@/stores/theme'
 
 const route = useRoute()
 const themeStore = useThemeStore()
 const theme = useTheme()
 
-const layout = computed(() =>
-  route.meta.layout === 'blank' ? BlankLayout : DefaultLayout,
-)
+const layout = computed(() => {
+  if (route.meta.layout === 'blank') return BlankLayout
+  if (route.meta.layout === 'reader') return ReaderLayout
+  return DefaultLayout
+})
 
 watchEffect(() => {
   theme.global.name.value = themeStore.themeName

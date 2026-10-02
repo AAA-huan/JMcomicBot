@@ -4,11 +4,12 @@ import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 
 import { errorMessage } from '@/api/client'
+import { fileDownloadUrl, getReadingProgress } from '@/api/files'
 import { deleteManga, getManga, patchManga } from '@/api/mangas'
 import { requestDownloads } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
-import type { Manga } from '@/types/api'
+import type { Manga, MangaFile, ReadingProgress } from '@/types/api'
 import { formatBytes, formatDateTime, parseTags } from '@/utils/format'
 import {
   colorOf,
@@ -40,16 +41,53 @@ const editLoading = ref(false)
 const deleteDialog = ref(false)
 const deleteLoading = ref(false)
 
+/** 每个可阅读文件的阅读进度，用于展示「继续阅读 n/N」。 */
+const progressByFile = reactive<Record<number, ReadingProgress>>({})
+
 async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
     manga.value = await getManga(mangaId)
+    await loadProgresses(manga.value.files)
   } catch (err) {
     error.value = errorMessage(err)
   } finally {
     loading.value = false
   }
+}
+
+/** 读取可阅读文件的进度；失败不阻塞页面，阅读器内会重新获取并提示。 */
+async function loadProgresses(files: MangaFile[]): Promise<void> {
+  await Promise.all(
+    files
+      .filter((file) => file.status === 'ready')
+      .map(async (file) => {
+        try {
+          progressByFile[file.id] = await getReadingProgress(file.id)
+        } catch (err) {
+          console.warn(`读取文件 ${file.id} 的阅读进度失败`, err)
+        }
+      }),
+  )
+}
+
+function openReader(file: MangaFile): void {
+  void router.push({
+    name: 'reader',
+    params: { fileId: file.id },
+    query: { from: route.fullPath },
+  })
+}
+
+/** 阅读按钮文案：无进度显示「阅读」，未读完显示进度，已读完可重新阅读。 */
+function readerLabel(file: MangaFile): string {
+  const progress = progressByFile[file.id]
+  if (!progress || progress.updated_at === null || progress.page_count <= 0) {
+    return '阅读'
+  }
+  if (progress.page_number >= progress.page_count) return '重新阅读'
+  return `继续阅读 ${progress.page_number}/${progress.page_count}`
 }
 
 function openEdit(): void {
@@ -82,10 +120,6 @@ async function submitEdit(): Promise<void> {
   } finally {
     editLoading.value = false
   }
-}
-
-function fileDownloadUrl(fileId: number): string {
-  return `/api/v1/files/${fileId}/content`
 }
 
 async function handleDownload(): Promise<void> {
@@ -288,14 +322,24 @@ onMounted(load)
                   </v-chip>
                 </td>
                 <td class="text-no-wrap">
-                  <v-btn
-                    v-if="file.status === 'ready'"
-                    icon="mdi-file-download-outline"
-                    size="small"
-                    variant="text"
-                    :href="fileDownloadUrl(file.id)"
-                    aria-label="下载 PDF"
-                  />
+                  <template v-if="file.status === 'ready'">
+                    <v-btn
+                      variant="tonal"
+                      size="small"
+                      prepend-icon="mdi-book-open-page-variant-outline"
+                      class="mr-1"
+                      @click="openReader(file)"
+                    >
+                      {{ readerLabel(file) }}
+                    </v-btn>
+                    <v-btn
+                      icon="mdi-file-download-outline"
+                      size="small"
+                      variant="text"
+                      :href="fileDownloadUrl(file.id)"
+                      aria-label="下载 PDF"
+                    />
+                  </template>
                   <v-btn
                     v-else
                     icon="mdi-file-download-outline"
@@ -315,6 +359,15 @@ onMounted(load)
             <v-list-item-title class="text-wrap">{{ file.display_name }}</v-list-item-title>
             <v-list-item-subtitle>
               {{ file.page_count }} 页 · {{ formatBytes(file.file_size_bytes) }}
+              <template
+                v-if="
+                  file.status === 'ready' &&
+                    progressByFile[file.id] &&
+                    progressByFile[file.id].updated_at !== null
+                "
+              >
+                · 已读 {{ progressByFile[file.id].page_number }}/{{ progressByFile[file.id].page_count }}
+              </template>
             </v-list-item-subtitle>
             <template #append>
               <div class="d-flex align-center ga-1">
@@ -325,14 +378,22 @@ onMounted(load)
                 >
                   {{ labelOf(FILE_STATUS_LABELS, file.status) }}
                 </v-chip>
-                <v-btn
-                  v-if="file.status === 'ready'"
-                  icon="mdi-file-download-outline"
-                  size="small"
-                  variant="text"
-                  :href="fileDownloadUrl(file.id)"
-                  aria-label="下载 PDF"
-                />
+                <template v-if="file.status === 'ready'">
+                  <v-btn
+                    icon="mdi-book-open-page-variant-outline"
+                    size="small"
+                    variant="text"
+                    :aria-label="readerLabel(file)"
+                    @click="openReader(file)"
+                  />
+                  <v-btn
+                    icon="mdi-file-download-outline"
+                    size="small"
+                    variant="text"
+                    :href="fileDownloadUrl(file.id)"
+                    aria-label="下载 PDF"
+                  />
+                </template>
                 <v-btn
                   v-else
                   icon="mdi-file-download-outline"
@@ -348,7 +409,7 @@ onMounted(load)
 
         <v-divider />
         <v-card-text class="text-caption text-medium-emphasis">
-          可下载 PDF 到本地；在线阅读与阅读进度将在阶段 3 提供。
+          可在线阅读 PDF（自动同步进度）或下载到本地；进度保存在服务器，跨设备可继续阅读。
         </v-card-text>
       </v-card>
     </template>

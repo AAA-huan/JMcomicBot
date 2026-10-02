@@ -36,6 +36,12 @@ const router = createRouter({
       meta: { title: '漫画详情' },
     },
     {
+      path: '/reader/:fileId',
+      name: 'reader',
+      component: () => import('@/reader/PdfReader.vue'),
+      meta: { layout: 'reader', title: '在线阅读' },
+    },
+    {
       path: '/tasks',
       name: 'tasks',
       component: () => import('@/pages/TasksPage.vue'),
