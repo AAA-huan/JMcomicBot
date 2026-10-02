@@ -7,6 +7,23 @@
 - 🐍 Python >= 3.12
 - 🌐 稳定的网络连接
 
+## ⚡ 推荐：使用 uv 部署（更简单）
+
+[uv](https://docs.astral.sh/uv/) 可自动创建虚拟环境、按 `uv.lock` 安装依赖并运行程序，省去手动 `venv` 与 `pip` 步骤。请在 proot Ubuntu 环境内安装使用：
+
+```bash
+# 1. 安装 uv（一次性；安装脚本不可用时可用 pip install uv）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. 在项目目录内安装依赖（自动创建 .venv）
+uv sync
+
+# 3. 启动机器人（无需手动激活虚拟环境）
+uv run python main.py
+```
+
+> 使用 uv 后，下文「环境配置」中的 `python3 -m venv` 与 `pip install` 可跳过；后文所有 `python3 main.py` 均可替换为 `uv run python main.py`。
+
 ## 🚀 部署步骤
 
 ### 第一步：安装 Termux 和 proot
@@ -200,6 +217,9 @@
    # 启动机器人
    python3 main.py
 
+   # 或使用 uv 运行（无需手动激活虚拟环境）
+   uv run python main.py
+
    # 停止机器人
    Ctrl+C
    ```
@@ -232,6 +252,9 @@ source venv/bin/activate
 # 启动机器人
 python3 main.py
 
+# 或使用 uv 运行（无需激活虚拟环境）
+uv run python main.py
+
 # 停止机器人
 Ctrl+C
 ```
@@ -243,6 +266,9 @@ ps aux | grep python
 
 # 停止机器人
 pkill -f "python3 main.py"
+
+# 使用 uv 启动时可用（匹配 python main.py 进程）
+pkill -f "python main.py"
 
 # 退出Ubuntu环境
 exit

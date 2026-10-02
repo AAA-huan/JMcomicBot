@@ -4,7 +4,7 @@
 迁移前会生成 `main.db.pre-migration.bak` 作为安全网。备份目录由 `BACKUP_PATH`
 （默认 `./data/backups`）配置。
 
-进入项目目录并激活虚拟环境后，可使用以下维护脚本：
+进入项目目录后，可使用以下维护脚本（命令默认使用 uv 运行；若使用传统虚拟环境，把 `uv run python` 换成 `python` 即可）：
 
 ```bash
 # 备份数据库：生成 main-日期-时间-版本号.db，并登记到 backup_record

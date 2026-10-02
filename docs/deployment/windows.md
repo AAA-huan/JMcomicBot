@@ -7,6 +7,23 @@
 - 💾 **至少 4GB 可用存储空间**（根据下载漫画数量调整）
 - 🌐 **稳定的网络连接**（支持代理配置）
 
+## ⚡ 推荐：使用 uv 部署（更简单）
+
+[uv](https://docs.astral.sh/uv/) 是 Python 包与环境管理器，可自动创建虚拟环境、按 `uv.lock` 安装依赖并运行程序，省去手动 `venv` 与 `pip` 步骤：
+
+```powershell
+# 1. 安装 uv（一次性；也可用 pip install uv）
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
+
+# 2. 在项目目录内安装依赖（自动创建 .venv）
+uv sync
+
+# 3. 启动机器人（无需手动激活虚拟环境）
+uv run python main.py
+```
+
+> 使用 uv 后，下文「环境配置」中的 `python -m venv` 与 `pip install` 可跳过；后文所有 `python main.py` 均可替换为 `uv run python main.py`。
+
 ## 🚀 部署步骤
 
 ### 📥 第一步：获取项目文件
@@ -139,6 +156,9 @@ LOW_MEMORY_MODE=false
    # 启动机器人
    python main.py
 
+   # 或使用 uv 运行（无需手动激活虚拟环境）
+   uv run python main.py
+
    # 停止机器人
    Ctrl+C
    ```
@@ -159,6 +179,9 @@ LOW_MEMORY_MODE=false
 
    # 启动机器人
    python main.py
+
+   # 或使用 uv 运行（无需激活虚拟环境）
+   uv run python main.py
    ```
 
 ##### 3. 验证运行状态
