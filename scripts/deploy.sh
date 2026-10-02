@@ -157,29 +157,136 @@ ensure_python() {
     die "请安装满足要求的 Python 后重新运行本脚本。"
 }
 
+# ============================ uv 安装（三源顺序 fallback） ============================
+
+# uv 安装候选源（按优先级）：
+#   1. astral.sh 官方安装器：最完整，自动检测平台、写入 ~/.local/bin 与 shell 配置
+#   2. GitHub Release 二进制直连：releases/latest/download/uv-<平台>.tar.gz
+#   3. ghproxy 镜像 release：对 github.com 做代理，国内 github 不通时使用
+# 按顺序尝试，第一个成功即返回；全部失败则报错并给出手动安装指引（不静默兜底）
+
+# 平台 → uv release 资产名映射
+_uv_release_asset() {
+    local os arch
+    os=$(uname -s)
+    arch=$(uname -m)
+    case "$os-$arch" in
+        Linux-x86_64)   echo "uv-x86_64-unknown-linux-gnu.tar.gz" ;;
+        Linux-aarch64)  echo "uv-aarch64-unknown-linux-gnu.tar.gz" ;;
+        Darwin-x86_64)  echo "uv-x86_64-apple-darwin.tar.gz" ;;
+        Darwin-arm64)   echo "uv-aarch64-apple-darwin.tar.gz" ;;
+        *)              return 1 ;;
+    esac
+}
+
+# 安装后验证：把 ~/.local/bin 加入 PATH 并确认 uv 可用
+_verify_uv_after_install() {
+    export PATH="$HOME/.local/bin:$PATH"
+    if ! command -v uv >/dev/null 2>&1; then
+        log_warn "uv 安装后仍不在 PATH 中"
+        return 1
+    fi
+    log_ok "uv 安装完成：$(uv --version)"
+    return 0
+}
+
+# 源1：astral.sh 官方安装器（最完整）
+_install_uv_official() {
+    log_info "尝试源1：astral.sh 官方安装器"
+    local url="https://astral.sh/uv/install.sh"
+    if command -v curl >/dev/null 2>&1; then
+        if curl -fsSL --max-time 30 "$url" | sh; then return 0; fi
+    elif command -v wget >/dev/null 2>&1; then
+        if wget -qO- --timeout=30 "$url" | sh; then return 0; fi
+    else
+        log_warn "未找到 curl 或 wget，跳过源1"
+        return 1
+    fi
+    log_warn "源1（astral.sh 官方安装器）失败"
+    return 1
+}
+
+# 源2/3：GitHub Release 二进制（prefix 为空=直连，prefix=镜像前缀=走镜像）
+#   prefix 示例："" 或 "https://ghproxy.net/"
+_install_uv_release() {
+    local prefix="$1"
+    local desc="${prefix:-GitHub 直连}"
+    [[ -n "$prefix" ]] && desc="${prefix}"
+    log_info "尝试源：GitHub Release 二进制（${desc}）"
+
+    local asset
+    if ! asset=$(_uv_release_asset); then
+        log_warn "当前平台 $(uname -s)-$(uname -m) 无对应 release 资产，跳过"
+        return 1
+    fi
+    local url="${prefix}https://github.com/astral-sh/uv/releases/latest/download/${asset}"
+
+    # 临时文件 / 目录（mktemp 不带 -t，跨 GNU/BSD 兼容）
+    local tmpfile tmpdir
+    tmpfile=$(mktemp) || { log_warn "无法创建临时文件"; return 1; }
+    tmpdir=$(mktemp -d) || { rm -f "$tmpfile"; log_warn "无法创建临时目录"; return 1; }
+
+    # 下载（curl 优先，wget 兜底）
+    if command -v curl >/dev/null 2>&1; then
+        if ! curl -fsSL --max-time 60 -o "$tmpfile" "$url"; then
+            log_warn "下载失败（${desc}）"; rm -rf "$tmpfile" "$tmpdir"; return 1
+        fi
+    elif command -v wget >/dev/null 2>&1; then
+        if ! wget -q --timeout=60 -O "$tmpfile" "$url"; then
+            log_warn "下载失败（${desc}）"; rm -rf "$tmpfile" "$tmpdir"; return 1
+        fi
+    else
+        log_warn "未找到 curl 或 wget"; rm -rf "$tmpfile" "$tmpdir"; return 1
+    fi
+
+    # 解压并定位 uv 可执行文件（结构：uv-<平台>/uv 与 uv-<平台>/uvx）
+    if ! tar -xzf "$tmpfile" -C "$tmpdir"; then
+        log_warn "解压失败（${desc}）"; rm -rf "$tmpfile" "$tmpdir"; return 1
+    fi
+    local extracted_bin
+    extracted_bin=$(find "$tmpdir" -name uv -type f 2>/dev/null | head -1)
+    if [[ -z "$extracted_bin" ]]; then
+        log_warn "解压后未找到 uv 可执行文件"; rm -rf "$tmpfile" "$tmpdir"; return 1
+    fi
+    chmod +x "$extracted_bin"
+
+    # 复制到 ~/.local/bin（与官方安装器默认路径一致，便于后续 PATH 复用）
+    local bindir="$HOME/.local/bin"
+    mkdir -p "$bindir"
+    cp "$extracted_bin" "$bindir/uv"
+    chmod +x "$bindir/uv"
+    # uvx 一并复制（如存在）
+    local extracted_uvx
+    extracted_uvx=$(find "$tmpdir" -name uvx -type f 2>/dev/null | head -1)
+    if [[ -n "$extracted_uvx" ]]; then
+        chmod +x "$extracted_uvx"
+        cp "$extracted_uvx" "$bindir/uvx"
+    fi
+    rm -rf "$tmpfile" "$tmpdir"
+    return 0
+}
+
 ensure_uv() {
     # 已经在 PATH 中
     if command -v uv >/dev/null 2>&1; then
         log_ok "uv 已安装：$(uv --version)"
         return 0
     fi
-    # uv 默认安装到 ~/.local/bin（astral 安装器）
+    # uv 默认安装到 ~/.local/bin（官方安装器与 release 二进制都写入此路径）
     if [[ -x "$HOME/.local/bin/uv" ]]; then
         export PATH="$HOME/.local/bin:$PATH"
         log_ok "uv 已安装：$(uv --version)"
         return 0
     fi
-    log_info "未检测到 uv，使用官方安装器安装..."
-    if command -v curl >/dev/null 2>&1; then
-        curl -LsSf https://astral.sh/uv/install.sh | sh
-    elif command -v wget >/dev/null 2>&1; then
-        wget -qO- https://astral.sh/uv/install.sh | sh
-    else
-        die "未找到 curl 或 wget，无法安装 uv，请手动安装后重试"
-    fi
-    export PATH="$HOME/.local/bin:$PATH"
-    command -v uv >/dev/null 2>&1 || die "uv 安装失败，请手动安装后重试"
-    log_ok "uv 安装完成：$(uv --version)"
+
+    log_info "未检测到 uv，开始安装（三源顺序 fallback）"
+    if _install_uv_official                && _verify_uv_after_install; then return 0; fi
+    if _install_uv_release ""              && _verify_uv_after_install; then return 0; fi
+    if _install_uv_release "https://ghproxy.net/" && _verify_uv_after_install; then return 0; fi
+
+    log_error "uv 安装失败：所有候选源均不可用"
+    log_info "请手动安装 uv：https://docs.astral.sh/uv/getting-started/installation/"
+    die "uv 安装失败，请手动安装后重试"
 }
 
 # ============================ 项目获取 / 更新 ============================
