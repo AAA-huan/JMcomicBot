@@ -324,18 +324,25 @@ function Interactive-Config {
     $curWs = Get-Env 'NAPCAT_WS_URL' '.env'
     if ([string]::IsNullOrWhiteSpace($curWs) -or $curWs -eq $WsUrlPlaceholder) {
         Write-Host "NapCat WebSocket 地址是 bot 与 NapCat 通信的关键。"
-        Write-Host "格式形如 ws://主机:端口/路径，例如 ws://localhost:3001/qq"
+        Write-Host "NapCat 与 bot 同机时只需输入端口号（如 3001），将自动拼接为 ws://localhost:<端口>/qq"
+        Write-Host "若 NapCat 在远端或路径不同，可直接输入完整地址（如 ws://1.2.3.4:8080/qq）"
         while ($true) {
-            $ws = Ask "请输入 NAPCAT_WS_URL" ""
+            $ws = Ask "请输入 NapCat WebSocket 端口或完整地址" ""
             if ([string]::IsNullOrWhiteSpace($ws)) {
-                Log-Warn "NAPCAT_WS_URL 不能为空，请重新输入"
+                Log-Warn "不能为空，请重新输入"
                 continue
             }
+            # 纯数字：当作端口，拼接默认地址（NapCat 与 bot 同机的最常见场景）
+            if ($ws -match '^[0-9]+$') {
+                $ws = "ws://localhost:${ws}/qq"
+                break
+            }
+            # 完整 ws/wss 地址直接采用
             if ($ws -match '^wss?://.+') { break }
-            Log-Warn "格式应为 ws://host:port/path，请重新输入"
+            Log-Warn "格式应为端口号（如 3001）或 ws://host:port/path，请重新输入"
         }
         Set-Env 'NAPCAT_WS_URL' $ws '.env'
-        Log-Ok "NAPCAT_WS_URL 已写入"
+        Log-Ok "NAPCAT_WS_URL 已写入: $ws"
     } else {
         Log-Ok "NAPCAT_WS_URL 已配置（$curWs），跳过"
     }
