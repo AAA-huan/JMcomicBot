@@ -1,9 +1,11 @@
 """FastAPI 应用工厂；导入模块不会启动监听线程。"""
 
-import asyncio
 from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 from typing import AsyncIterator
+
+import asyncio
+import mimetypes
 
 from fastapi import FastAPI, Request
 from fastapi.responses import FileResponse
@@ -75,6 +77,9 @@ def create_web_app(
             dependencies, LoginRateLimiter(), allowed_origins, allow_any_host
         )
     )
+    # 部分系统（如 Termux）的 MIME 数据库缺少 .mjs 映射；PDF.js 的
+    # module worker 要求 JavaScript MIME 类型，这里显式声明保证跨平台一致。
+    mimetypes.add_type("text/javascript", ".mjs")
     app.mount("/assets", StaticFiles(directory=assets_root), name="assets")
 
     @app.get("/{full_path:path}", include_in_schema=False)

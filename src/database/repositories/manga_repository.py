@@ -8,7 +8,7 @@ from typing import List, Optional
 
 import os
 
-from sqlalchemy import Select, delete, func, or_, select, update
+from sqlalchemy import Integer, Select, cast, delete, func, or_, select, update
 from sqlalchemy.orm import selectinload
 
 from src.database.database import DatabaseManager
@@ -66,7 +66,7 @@ class MangaRepository(BaseRepository):
             stmt = (
                 select(Manga)
                 .options(selectinload(Manga.files))
-                .order_by(Manga.downloaded_at.desc(), Manga.id)
+                .order_by(Manga.downloaded_at.desc(), cast(Manga.id, Integer), Manga.id)
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )
@@ -78,7 +78,7 @@ class MangaRepository(BaseRepository):
             stmt = (
                 select(Manga)
                 .options(selectinload(Manga.files))
-                .order_by(Manga.downloaded_at.desc(), Manga.id)
+                .order_by(Manga.downloaded_at.desc(), cast(Manga.id, Integer), Manga.id)
             )
             return list(session.scalars(stmt).all())
 
@@ -121,13 +121,16 @@ class MangaRepository(BaseRepository):
         sort: str = "downloaded_at_desc",
     ) -> tuple[List[Manga], int]:
         """按白名单条件分页查询漫画并返回总数。"""
+        # 漫画 ID 是数字字符串，排序必须按数值比较，避免 "101051" 排在 "2556" 之前；
+        # 数值 ID 同时作为其他排序方式的稳定第二排序键。
+        numeric_id = cast(Manga.id, Integer)
         sort_columns = {
-            "downloaded_at_desc": (Manga.downloaded_at.desc(), Manga.id),
-            "downloaded_at_asc": (Manga.downloaded_at, Manga.id),
-            "title_asc": (Manga.title, Manga.id),
-            "title_desc": (Manga.title.desc(), Manga.id),
-            "id_asc": (Manga.id,),
-            "id_desc": (Manga.id.desc(),),
+            "downloaded_at_desc": (Manga.downloaded_at.desc(), numeric_id),
+            "downloaded_at_asc": (Manga.downloaded_at, numeric_id),
+            "title_asc": (Manga.title, numeric_id),
+            "title_desc": (Manga.title.desc(), numeric_id),
+            "id_asc": (numeric_id, Manga.id),
+            "id_desc": (numeric_id.desc(), Manga.id),
         }
         if sort not in sort_columns:
             raise ValueError(f"不支持的漫画排序方式: {sort}")
@@ -158,7 +161,7 @@ class MangaRepository(BaseRepository):
                 select(Manga)
                 .where(Manga.author.like(f"%{author}%"))
                 .options(selectinload(Manga.files))
-                .order_by(Manga.downloaded_at.desc(), Manga.id)
+                .order_by(Manga.downloaded_at.desc(), cast(Manga.id, Integer), Manga.id)
             )
             return list(session.scalars(stmt).all())
 

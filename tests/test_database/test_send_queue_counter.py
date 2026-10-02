@@ -1,5 +1,6 @@
 """文件发送队列计数与批量进度回归测试"""
 
+from threading import Lock
 from types import SimpleNamespace
 from typing import Any, Dict, List
 
@@ -148,3 +149,34 @@ def test_is_manga_sending_detects_current_and_queued() -> None:
     assert manager.is_manga_sending("350236") is True
     assert manager.is_manga_sending("350234") is True
     assert manager.is_manga_sending("350999") is False
+
+
+def test_send_queue_status_reports_pending_and_active() -> None:
+    """发送队列任务总数含正在发送的文件，pending_count 只算排队。"""
+    manager = object.__new__(MessageManager)
+    manager._queue_count_lock = Lock()
+    manager._queue_running = True
+    manager._queue_count = 2
+    manager._current_sending_file = "350236-标题(2章).pdf"
+
+    status = manager.get_send_queue_status()
+
+    assert status["running"] is True
+    assert status["queue_size"] == 2
+    assert status["pending_count"] == 1
+    assert status["current_file"] == "350236-标题(2章).pdf"
+
+
+def test_send_queue_status_without_active_file() -> None:
+    """没有正在发送的文件时待处理数等于任务总数。"""
+    manager = object.__new__(MessageManager)
+    manager._queue_count_lock = Lock()
+    manager._queue_running = True
+    manager._queue_count = 3
+    manager._current_sending_file = None
+
+    status = manager.get_send_queue_status()
+
+    assert status["queue_size"] == 3
+    assert status["pending_count"] == 3
+    assert status["current_file"] is None

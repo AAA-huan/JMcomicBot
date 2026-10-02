@@ -102,15 +102,20 @@ class MessageManager:
     def get_send_queue_status(self) -> Dict[str, Any]:
         """获取当前文件发送队列状态
 
+        queue_size 为任务总数（排队 + 正在发送），pending_count 为排队数，
+        current_file 为正在发送的文件名。
+
         Returns:
-            Dict[str, Any]: 包含running、queue_size、current_file字段的状态字典
+            Dict[str, Any]: 包含 running、queue_size、pending_count、current_file 的状态字典
         """
         with self._queue_count_lock:
             qc = self._queue_count
+        current_file = self._current_sending_file
         return {
             "running": self._queue_running,
             "queue_size": qc,
-            "current_file": self._current_sending_file,
+            "pending_count": max(0, qc - (1 if current_file else 0)),
+            "current_file": current_file,
         }
 
     def is_manga_sending(self, manga_id: str) -> bool:

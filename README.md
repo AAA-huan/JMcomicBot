@@ -46,7 +46,7 @@
 |------|------|
 | [命令大全](docs/commands.md) | 全部 QQ 指令与别名、批量操作规则 |
 | [WebUI 控制台](docs/webui.md) | 访问与首次设置、在线阅读与进度、局域网访问、忘记密码恢复 |
-| [数据库维护](docs/maintenance.md) | 备份 / 扫描 / 修复 / 文件校验脚本与数据保留策略 |
+| [维护脚本](docs/maintenance.md) | 备份 / 扫描 / 修复 / 文件校验 / WebUI 管理员重置脚本与数据保留策略 |
 | [Windows 部署](docs/deployment/windows.md) | Windows 安装、配置与常驻 |
 | [Linux 部署](docs/deployment/linux.md) | Linux 安装、配置与系统服务 |
 | [Android 部署](docs/deployment/android.md) | Termux + Ubuntu（proot）部署与常驻 |

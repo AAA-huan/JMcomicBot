@@ -148,3 +148,17 @@ def test_static_entry_and_assets_have_safe_cache_policy(db_manager) -> None:
     assert index.headers["Cache-Control"] == "no-store"
     assert asset.status_code == 200
     assert asset.headers["Cache-Control"] == "public, max-age=31536000, immutable"
+
+
+def test_module_worker_asset_is_served_as_javascript(db_manager) -> None:
+    """PDF.js 的 ESM Worker 必须以 JavaScript MIME 提供，否则浏览器拒绝加载。"""
+    static_root = Path(__file__).resolve().parents[2] / "src" / "web" / "static"
+    worker_files = sorted((static_root / "assets").glob("*.mjs"))
+    assert worker_files, "构建产物缺少 PDF.js Worker（.mjs），请先执行 npm run build"
+    worker_name = worker_files[0].name
+
+    with _create_client(db_manager) as client:
+        response = client.get(f"/assets/{worker_name}")
+
+    assert response.status_code == 200
+    assert response.headers["content-type"].startswith("text/javascript")

@@ -182,10 +182,18 @@ class DownloadManager:
             self._clear_download_folder()
 
     def get_queue_status(self) -> Dict[str, object]:
-        """返回不包含用户信息和本地路径的下载队列状态。"""
+        """返回不包含用户信息和本地路径的下载队列状态。
+
+        queue_size 为任务总数（排队 + 正在下载），pending_count 为排队数，
+        current_manga_id 为正在下载的漫画 ID；任务被 worker 取走后总数保持不变。
+        """
+        current_manga_id = next(iter(self.downloading_mangas), None)
+        pending_count = self.download_queue.qsize()
         return {
             "running": self.queue_running,
-            "queue_size": self.download_queue.qsize(),
+            "queue_size": pending_count + (1 if current_manga_id is not None else 0),
+            "pending_count": pending_count,
+            "current_manga_id": current_manga_id,
         }
 
     def _start_download_queue_processor(self) -> None:

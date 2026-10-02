@@ -7,22 +7,17 @@
 - 🐍 Python >= 3.12
 - 🌐 稳定的网络连接
 
-## ⚡ 推荐：使用 uv 部署（更简单）
+## ⚡ 一键快速部署
 
-[uv](https://docs.astral.sh/uv/) 可自动创建虚拟环境、按 `uv.lock` 安装依赖并运行程序，省去手动 `venv` 与 `pip` 步骤。请在 proot Ubuntu 环境内安装使用：
+先看下面proot的部署方式，然后在 proot Ubuntu 环境内，可直接运行一键部署脚本：它会自动安装 git/Python/uv、克隆项目、同步依赖、生成配置并引导填写关键项。
 
 ```bash
-# 1. 安装 uv（一次性；安装脚本不可用时可用 pip install uv）
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 2. 在项目目录内安装依赖（自动创建 .venv）
-uv sync
-
-# 3. 启动机器人（无需手动激活虚拟环境）
-uv run python main.py
+curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.sh | bash
 ```
 
-> 使用 uv 后，下文「环境配置」中的 `python3 -m venv` 与 `pip install` 可跳过；后文所有 `python3 main.py` 均可替换为 `uv run python main.py`。
+脚本完成后会打印 NapCat 部署要点。若希望了解手动步骤再操作，可继续阅读下文。
+
+> 脚本支持重复运行：再次执行等同于「拉取最新代码 + 同步依赖」，不会覆盖已填写的 `.env` / `option.yml`。
 
 ## 🚀 部署步骤
 
@@ -107,22 +102,16 @@ uv run python main.py
    # 注意：使用.参数表示将代码克隆到当前JMBot目录，不会创建额外的子目录
    ```
 
-2. **创建虚拟环境**
+2. **安装 uv**
+   [uv](https://docs.astral.sh/uv/) 是 Python 包与环境管理器，可自动创建虚拟环境、按 `uv.lock` 安装依赖并运行程序，省去手动 `venv` 与 `pip` 步骤：
    ```bash
-   # 创建虚拟环境
-   python3 -m venv venv
-
-   # 激活虚拟环境
-   source venv/bin/activate
-
-   # 验证虚拟环境是否激活（应该显示venv前缀）
-   which python3
+   curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
 
-3. **安装 Python 依赖**
+3. **安装项目依赖**
    ```bash
-   # 安装项目依赖
-   pip3 install -r requirements.txt --upgrade
+   # 在项目目录内执行（自动创建 .venv 并按 uv.lock 安装依赖）
+   uv sync
    ```
 
 4. **配置环境变量**
@@ -214,10 +203,7 @@ uv run python main.py
    # 进入项目目录
    cd ~/JMBot
 
-   # 启动机器人
-   python3 main.py
-
-   # 或使用 uv 运行（无需手动激活虚拟环境）
+   # 启动机器人（uv 会自动使用 .venv，无需手动激活虚拟环境）
    uv run python main.py
 
    # 停止机器人
@@ -246,13 +232,7 @@ sudo napcat
 # 进入项目目录
 cd ~/JMBot
 
-# 激活虚拟环境
-source venv/bin/activate
-
-# 启动机器人
-python3 main.py
-
-# 或使用 uv 运行（无需激活虚拟环境）
+# 启动机器人（uv 会自动使用 .venv，无需手动激活虚拟环境）
 uv run python main.py
 
 # 停止机器人
@@ -264,11 +244,8 @@ Ctrl+C
 # 查看机器人进程
 ps aux | grep python
 
-# 停止机器人
-pkill -f "python3 main.py"
-
-# 使用 uv 启动时可用（匹配 python main.py 进程）
-pkill -f "python main.py"
+# 停止机器人（uv run 最终仍由 python 解释器执行 main.py）
+pkill -f "main.py"
 
 # 退出Ubuntu环境
 exit

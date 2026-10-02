@@ -14,11 +14,13 @@ import { fileContentUrl } from '@/api/files'
 
 import { mapPdfError, type ReaderError } from './pdfErrors'
 
-// Worker 与主线程同源：Vite 构建时输出独立 worker 资源
-GlobalWorkerOptions.workerPort = new Worker(
-  new URL('pdfjs-dist/build/pdf.worker.min.mjs', import.meta.url),
-  { type: 'module' },
-)
+// Worker 与主线程同源：交给 PDF.js 按 workerSrc 自行创建与销毁 Worker。
+// 不使用共享 workerPort，避免文档销毁时端口被终止后再次进入阅读器永久失败；
+// Worker 加载失败时 PDF.js 会基于同一 URL 回退到主线程解析（fake worker）。
+GlobalWorkerOptions.workerSrc = new URL(
+  'pdfjs-dist/build/pdf.worker.min.mjs',
+  import.meta.url,
+).href
 
 /** 静默销毁可能已失败或被替换的加载任务，只记录不抛出。 */
 async function destroyTask(task: PDFDocumentLoadingTask): Promise<void> {
@@ -57,6 +59,8 @@ export function usePdfDocument(): {
       doc.value = await task.promise
       return null
     } catch (error) {
+      // 保留原始错误供排查（错误界面只展示安全的中文提示）
+      console.error('PDF 加载失败', error)
       if (loadingTask === task) {
         loadingTask = null
         doc.value = null
