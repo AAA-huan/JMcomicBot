@@ -2,33 +2,95 @@
 
 from typing import List, Optional
 
+from src.database.repositories import PermissionRepository
 from src.logging.logger_config import logger
 
 
 class PermissionManager:
-    """权限管理器，负责用户权限检查"""
+    """权限管理器，负责用户权限检查
+
+    白名单/黑名单/删除权限用户均持久化在数据库 permission 表中。
+    首次启动时若权限表为空，会将 .env 中配置的名单作为种子数据导入；
+    此后以数据库内容为准，并支持通过动态增删接口实时变更。
+    """
+
+    # 数据库 permission 表中的名单类型（scope）
+    SCOPE_GROUP_WHITELIST = "group_whitelist"
+    SCOPE_PRIVATE_WHITELIST = "private_whitelist"
+    SCOPE_GLOBAL_BLACKLIST = "global_blacklist"
+    SCOPE_DELETE_PERMISSION_USER = "delete_permission_user"
+
+    # 全部合法名单类型，供 WebUI 与命令入口统一校验
+    SCOPES = (
+        SCOPE_GROUP_WHITELIST,
+        SCOPE_PRIVATE_WHITELIST,
+        SCOPE_GLOBAL_BLACKLIST,
+        SCOPE_DELETE_PERMISSION_USER,
+    )
 
     def __init__(
         self,
-        group_whitelist: List[str],
-        private_whitelist: List[str],
-        global_blacklist: List[str],
-        delete_permission_user: List[str],
+        permission_repo: PermissionRepository,
+        seed_group_whitelist: Optional[List[str]] = None,
+        seed_private_whitelist: Optional[List[str]] = None,
+        seed_global_blacklist: Optional[List[str]] = None,
+        seed_delete_permission_user: Optional[List[str]] = None,
     ) -> None:
         """
         初始化权限管理器
 
         Args:
-            group_whitelist: 群组白名单
-            private_whitelist: 私信白名单
-            global_blacklist: 全局黑名单
-            delete_permission_user: 删除权限用户名单
+            permission_repo: 权限名单仓储
+            seed_group_whitelist: 首次启动时的群组白名单种子数据（来自.env）
+            seed_private_whitelist: 首次启动时的私信白名单种子数据（来自.env）
+            seed_global_blacklist: 首次启动时的全局黑名单种子数据（来自.env）
+            seed_delete_permission_user: 首次启动时的删除权限用户种子数据（来自.env）
         """
-        self.group_whitelist = group_whitelist
-        self.private_whitelist = private_whitelist
-        self.global_blacklist = global_blacklist
-        self.delete_permission_user = delete_permission_user
+        self.permission_repo = permission_repo
         self.logger = logger
+
+        seed_data = [
+            (self.SCOPE_GROUP_WHITELIST, seed_group_whitelist or []),
+            (self.SCOPE_PRIVATE_WHITELIST, seed_private_whitelist or []),
+            (self.SCOPE_GLOBAL_BLACKLIST, seed_global_blacklist or []),
+            (self.SCOPE_DELETE_PERMISSION_USER, seed_delete_permission_user or []),
+        ]
+        self._seed_if_empty(seed_data)
+        self._reload_scopes()
+
+        self.logger.info(
+            f"黑白名单配置加载完成 - "
+            f"群组白名单: {len(self.group_whitelist)}个, "
+            f"私信白名单: {len(self.private_whitelist)}个, "
+            f"全局黑名单: {len(self.global_blacklist)}个, "
+            f"删除权限用户: {len(self.delete_permission_user)}个"
+        )
+
+    def _seed_if_empty(self, seed_data: List[tuple[str, List[str]]]) -> None:
+        """
+        权限表为空时将种子数据导入数据库，实现 .env → 数据库的一次性迁移
+
+        Args:
+            seed_data: (scope, id列表) 列表
+        """
+        existing_scopes = self.permission_repo.get_all_scopes()
+        if existing_scopes:
+            return
+
+        for scope, values in seed_data:
+            if values:
+                self.permission_repo.replace_scope(scope, values)
+                self.logger.info(f"已从.env导入 {scope} 种子数据: {len(values)}个")
+
+    def _reload_scopes(self) -> None:
+        """从数据库重新加载全部名单到内存"""
+        scopes = self.permission_repo.get_all_scopes()
+        self.group_whitelist: List[str] = scopes.get(self.SCOPE_GROUP_WHITELIST, [])
+        self.private_whitelist: List[str] = scopes.get(self.SCOPE_PRIVATE_WHITELIST, [])
+        self.global_blacklist: List[str] = scopes.get(self.SCOPE_GLOBAL_BLACKLIST, [])
+        self.delete_permission_user: List[str] = scopes.get(
+            self.SCOPE_DELETE_PERMISSION_USER, []
+        )
 
     def check_user_permission(  # pylint: disable=too-many-arguments
         self,
@@ -89,6 +151,80 @@ class PermissionManager:
         self.logger.debug(f"用户 {user_label} 权限检查通过")
         return True
 
+    def add_to_scope(self, scope: str, value: str) -> bool:
+        """
+        向指定名单动态添加一个ID并立即生效
+
+        Args:
+            scope: 名单类型（使用 SCOPE_* 常量）
+            value: 名单内ID
+
+        Returns:
+            bool: 是否为新插入
+        """
+        self.validate_scope(scope)
+        added = self.permission_repo.add(scope, value)
+        if added:
+            self._reload_scopes()
+        return added
+
+    def remove_from_scope(self, scope: str, value: str) -> bool:
+        """
+        从指定名单动态移除一个ID并立即生效
+
+        Args:
+            scope: 名单类型（使用 SCOPE_* 常量）
+            value: 名单内ID
+
+        Returns:
+            bool: 是否实际删除了记录
+        """
+        self.validate_scope(scope)
+        removed = self.permission_repo.remove(scope, value)
+        if removed:
+            self._reload_scopes()
+        return removed
+
+    @classmethod
+    def validate_scope(cls, scope: str) -> str:
+        """
+        校验名单类型是否受支持
+
+        Args:
+            scope: 名单类型
+
+        Returns:
+            str: 原样返回合法名单类型
+
+        Raises:
+            ValueError: 名单类型不在项目定义的四种类型中时
+        """
+        if scope not in cls.SCOPES:
+            raise ValueError(f"不支持的权限类型: {scope}")
+        return scope
+
+    def get_scope(self, scope: str) -> List[str]:
+        """
+        返回指定名单当前的内存快照
+
+        Args:
+            scope: 名单类型
+
+        Returns:
+            List[str]: 名单内ID列表的副本
+
+        Raises:
+            ValueError: 名单类型不受支持时
+        """
+        self.validate_scope(scope)
+        scope_values = {
+            self.SCOPE_GROUP_WHITELIST: self.group_whitelist,
+            self.SCOPE_PRIVATE_WHITELIST: self.private_whitelist,
+            self.SCOPE_GLOBAL_BLACKLIST: self.global_blacklist,
+            self.SCOPE_DELETE_PERMISSION_USER: self.delete_permission_user,
+        }
+        return list(scope_values[scope])
+
     def update_whitelist(
         self,
         group_whitelist: Optional[List[str]] = None,
@@ -96,7 +232,7 @@ class PermissionManager:
         global_blacklist: Optional[List[str]] = None,
     ) -> None:
         """
-        更新白名单和黑名单
+        整体更新白名单和黑名单（落库并立即生效）
 
         Args:
             group_whitelist: 新的群组白名单
@@ -104,14 +240,21 @@ class PermissionManager:
             global_blacklist: 新的全局黑名单
         """
         if group_whitelist is not None:
-            self.group_whitelist = group_whitelist
+            self.permission_repo.replace_scope(
+                self.SCOPE_GROUP_WHITELIST, group_whitelist
+            )
             self.logger.info(f"群组白名单已更新: {len(group_whitelist)}个")
         if private_whitelist is not None:
-            self.private_whitelist = private_whitelist
+            self.permission_repo.replace_scope(
+                self.SCOPE_PRIVATE_WHITELIST, private_whitelist
+            )
             self.logger.info(f"私信白名单已更新: {len(private_whitelist)}个")
         if global_blacklist is not None:
-            self.global_blacklist = global_blacklist
+            self.permission_repo.replace_scope(
+                self.SCOPE_GLOBAL_BLACKLIST, global_blacklist
+            )
             self.logger.info(f"全局黑名单已更新: {len(global_blacklist)}个")
+        self._reload_scopes()
 
     def check_delete_permission(self, user_id: str) -> bool:
         """

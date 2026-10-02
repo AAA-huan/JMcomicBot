@@ -1,0 +1,194 @@
+# Linux 部署
+
+## 📋 环境要求
+
+- 🐍 Python >= 3.12
+- 🐧 **Ubuntu 18.04 或更高版本（推荐）**
+- 💾 至少 4GB 可用存储空间
+- 🌐 稳定的网络连接
+- 🔧 系统管理员权限
+
+## ⚡ 推荐：使用 uv 部署（更简单）
+
+[uv](https://docs.astral.sh/uv/) 是 Python 包与环境管理器，可自动创建虚拟环境、按 `uv.lock` 安装依赖并运行程序，省去手动 `venv` 与 `pip` 步骤：
+
+```bash
+# 1. 安装 uv（一次性；也可用 pip install uv）
+curl -LsSf https://astral.sh/uv/install.sh | sh
+
+# 2. 在项目目录内安装依赖（自动创建 .venv）
+uv sync
+
+# 3. 启动机器人（无需手动激活虚拟环境）
+uv run python main.py
+```
+
+> 使用 uv 后，下文「环境配置」中的 `python3 -m venv` 与 `pip install` 可跳过；后文所有 `python main.py` 均可替换为 `uv run python main.py`。
+
+## 🚀 部署步骤
+
+### 第一步：获取必要的文件
+
+1. **安装 Git（如未安装）**
+   ```bash
+   # 更新包管理器并安装 Git
+   sudo apt update
+   sudo apt install git -y
+   
+   # 验证安装
+   git --version
+   ```
+
+2. **创建项目目录**
+   ```bash
+   # 创建项目文件夹
+   mkdir -p ~/JMBot
+   cd ~/JMBot
+   ```
+
+3. **使用 Git 克隆项目**
+   ```bash
+   # 使用 Git 克隆项目到当前目录
+   git clone https://github.com/AAA-huan/JMcomicBot.git .
+   # 注意：使用.参数表示将代码克隆到当前JMBot目录，不会创建额外的子目录
+   ```
+
+### 第二步：环境配置
+
+1. **安装系统依赖**
+   ```bash
+   # 更新系统包
+   sudo apt update
+   sudo apt upgrade -y
+   
+   # 安装Python和必要工具
+   sudo apt install -y python3 python3-pip python3-venv git
+   ```
+
+2. **创建虚拟环境**
+   ```bash
+   # 创建虚拟环境
+   python3 -m venv venv
+   source venv/bin/activate
+   ```
+
+3. **安装依赖包**
+   ```bash
+   # 安装项目依赖
+   pip install -r requirements.txt --upgrade
+   ```
+
+### 第三步：配置机器人
+
+1. **复制配置文件**
+   ```bash
+   # 复制环境变量示例文件
+   cp .env.example .env
+    
+   # 复制漫画下载配置示例
+   cp option_example.yml option.yml
+   ```
+
+2. **编辑配置文件**
+   ```bash
+   # 编辑环境变量配置
+   vim .env
+   ```
+   
+   修改以下配置：
+   ```ini
+   # 必须修改的只有NAPCAT_WS_URL的port
+   # 其他配置根据实际情况修改即可
+
+   # WebSocket服务端配置
+   # 修改port为实际的监听端口
+   NAPCAT_WS_URL=ws://localhost:port/qq
+
+   # API Token配置（可选）
+   # 用于NapCat WebSocket服务的身份验证
+   # 系统会自动将token添加到WebSocket连接URL中
+   NAPCAT_TOKEN=""
+
+   # 漫画下载路径
+   # 可以使用相对路径（如./downloads）或绝对路径（如D:/downloads）
+   MANGA_DOWNLOAD_PATH=./downloads # 默认使用当前目录下的downloads文件夹
+
+   # 黑白名单配置
+   # 群组白名单：允许使用机器人的群聊ID列表，多个ID用逗号分隔
+   # 留空表示不限制（所有群组都可以使用）
+   GROUP_WHITELIST=""
+
+   # 私信白名单：允许使用机器人的用户ID列表，多个ID用逗号分隔
+   # 留空表示不限制（所有用户都可以私信使用）
+   PRIVATE_WHITELIST=""
+
+   # 全局黑名单：任何情况下都禁止使用机器人的用户ID列表，多个ID用逗号分隔
+   # 黑名单优先级高于白名单
+   GLOBAL_BLACKLIST=""
+   
+   # 删除权限名单：允许使用删除功能的用户ID，允许为空，最多只能有一个用户ID
+   DELETE_PERMISSION_USER=""
+
+   # 内存低占用模式
+   # true: 开启低占用模式，下载后立刻发送，发送后3分钟删除，启动时清空下载文件夹
+   # false: 默认模式，保留下载的漫画（默认值）
+   LOW_MEMORY_MODE=false
+
+   # 更多高级配置项（如文件发送速率、批次大小、断线重发超时等）
+   # 请参考项目根目录的 .env.example
+   ```
+   完成修改后保存并退出
+
+3. **创建数据目录**
+   ```bash
+   # 创建下载目录
+   mkdir -p ~/JMBot/downloads
+   ```
+
+
+### 第四步：配置 NapCat
+
+1. **安装 NapCat**
+   - 参考 NapCatQQ 文档安装 NapCat https://github.com/NapNeko/NapCatQQ
+   - 配置 WebSocket 服务端与机器人配置匹配
+
+> **注意** - 若使用docker部署napcat，则需要注意以下几点
+1. napcat的websocket服务端的host该改为0.0.0.0
+2. 部署时需要把downloads目录挂载到容器内
+```bash
+docker run -d \
+-e NAPCAT_GID=$(id -g) \
+-e NAPCAT_UID=$(id -u) \
+-p 3000:3000 \
+-p 3001:3001 \
+-p 6099:6099 \
+--name napcat \
+--restart=always \
+-v /home/$USER/JMBot/downloads:/home/$USER/JMBot/downloads \ # 加这行
+mlikiowa/napcat-docker:latest
+
+```
+
+### 第五步：使用方法
+
+##### 1. 启动 NapCat 服务
+- 确保 NapCat 已正确安装并配置
+- 启动 NapCat 服务（具体步骤参考 NapCat 官方文档）
+
+##### 2. 启动机器人
+```bash
+# 进入项目目录
+cd ~/JMBot
+
+# 激活虚拟环境
+source venv/bin/activate
+
+# 启动机器人
+python main.py
+
+# 或使用 uv 运行（无需激活虚拟环境）
+uv run python main.py
+
+# 停止机器人
+Ctrl+C
+```

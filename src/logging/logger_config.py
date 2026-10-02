@@ -24,11 +24,14 @@ MODULE_COLORS_HEX: Dict[str, Tuple[str, str]] = {
     "src.command.parser": ("[command]", "#FE0000"),  # 红色
     "src.message.manager": ("[message]", "#00B4FF"),  # 天蓝色
     "src.download.manager": ("[download]", "#FFB600"),  # 金色
-    "src.download.progress_tracker": ("[download]", "#FFB600"),  # 金色
     "src.bot": ("[bot]", "#FF69B4"),  # 粉色
     "src.config.manager": ("[config]", "#808080"),  # 灰色
     "src.platform.compatibility": ("[platform]", "#808080"),  # 灰色
     "src.permission.manager": ("[perm]", "#808080"),  # 灰色
+    "src.database.database": ("[database]", "#808080"),  # 灰色
+    "src.database.repositories": ("[database]", "#808080"),  # 灰色
+    "src.database.repositories.audit_event_repository": ("[audit]", "#00C853"),  # 绿色
+    "src.web.security": ("[webui]", "#00C853"),  # 绿色
     "src.utils.helpers": ("[utils]", "#808080"),  # 灰色
     "src.utils.batch": ("[batch]", "#808080"),  # 灰色
 }

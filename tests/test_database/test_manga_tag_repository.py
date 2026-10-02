@@ -1,0 +1,140 @@
+"""漫画标签仓储的测试"""
+
+import pytest
+
+from src.database.models import Tag
+from src.database.repositories.manga_repository import MangaRepository
+from src.database.repositories.manga_tag_repository import MangaTagRepository
+
+
+class TestMangaTag:
+    """漫画标签仓储测试类"""
+
+    @staticmethod
+    def _create_mangas(manga_repo: MangaRepository, *manga_ids: str) -> None:
+        for manga_id in manga_ids:
+            manga_repo.upsert(
+                manga_id=manga_id,
+                title="",
+                author="",
+                chapter_count=0,
+                page_count=0,
+            )
+
+    def test_add_and_get_by_tag(
+        self, tag_repo: MangaTagRepository, manga_repo: MangaRepository
+    ) -> None:
+        self._create_mangas(manga_repo, "100", "101")
+        tag_repo.add("萌系", "100")
+        tag_repo.add("萌系", "101")
+
+        records = tag_repo.get_by_tag("萌系")
+        assert len(records) == 2
+        assert {r.manga_id for r in records} == {"100", "101"}
+        assert all(record.tag_id is not None for record in records)
+
+    def test_add_idempotent(
+        self, tag_repo: MangaTagRepository, manga_repo: MangaRepository
+    ) -> None:
+        self._create_mangas(manga_repo, "100")
+        tag_repo.add("萌系", "100")
+        tag_repo.add("萌系", "100")
+
+        assert len(tag_repo.get_by_tag("萌系")) == 1
+
+    def test_tag_query_uses_normalized_name(
+        self, tag_repo: MangaTagRepository, manga_repo: MangaRepository
+    ) -> None:
+        self._create_mangas(manga_repo, "100")
+        tag_repo.add(" 萌系 ", "100")
+
+        assert len(tag_repo.get_by_tag("萌系")) == 1
+        assert tag_repo.list_all_tags() == ["萌系"]
+
+    def test_strict_add_requires_existing_manga(
+        self, tag_repo: MangaTagRepository
+    ) -> None:
+        with pytest.raises(ValueError, match="漫画记录不存在"):
+            tag_repo.add_for_existing_manga("萌系", "404")
+
+    def test_list_all_tags(
+        self, tag_repo: MangaTagRepository, manga_repo: MangaRepository
+    ) -> None:
+        self._create_mangas(manga_repo, "100", "200")
+        tag_repo.add("萌系", "100")
+        tag_repo.add("热血", "200")
+
+        assert tag_repo.list_all_tags() == sorted(["萌系", "热血"])
+
+    def test_delete_by_manga_id(
+        self, tag_repo: MangaTagRepository, manga_repo: MangaRepository
+    ) -> None:
+        self._create_mangas(manga_repo, "100", "200")
+        tag_repo.add("萌系", "100")
+        tag_repo.add("热血", "100")
+        tag_repo.add("萌系", "200")
+
+        assert tag_repo.delete_by_manga_id("100") == 2
+        assert len(tag_repo.get_by_tag("萌系")) == 1
+        assert len(tag_repo.get_by_tag("热血")) == 0
+
+    def test_get_manga_ids_by_tags_intersection(
+        self, tag_repo: MangaTagRepository, manga_repo: MangaRepository
+    ) -> None:
+        self._create_mangas(manga_repo, "100", "200", "300")
+        tag_repo.add("萌系", "100")
+        tag_repo.add("纯爱", "100")
+        tag_repo.add("萌系", "200")
+        tag_repo.add("纯爱", "300")
+
+        # 同时命中"萌系"和"纯爱"的只有 100
+        assert tag_repo.get_manga_ids_by_tags(["萌系", "纯爱"]) == {"100"}
+        assert tag_repo.get_manga_ids_by_tags(["萌系"]) == {"100", "200"}
+        assert tag_repo.get_manga_ids_by_tags([]) == set()
+
+    def test_sync_from_manga(
+        self, tmp_path, tag_repo: MangaTagRepository, manga_repo: MangaRepository
+    ) -> None:
+        import os
+
+        manga_repo.upsert(
+            manga_id="110",
+            title="萌漫画",
+            author="",
+            chapter_count=1,
+            page_count=10,
+        )
+        pdf_path = tmp_path / "110-萌漫画(1章).pdf"
+        pdf_path.write_bytes(b"%PDF")
+        manga_repo.add_file(
+            manga_id="110",
+            file_path=os.path.join(str(tmp_path), pdf_path.name),
+        )
+        manga_repo.upsert(
+            manga_id="111",
+            title="热血漫画",
+            author="",
+            chapter_count=1,
+            page_count=10,
+        )
+
+        added = tag_repo.sync_from_manga()
+        assert added == 0
+        assert tag_repo.list_all_tags() == []
+
+        # 幂等：再次回填不再新增
+        assert tag_repo.sync_from_manga() == 0
+
+    def test_delete_orphan_tags_removes_only_unlinked(
+        self, db_manager, tag_repo: MangaTagRepository, manga_repo: MangaRepository
+    ) -> None:
+        self._create_mangas(manga_repo, "100")
+        tag_repo.add("纯爱", "100")  # 有关联的标签
+        with db_manager.get_session() as session:
+            session.add(Tag(name="孤儿标签", normalized_name="孤儿标签"))
+            session.commit()
+
+        removed = tag_repo.delete_orphan_tags()
+
+        assert removed == 1
+        assert tag_repo.list_all_tags() == ["纯爱"]

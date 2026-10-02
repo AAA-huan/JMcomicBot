@@ -1,11 +1,37 @@
 """配置管理器模块，负责加载和管理应用程序配置"""
 
+from typing import Dict, List, Union
+
 import os
-from typing import Dict, Union, List
 
 from dotenv import load_dotenv
 
 from src.logging.logger_config import logger
+
+
+def _parse_bool_config(name: str, default: bool) -> bool:
+    """解析布尔环境变量，非法值直接暴露配置错误。"""
+    value = os.getenv(name)
+    if value is None:
+        return default
+    normalized = value.strip().lower()
+    if normalized in ("true", "1", "yes", "on"):
+        return True
+    if normalized in ("false", "0", "no", "off"):
+        return False
+    raise ValueError(f"{name} 必须是布尔值")
+
+
+def _parse_int_config(name: str, default: int, minimum: int, maximum: int) -> int:
+    """解析有明确范围的整数环境变量。"""
+    raw_value = os.getenv(name, str(default))
+    try:
+        value = int(raw_value)
+    except ValueError as error:
+        raise ValueError(f"{name} 必须是整数") from error
+    if not minimum <= value <= maximum:
+        raise ValueError(f"{name} 必须位于 {minimum} 到 {maximum} 之间")
+    return value
 
 
 class ConfigManager:
@@ -105,6 +131,34 @@ class ConfigManager:
         except ValueError:
             resend_confirm_timeout = 300
 
+        # 获取SQLite数据库目录配置，处理路径并转换为绝对路径
+        db_path = os.getenv("DB_PATH", "./data")
+        if db_path.startswith("~"):
+            db_path = os.path.expanduser(db_path)
+        absolute_db_path = os.path.abspath(db_path)
+
+        # 获取数据库备份目录配置，处理方式与 DB_PATH 一致
+        backup_path = os.getenv("BACKUP_PATH", "./data/backups")
+        if backup_path.startswith("~"):
+            backup_path = os.path.expanduser(backup_path)
+        absolute_backup_path = os.path.abspath(backup_path)
+
+        # 获取数据库SQL日志开关
+        db_echo_str = os.getenv("DB_ECHO", "false").lower()
+        db_echo = db_echo_str in ("true", "1", "yes", "on")
+
+        webui_enabled = _parse_bool_config("WEBUI_ENABLED", True)
+        webui_host = os.getenv("WEBUI_HOST", "127.0.0.1").strip()
+        if not webui_host:
+            raise ValueError("WEBUI_HOST 不能为空")
+        webui_port = _parse_int_config("WEBUI_PORT", 7999, 1, 65535)
+        webui_session_hours = _parse_int_config("WEBUI_SESSION_HOURS", 24, 1, 24 * 30)
+        # 开发环境额外允许的页面来源（Vite 开发服务器），生产默认留空
+        webui_dev_origins = self._parse_id_list(os.getenv("WEBUI_DEV_ORIGINS", ""))
+        for origin in webui_dev_origins:
+            if not origin.startswith(("http://", "https://")):
+                raise ValueError(f"WEBUI_DEV_ORIGINS 必须是完整的来源地址: {origin}")
+
         self.config_dict: Dict[str, Union[str, int, float, bool]] = {
             "MANGA_DOWNLOAD_PATH": absolute_download_path,
             "NAPCAT_WS_URL": ws_url,
@@ -116,6 +170,13 @@ class ConfigManager:
             "FILE_SEND_BATCH_INTERVAL": file_send_batch_interval,
             "SEND_RETRY_TIMEOUT": send_retry_timeout,
             "RESEND_CONFIRM_TIMEOUT": resend_confirm_timeout,
+            "DB_PATH": absolute_db_path,
+            "BACKUP_PATH": absolute_backup_path,
+            "DB_ECHO": db_echo,
+            "WEBUI_ENABLED": webui_enabled,
+            "WEBUI_HOST": webui_host,
+            "WEBUI_PORT": webui_port,
+            "WEBUI_SESSION_HOURS": webui_session_hours,
         }
 
         # 初始化黑白名单配置
@@ -132,6 +193,8 @@ class ConfigManager:
         self.delete_permission_user: List[str] = self._parse_id_list(
             os.getenv("DELETE_PERMISSION_USER", "")
         )
+        # WebUI 开发环境额外允许的页面来源
+        self.webui_dev_origins: List[str] = webui_dev_origins
         # 记录黑白名单配置信息
         self.logger.info(
             f"黑白名单配置加载完成 - "

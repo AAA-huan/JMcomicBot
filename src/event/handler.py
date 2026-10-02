@@ -4,6 +4,7 @@ import re
 from typing import Any, Callable, Dict, Optional
 
 from src.logging.logger_config import logger
+from src.utils.name_cache import NameCache
 
 
 class EventHandler:
@@ -127,9 +128,12 @@ class EventHandler:
             self.logger.warning("私聊消息缺少必要字段")
             return
 
-        # 从事件数据中提取用户名用于日志显示
+        # 从事件数据中提取用户名用于日志显示，并缓存昵称
         sender = data.get("sender", {})
         user_display = self._format_user_display(user_id, sender)
+        nickname = sender.get("nickname", "") if isinstance(sender, dict) else ""
+        if nickname:
+            NameCache.get_instance().set_user_name(user_id, nickname)
 
         try:
             self.permission_checker(user_id, None, True, user_display=user_display)
@@ -160,10 +164,16 @@ class EventHandler:
             self.logger.warning("群消息缺少必要字段")
             return
 
-        # 从事件数据中提取群名与用户显示名（群名片优先）
+        # 从事件数据中提取群名与用户显示名（群名片优先），并缓存昵称/群名
         sender = data.get("sender", {})
         user_display = self._format_group_user_display(user_id, sender)
         group_display = self._format_group_display(group_id, data)
+        nickname = sender.get("nickname", "") if isinstance(sender, dict) else ""
+        group_name = data.get("group_name", "")
+        if nickname:
+            NameCache.get_instance().set_user_name(user_id, nickname)
+        if group_name:
+            NameCache.get_instance().set_group_name(group_id, group_name)
 
         try:
             self.permission_checker(

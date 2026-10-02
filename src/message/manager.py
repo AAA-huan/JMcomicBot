@@ -1,13 +1,15 @@
 """消息管理器，负责发送文本消息和文件"""
 
+from dataclasses import dataclass, field
+from typing import Any, Dict, List, Optional
+
 import json
 import os
 import queue
 import threading
 import time
-from dataclasses import dataclass, field
-from typing import Any, Dict, List, Optional
 
+from src.database.repositories import TaskLogRepository
 from src.logging.logger_config import logger
 
 
@@ -26,19 +28,27 @@ class SendTask:
 class MessageManager:
     """消息管理器，负责发送文本消息和文件"""
 
-    def __init__(self, config: Dict[str, Any], ws_client: Optional[Any] = None) -> None:
+    def __init__(
+        self,
+        config: Dict[str, Any],
+        ws_client: Optional[Any] = None,
+        task_log_repo: Optional[TaskLogRepository] = None,
+    ) -> None:
         """
         初始化消息管理器
 
         Args:
             config: 配置字典，包含NAPCAT_TOKEN等信息
             ws_client: WebSocket客户端实例
+            task_log_repo: 任务日志仓储，记录文件发送任务
         """
         self.config = config
         self.ws_client = ws_client
+        self.task_log_repo = task_log_repo
         self.logger = logger
         self._file_queue: queue.Queue = queue.Queue()
         self._queue_running: bool = True
+        self._stop_event: threading.Event = threading.Event()
         self._file_thread: Optional[threading.Thread] = None
         # 保护所有ws.send，避免多线程并发写入连接
         self._ws_lock: threading.RLock = threading.RLock()
@@ -52,19 +62,42 @@ class MessageManager:
         # 未完成的任务总数（队列中等待 + 正在处理的），替代 qsize()
         self._queue_count: int = 0
         self._queue_count_lock: threading.Lock = threading.Lock()
-        # 尚未入队的批次余量（由 add_send_pending_count  +/- 管理）
-        self._batch_pending: int = 0
-        self._batch_pending_lock: threading.Lock = threading.Lock()
+        # 发送参数独立保存，SettingsService 通过 update_send_settings 显式更新
+        self.file_send_interval: float = float(config.get("FILE_SEND_INTERVAL", 1.8))
+        self.send_retry_timeout: int = int(config.get("SEND_RETRY_TIMEOUT", 30))
+        self.resend_confirm_timeout: int = int(
+            config.get("RESEND_CONFIRM_TIMEOUT", 300)
+        )
         self._start_file_queue_worker()
 
-    def add_send_pending_count(self, delta: int) -> None:
-        """增加/减少尚未入队的批次余量计数
-
-        Args:
-            delta: 增量（正数增加，负数减少）
-        """
-        with self._batch_pending_lock:
-            self._batch_pending = max(0, self._batch_pending + delta)
+    def update_send_settings(
+        self,
+        send_interval: Optional[float] = None,
+        retry_timeout: Optional[int] = None,
+        resend_confirm_timeout: Optional[int] = None,
+    ) -> None:
+        """由 SettingsService 调用，显式更新发送参数并立即生效。"""
+        if send_interval is not None:
+            if send_interval <= 0:
+                raise ValueError("文件发送间隔必须大于 0")
+            self.file_send_interval = send_interval
+            self.config["FILE_SEND_INTERVAL"] = send_interval
+        if retry_timeout is not None:
+            if retry_timeout < 1:
+                raise ValueError("发送重试超时必须至少为 1 秒")
+            self.send_retry_timeout = retry_timeout
+            self.config["SEND_RETRY_TIMEOUT"] = retry_timeout
+        if resend_confirm_timeout is not None:
+            if resend_confirm_timeout < 1:
+                raise ValueError("重发确认超时必须至少为 1 秒")
+            self.resend_confirm_timeout = resend_confirm_timeout
+            self.config["RESEND_CONFIRM_TIMEOUT"] = resend_confirm_timeout
+        self.logger.info(
+            "文件发送参数已更新: "
+            f"发送间隔 {self.file_send_interval} 秒, "
+            f"重试超时 {self.send_retry_timeout} 秒, "
+            f"重发确认超时 {self.resend_confirm_timeout} 秒"
+        )
 
     def get_send_queue_status(self) -> Dict[str, Any]:
         """获取当前文件发送队列状态
@@ -74,13 +107,21 @@ class MessageManager:
         """
         with self._queue_count_lock:
             qc = self._queue_count
-        with self._batch_pending_lock:
-            bp = self._batch_pending
         return {
             "running": self._queue_running,
-            "queue_size": qc + bp,
+            "queue_size": qc,
             "current_file": self._current_sending_file,
         }
+
+    def is_manga_sending(self, manga_id: str) -> bool:
+        """返回指定漫画是否有文件正在发送或排队发送。"""
+        current = self._current_sending_file
+        if current is not None and current.split("-", 1)[0] == manga_id:
+            return True
+        for task in list(self._file_queue.queue):
+            if os.path.basename(task.file_path).split("-", 1)[0] == manga_id:
+                return True
+        return False
 
     def set_websocket_client(self, ws_client: Optional[Any]) -> None:
         """
@@ -91,20 +132,37 @@ class MessageManager:
         """
         self.ws_client = ws_client
 
-    def stop(self) -> None:
-        """停止文件发送队列进程，释放资源"""
-        self._queue_running = False
+    def stop(self, timeout: float = 1.0) -> bool:
+        """停止文件发送队列并等待工作线程退出
+
+        Args:
+            timeout: 等待工作线程退出的最长秒数
+
+        Returns:
+            bool: 工作线程是否已退出
+        """
+        with self._queue_count_lock:
+            self._queue_running = False
+            self._stop_event.set()
+            # 与入队共用锁，避免停止哨兵之后又插入新任务。
+            self._file_queue.put(None)
         with self._result_cond:
             self._result_cond.notify_all()
         if self._file_thread is not None:
-            self._file_thread.join(timeout=2)
-            self.logger.info("文件发送队列进程已停止")
+            self._file_thread.join(timeout=timeout)
+            if self._file_thread.is_alive():
+                self.logger.warning("文件发送队列未在限定时间内停止")
+                return False
+        with self._queue_count_lock:
+            self._queue_count = 0
+        self.logger.info("文件发送队列线程已停止")
+        return True
 
     def _start_file_queue_worker(self) -> None:
         """启动文件发送队列后台线程，串行执行文件发送任务"""
 
         def process_queue() -> None:
-            while self._queue_running:
+            while not self._stop_event.is_set():
                 try:
                     task = self._file_queue.get(timeout=1)
                 except queue.Empty:
@@ -112,12 +170,40 @@ class MessageManager:
                     self._cleanup_expired_resends()
                     continue
 
-                self._process_send_task(task)
-                self._file_queue.task_done()
+                try:
+                    if task is None or self._stop_event.is_set():
+                        return
+                    self._process_send_task(task)
+                finally:
+                    self._file_queue.task_done()
 
         self._file_thread = threading.Thread(target=process_queue, daemon=True)
         self._file_thread.start()
         self.logger.info("文件发送队列后台线程已启动")
+
+    def _log_send_task(self, task: SendTask, status: str, message: str) -> None:
+        """记录文件发送任务到数据库
+
+        Args:
+            task: 文件发送任务
+            status: 任务状态
+            message: 结果信息
+        """
+        if self.task_log_repo is None:
+            return
+        manga_id = os.path.basename(task.file_path).split("-", 1)[0]
+        try:
+            self.task_log_repo.add(
+                task_type="send",
+                status=status,
+                manga_id=manga_id,
+                user_id=task.user_id,
+                group_id=task.group_id or "",
+                private=task.private,
+                message=f"{message} {task.file_path}".strip(),
+            )
+        except Exception as e:
+            self.logger.error(f"记录发送任务日志失败: {e}")
 
     def _process_send_task(self, task: SendTask) -> None:
         """处理单个文件发送任务，发送结果通过条件变量通知等待线程"""
@@ -125,37 +211,46 @@ class MessageManager:
         try:
             self._send_file_with_retry(task)
             task.status = "done"
+            self._log_send_task(task, "success", "")
         except Exception as e:
             self.logger.error(f"发送文件失败: {task.file_path}, {e}")
             task.status = "failed"
             task.error = str(e)
-            self._store_pending_error(
-                user_id=task.user_id,
-                content_type="file",
-                content=task.file_path,
-                group_id=task.group_id,
-                private=task.private,
-            )
+            self._log_send_task(task, "failed", str(e))
+            if not self._stop_event.is_set():
+                self._store_pending_error(
+                    user_id=task.user_id,
+                    content_type="file",
+                    content=task.file_path,
+                    group_id=task.group_id,
+                    private=task.private,
+                )
         finally:
             self._current_sending_file = None
             with self._queue_count_lock:
                 self._queue_count -= 1
-            with self._batch_pending_lock:
-                self._batch_pending = max(0, self._batch_pending - 1)
             with self._result_cond:
                 self._result_cond.notify_all()
+
+    def _enqueue_file_task(self, task: SendTask) -> None:
+        """登记并加入文件发送队列，确保所有入队路径使用相同计数规则"""
+        with self._queue_count_lock:
+            if self._stop_event.is_set():
+                raise RuntimeError("文件发送队列已停止")
+            self._queue_count += 1
+            self._file_queue.put(task)
 
     def _send_file_with_retry(self, task: SendTask) -> None:
         """尝试发送文件，连接断开时等待重连并重试，超时抛出异常"""
         payload = self._build_file_payload(
             task.file_path, task.user_id, task.group_id, task.private
         )
-        retry_timeout = int(self.config.get("SEND_RETRY_TIMEOUT", 30))
+        retry_timeout = self.send_retry_timeout
         deadline = time.time() + retry_timeout
 
-        while time.time() < deadline:
+        while time.time() < deadline and not self._stop_event.is_set():
             if self.ws_client is None or not self._is_websocket_connected():
-                time.sleep(0.5)
+                self._stop_event.wait(0.5)
                 continue
             try:
                 with self._ws_lock:
@@ -165,13 +260,15 @@ class MessageManager:
                     f"目标: {'私聊' if task.private else '群聊'}, "
                     f"用户: {task.user_id}"
                 )
-                send_interval = float(self.config.get("FILE_SEND_INTERVAL", 1.8))
-                time.sleep(send_interval)
+                send_interval = self.file_send_interval
+                self._stop_event.wait(send_interval)
                 return
             except Exception as e:
                 self.logger.warning(f"发送文件时连接异常，重试中: {e}")
-                time.sleep(0.5)
+                self._stop_event.wait(0.5)
 
+        if self._stop_event.is_set():
+            raise RuntimeError("文件发送队列已停止")
         raise RuntimeError(
             f"WebSocket连接未建立，文件发送失败: {os.path.basename(task.file_path)}"
         )
@@ -257,9 +354,7 @@ class MessageManager:
             group_id=group_id,
             private=private,
         )
-        with self._queue_count_lock:
-            self._queue_count += 1
-        self._file_queue.put(task)
+        self._enqueue_file_task(task)
 
         with self._result_cond:
             while task.status == "pending":
@@ -379,7 +474,7 @@ class MessageManager:
                     by_manga[manga_id] = by_manga.get(manga_id, 0) + 1
                 for manga_id, count in by_manga.items():
                     notify += f" • 漫画ID {manga_id}（{count} 个文件）\n"
-                resend_timeout = int(self.config.get("RESEND_CONFIRM_TIMEOUT", 300))
+                resend_timeout = self.resend_confirm_timeout
                 notify += (
                     f"\n📬 回复「重发重发」确认重新发送，"
                     f"{int(resend_timeout / 60)} 分钟内未确认将自动放弃"
@@ -460,7 +555,7 @@ class MessageManager:
         count = 0
         for entry in resend_entries:
             self.logger.info(f"重发文件: {entry['content']}")
-            self._file_queue.put(
+            self._enqueue_file_task(
                 SendTask(
                     user_id=entry["user_id"],
                     file_path=entry["content"],
@@ -473,7 +568,7 @@ class MessageManager:
 
     def _cleanup_expired_resends(self) -> None:
         """清理等待用户确认重发但已超时的文件，防止残留"""
-        timeout = int(self.config.get("RESEND_CONFIRM_TIMEOUT", 300))
+        timeout = self.resend_confirm_timeout
         now = time.time()
         expired: List[Dict[str, Any]] = []
         with self._pending_errors_lock:
