@@ -7,14 +7,20 @@
 建议先停止机器人再执行；必须显式传入 --yes 才会真正删除。
 
 用法:
-    uv run python reset_web_admin.py --yes
+    uv run python scripts/reset_web_admin.py --yes
 """
+
+from pathlib import Path
 
 import argparse
 import sys
 
 from sqlalchemy import delete
 
+# 直接运行时项目根不在 sys.path，先注入以便导入 src 包；包方式导入同样安全
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# pylint: disable=wrong-import-position
 from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
 from src.database.models import WebAdmin, WebSession

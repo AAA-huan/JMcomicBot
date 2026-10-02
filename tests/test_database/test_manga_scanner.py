@@ -5,7 +5,7 @@ import sys
 
 import pytest
 
-from scan_mangas import main as scan_main
+from scripts.scan_mangas import main as scan_main
 from src.database.database import DatabaseManager
 from src.database.models import Manga
 from src.database.repositories import MangaRepository
@@ -323,7 +323,7 @@ class TestScanMangasScriptEntry:
         db_dir = tmp_path / "data"
         monkeypatch.setenv("MANGA_DOWNLOAD_PATH", str(download_dir))
         monkeypatch.setenv("DB_PATH", str(db_dir))
-        monkeypatch.setattr(sys, "argv", ["scan_mangas.py"])
+        monkeypatch.setattr(sys, "argv", ["scripts/scan_mangas.py"])
 
         scan_main()
 

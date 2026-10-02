@@ -5,13 +5,19 @@
 重新下载走 download 任务。
 
 用法:
-    uv run python verify_mangas.py                # 校验全部漫画文件
-    uv run python verify_mangas.py --id 350234    # 仅校验指定漫画（可重复指定）
+    uv run python scripts/verify_mangas.py                # 校验全部漫画文件
+    uv run python scripts/verify_mangas.py --id 350234    # 仅校验指定漫画（可重复指定）
 """
+
+from pathlib import Path
 
 import argparse
 import sys
 
+# 直接运行时项目根不在 sys.path，先注入以便导入 src 包；包方式导入同样安全
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# pylint: disable=wrong-import-position
 from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
 from src.database.repositories import (

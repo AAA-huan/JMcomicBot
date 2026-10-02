@@ -4,13 +4,19 @@
 修复前建议先使用 --dry-run 查看差异清单，确认后再执行。
 
 用法:
-    uv run python repair_mangas.py --dry-run   # 仅预览差异，不执行任何写入
-    uv run python repair_mangas.py             # 确认后执行修复
+    uv run python scripts/repair_mangas.py --dry-run   # 仅预览差异，不执行任何写入
+    uv run python scripts/repair_mangas.py             # 确认后执行修复
 """
+
+from pathlib import Path
 
 import argparse
 import sys
 
+# 直接运行时项目根不在 sys.path，先注入以便导入 src 包；包方式导入同样安全
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# pylint: disable=wrong-import-position
 from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
 from src.database.repositories import (

@@ -227,7 +227,7 @@ def _run_scan(
     task_service: OperationTaskService,
     context: OperationContext,
 ) -> None:
-    """按 scan_mangas.py 的真实流程执行一次扫描入库。"""
+    """按 scripts/scan_mangas.py 的真实流程执行一次扫描入库。"""
     task = task_service.create("scan", context)
     task_service.start(task.id, "scanning")
     try:

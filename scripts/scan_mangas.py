@@ -3,14 +3,20 @@
 扫描漫画下载目录内已下载的漫画PDF文件，将元数据与文件记录同步到SQLite数据库。
 
 用法:
-    uv run python scan_mangas.py              # 扫描并写入数据库
-    uv run python scan_mangas.py --dry-run    # 仅预览将入库的内容，不写入
-    uv run python scan_mangas.py --enrich     # 扫描后联网补全作者/标签等元数据
+    uv run python scripts/scan_mangas.py              # 扫描并写入数据库
+    uv run python scripts/scan_mangas.py --dry-run    # 仅预览将入库的内容，不写入
+    uv run python scripts/scan_mangas.py --enrich     # 扫描后联网补全作者/标签等元数据
 """
+
+from pathlib import Path
 
 import argparse
 import sys
 
+# 直接运行时项目根不在 sys.path，先注入以便导入 src 包；包方式导入同样安全
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+# pylint: disable=wrong-import-position
 from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
 from src.database.repositories import (
