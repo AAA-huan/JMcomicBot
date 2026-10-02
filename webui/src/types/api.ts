@@ -50,7 +50,9 @@ export interface OperationTask {
 export interface QueueStatus {
   running: boolean
   queue_size: number
+  pending_count?: number
   current_file?: string | null
+  current_manga_id?: string | null
 }
 
 export interface SystemStatus {

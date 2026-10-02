@@ -198,7 +198,14 @@ onMounted(() => {
         <v-card class="pa-4 h-100">
           <div class="text-caption text-medium-emphasis">下载队列</div>
           <div class="text-h6">
-            {{ status?.download_queue.queue_size ?? '—' }} 个待处理
+            {{ status?.download_queue.queue_size ?? '—' }} 个任务
+          </div>
+          <div class="text-caption text-medium-emphasis text-truncate">
+            {{
+              status?.download_queue.current_manga_id
+                ? `正在下载：${status.download_queue.current_manga_id}`
+                : '当前没有正在下载的漫画'
+            }}
           </div>
         </v-card>
       </v-col>
@@ -206,7 +213,14 @@ onMounted(() => {
         <v-card class="pa-4 h-100">
           <div class="text-caption text-medium-emphasis">发送队列</div>
           <div class="text-h6">
-            {{ status?.send_queue.queue_size ?? '—' }} 个待处理
+            {{ status?.send_queue.queue_size ?? '—' }} 个任务
+          </div>
+          <div class="text-caption text-medium-emphasis text-truncate">
+            {{
+              status?.send_queue.current_file
+                ? `正在发送：${status.send_queue.current_file}`
+                : '当前没有正在发送的文件'
+            }}
           </div>
         </v-card>
       </v-col>

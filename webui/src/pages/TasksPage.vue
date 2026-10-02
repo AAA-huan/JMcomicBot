@@ -267,7 +267,14 @@ watch(
               {{ downloadQueue?.running ? '运行中' : '已停止' }}
             </v-chip>
           </div>
-          <div class="text-h5 mt-2">{{ downloadQueue?.queue_size ?? 0 }} 个待处理</div>
+          <div class="text-h5 mt-2">{{ downloadQueue?.queue_size ?? 0 }} 个任务</div>
+          <div class="text-caption text-medium-emphasis">
+            {{
+              downloadQueue?.current_manga_id
+                ? `正在下载：${downloadQueue.current_manga_id}`
+                : '当前没有正在下载的漫画'
+            }}
+          </div>
           <div class="text-caption text-medium-emphasis">
             下载任务由后台串行执行，刷新页面不会丢失。
           </div>
@@ -283,7 +290,7 @@ watch(
               {{ sendQueue?.running ? '运行中' : '已停止' }}
             </v-chip>
           </div>
-          <div class="text-h5 mt-2">{{ sendQueue?.queue_size ?? 0 }} 个待处理</div>
+          <div class="text-h5 mt-2">{{ sendQueue?.queue_size ?? 0 }} 个任务</div>
           <div class="text-caption text-medium-emphasis text-truncate">
             {{ sendQueue?.current_file ? `正在发送：${sendQueue.current_file}` : '当前没有正在发送的文件' }}
           </div>

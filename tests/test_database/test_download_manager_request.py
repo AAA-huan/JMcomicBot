@@ -87,3 +87,29 @@ def test_request_download_rejects_stopped_queue() -> None:
 
     with pytest.raises(RuntimeError, match="下载队列已停止"):
         manager.request_download("100", OperationContext.qq("10001"), None)
+
+
+def test_queue_status_counts_active_download() -> None:
+    """下载队列任务总数应包含正在下载的任务。"""
+    manager = _make_manager()
+    manager.download_queue.qsize = Mock(return_value=2)
+    manager.downloading_mangas["100"] = True
+
+    status = manager.get_queue_status()
+
+    assert status["queue_size"] == 3
+    assert status["pending_count"] == 2
+    assert status["current_manga_id"] == "100"
+    assert status["running"] is True
+
+
+def test_queue_status_without_active_download() -> None:
+    """没有正在下载的任务时总数等于排队数。"""
+    manager = _make_manager()
+    manager.download_queue.qsize = Mock(return_value=1)
+
+    status = manager.get_queue_status()
+
+    assert status["queue_size"] == 1
+    assert status["pending_count"] == 1
+    assert status["current_manga_id"] is None
