@@ -8,22 +8,17 @@
 - 🌐 稳定的网络连接
 - 🔧 系统管理员权限
 
-## ⚡ 推荐：使用 uv 部署（更简单）
+## ⚡ 一键快速部署
 
-[uv](https://docs.astral.sh/uv/) 是 Python 包与环境管理器，可自动创建虚拟环境、按 `uv.lock` 安装依赖并运行程序，省去手动 `venv` 与 `pip` 步骤：
+如果你希望最快完成部署，可直接运行一键部署脚本：它会自动安装 git/Python/uv、克隆项目、同步依赖、生成配置并引导填写关键项。
 
 ```bash
-# 1. 安装 uv（一次性；也可用 pip install uv）
-curl -LsSf https://astral.sh/uv/install.sh | sh
-
-# 2. 在项目目录内安装依赖（自动创建 .venv）
-uv sync
-
-# 3. 启动机器人（无需手动激活虚拟环境）
-uv run python main.py
+curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.sh | bash
 ```
 
-> 使用 uv 后，下文「环境配置」中的 `python3 -m venv` 与 `pip install` 可跳过；后文所有 `python main.py` 均可替换为 `uv run python main.py`。
+脚本完成后会打印 NapCat 部署要点。若希望了解手动步骤再操作，可继续阅读下文。
+
+> 脚本支持重复运行：再次执行等同于「拉取最新代码 + 同步依赖」，不会覆盖已填写的 `.env` / `option.yml`。
 
 ## 🚀 部署步骤
 
@@ -62,20 +57,19 @@ uv run python main.py
    sudo apt upgrade -y
    
    # 安装Python和必要工具
-   sudo apt install -y python3 python3-pip python3-venv git
+   sudo apt install -y python3 python3-venv git curl
    ```
 
-2. **创建虚拟环境**
+2. **安装 uv**
+   [uv](https://docs.astral.sh/uv/) 是 Python 包与环境管理器，可自动创建虚拟环境、按 `uv.lock` 安装依赖并运行程序，省去手动 `venv` 与 `pip` 步骤：
    ```bash
-   # 创建虚拟环境
-   python3 -m venv venv
-   source venv/bin/activate
+   curl -LsSf https://astral.sh/uv/install.sh | sh
    ```
 
-3. **安装依赖包**
+3. **安装项目依赖**
    ```bash
-   # 安装项目依赖
-   pip install -r requirements.txt --upgrade
+   # 在项目目录内执行（自动创建 .venv 并按 uv.lock 安装依赖）
+   uv sync
    ```
 
 ### 第三步：配置机器人
@@ -180,13 +174,7 @@ mlikiowa/napcat-docker:latest
 # 进入项目目录
 cd ~/JMBot
 
-# 激活虚拟环境
-source venv/bin/activate
-
-# 启动机器人
-python main.py
-
-# 或使用 uv 运行（无需激活虚拟环境）
+# 启动机器人（uv 会自动使用 .venv，无需手动激活虚拟环境）
 uv run python main.py
 
 # 停止机器人

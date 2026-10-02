@@ -7,22 +7,17 @@
 - 💾 **至少 4GB 可用存储空间**（根据下载漫画数量调整）
 - 🌐 **稳定的网络连接**（支持代理配置）
 
-## ⚡ 推荐：使用 uv 部署（更简单）
+## ⚡ 一键快速部署
 
-[uv](https://docs.astral.sh/uv/) 是 Python 包与环境管理器，可自动创建虚拟环境、按 `uv.lock` 安装依赖并运行程序，省去手动 `venv` 与 `pip` 步骤：
+如果你希望最快完成部署，可直接使用powershell运行一键部署脚本：它会自动安装 git/Python/uv、克隆项目、同步依赖、生成配置并引导填写关键项。
 
 ```powershell
-# 1. 安装 uv（一次性；也可用 pip install uv）
-powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
-
-# 2. 在项目目录内安装依赖（自动创建 .venv）
-uv sync
-
-# 3. 启动机器人（无需手动激活虚拟环境）
-uv run python main.py
+irm https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.ps1 | iex
 ```
 
-> 使用 uv 后，下文「环境配置」中的 `python -m venv` 与 `pip install` 可跳过；后文所有 `python main.py` 均可替换为 `uv run python main.py`。
+脚本完成后会打印 NapCat 部署要点。若希望了解手动步骤再操作，可继续阅读下文。
+
+> 脚本支持重复运行：再次执行等同于「拉取最新代码 + 同步依赖」，不会覆盖已填写的 `.env` / `option.yml`。
 
 ## 🚀 部署步骤
 
@@ -54,26 +49,16 @@ git clone https://github.com/AAA-huan/JMcomicBot.git .
 - 安装时务必勾选「Add Python to PATH」选项
 - 必须安装 Python 3.12 或更高版本（项目依赖要求）
 
-##### 2. 创建虚拟环境
-```bash
-# 确保在JMBot项目文件夹内
-# 鼠标右键打开powershell
-# 创建虚拟环境
-python -m venv venv
-
-# 激活虚拟环境
-# Windows PowerShell:
-venv\Scripts\Activate
-
-# 验证虚拟环境激活
-python --version
-pip --version
+##### 2. 安装 uv
+[uv](https://docs.astral.sh/uv/) 是 Python 包与环境管理器，可自动创建虚拟环境、按 `uv.lock` 安装依赖并运行程序，省去手动 `venv` 与 `pip` 步骤：
+```powershell
+powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"
 ```
 
 ##### 3. 安装项目依赖
-```bash
-# 使用 pip 安装依赖
-pip install -r requirements.txt  --upgrade
+```powershell
+# 在项目目录内执行（自动创建 .venv 并按 uv.lock 安装依赖）
+uv sync
 ```
 
 ### 🔧 第三步：配置机器人
@@ -153,10 +138,7 @@ LOW_MEMORY_MODE=false
    ```bash
    # 进入项目目录
    # 右键点击项目文件夹，选择在powershell中打开
-   # 启动机器人
-   python main.py
-
-   # 或使用 uv 运行（无需手动激活虚拟环境）
+   # 启动机器人（uv 会自动使用 .venv，无需手动激活虚拟环境）
    uv run python main.py
 
    # 停止机器人
@@ -169,18 +151,12 @@ LOW_MEMORY_MODE=false
 - 确保 NapCat 已正确安装并配置
 - 启动 NapCat 服务
 
-##### 2. 激活虚拟环境并启动机器人
+##### 2. 启动机器人
    ```bash
    # 进入项目目录
    # 右键点击项目文件夹，选择在powershell中打开
 
-   # 激活虚拟环境
-   venv\Scripts\Activate
-
-   # 启动机器人
-   python main.py
-
-   # 或使用 uv 运行（无需激活虚拟环境）
+   # 启动机器人（uv 会自动使用 .venv，无需手动激活虚拟环境）
    uv run python main.py
    ```
 
