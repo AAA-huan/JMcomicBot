@@ -18,4 +18,24 @@ export WEBUI_PORT="${E2E_PORT:-18080}"
 export WEBUI_SESSION_HOURS=24
 
 uv run python tests/smoke/prepare_test_data.py --mangas 6 >/dev/null 2>&1
+
+# 制造损坏 PDF 供阅读器错误界面用例使用（900004 不用于正常阅读用例）
+uv run python - <<'PY'
+import os
+import sqlite3
+from pathlib import Path
+
+db_path = Path(os.environ["DB_PATH"]) / "main.db"
+conn = sqlite3.connect(db_path)
+row = conn.execute(
+    "select relative_path from manga_file where manga_id = '900004'"
+).fetchone()
+conn.close()
+if row is None:
+    raise SystemExit("E2E 数据缺少 900004 文件记录")
+target = Path(os.environ["MANGA_DOWNLOAD_PATH"]) / row[0]
+target.write_bytes(b"this is not a valid pdf")
+print(f"E2E 损坏 PDF 已就绪: {target.name}")
+PY
+
 exec uv run python main.py
