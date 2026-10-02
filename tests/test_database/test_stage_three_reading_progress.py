@@ -55,8 +55,8 @@ def progress_repo(db_manager) -> ReadingProgressRepository:
 
 
 @pytest.fixture()
-def progress_service(progress_repo) -> ReadingProgressService:
-    return ReadingProgressService(progress_repo)
+def progress_service(progress_repo, manga_repo) -> ReadingProgressService:
+    return ReadingProgressService(progress_repo, manga_repo)
 
 
 def test_service_validates_page_range_and_computes_percent(

@@ -15,6 +15,7 @@ from src.database.repositories import (
     MangaTagRepository,
     OperationTaskRepository,
     PermissionRepository,
+    ReadingProgressRepository,
     ScanRecordRepository,
     SettingHistoryRepository,
     SettingRepository,
@@ -30,6 +31,7 @@ from src.service import (
     MangaService,
     OperationTaskService,
     PermissionService,
+    ReadingProgressService,
     RepairService,
     ScanService,
     SettingsService,
@@ -218,6 +220,9 @@ def build_web_context(  # pylint: disable=too-many-locals
             ScanRecordRepository(db_manager),
             task_service,
             download_root=str(download_root),
+        ),
+        reading_progress_service=ReadingProgressService(
+            ReadingProgressRepository(db_manager), manga_repo
         ),
         event_bus=event_bus,
     )

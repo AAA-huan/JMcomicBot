@@ -17,7 +17,11 @@ from src.service.permission_service import (
     CachedUser,
     PermissionService,
 )
-from src.service.reading_progress_service import ReadingProgressService
+from src.service.reading_progress_service import (
+    ReadingProgressFileNotFoundError,
+    ReadingProgressService,
+    ReadingProgressView,
+)
 from src.service.repair_service import RepairService
 from src.service.results import (
     BackupResult,
@@ -52,7 +56,9 @@ __all__ = [
     "OperationContext",
     "OperationTaskService",
     "PermissionService",
+    "ReadingProgressFileNotFoundError",
     "ReadingProgressService",
+    "ReadingProgressView",
     "RepairService",
     "ScanRunResult",
     "ScanService",

@@ -8,7 +8,7 @@ from typing import List, Optional
 
 import os
 
-from sqlalchemy import Select, delete, func, or_, select
+from sqlalchemy import Select, delete, func, or_, select, update
 from sqlalchemy.orm import selectinload
 
 from src.database.database import DatabaseManager
@@ -345,6 +345,23 @@ class MangaRepository(BaseRepository):
         """
         with self._get_session() as session:
             return session.get(MangaFile, file_id)
+
+    def update_page_count_if_zero(self, file_id: int, page_count: int) -> bool:
+        """仅在文件页数为 0 时补齐页数，返回是否更新了记录。
+
+        PDF.js 阅读器上报的页数只用于修正缺失值，不覆盖下载或校验写入的
+        可信页数；使用带条件的单条 UPDATE 原子完成，避免并发覆盖竞态。
+        """
+        if page_count <= 0:
+            raise ValueError("PDF页数必须大于 0")
+        with self._get_session() as session:
+            result = session.execute(
+                update(MangaFile)
+                .where(MangaFile.id == file_id, MangaFile.page_count == 0)
+                .values(page_count=page_count, updated_at=utc_now())
+            )
+            session.commit()
+            return bool(result.rowcount)
 
     def list_files(self, manga_id: str) -> List[MangaFile]:
         """查询指定漫画的 PDF 文件记录列表

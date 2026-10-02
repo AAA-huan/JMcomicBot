@@ -18,6 +18,7 @@ from src.database.repositories import (
     MangaTagRepository,
     OperationTaskRepository,
     PermissionRepository,
+    ReadingProgressRepository,
     ScanRecordRepository,
     SettingHistoryRepository,
     SettingRepository,
@@ -41,6 +42,7 @@ from src.service import (
     OperationContext,
     OperationTaskService,
     PermissionService,
+    ReadingProgressService,
     RepairService,
     ScanService,
     SettingsService,
@@ -99,6 +101,7 @@ class MangaBot:
         self.web_session_repo = WebSessionRepository(self.database_manager)
         self.backup_repo = BackupRepository(self.database_manager)
         self.scan_record_repo = ScanRecordRepository(self.database_manager)
+        self.reading_progress_repo = ReadingProgressRepository(self.database_manager)
         self.setting_repo = SettingRepository(self.database_manager)
         self.setting_history_repo = SettingHistoryRepository(self.database_manager)
         # WebSocket 事件总线：任务等业务线程发布，Web 连接订阅
@@ -199,6 +202,11 @@ class MangaBot:
             download_root=str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]),
             download_conflict_checker=self.download_manager.is_download_active,
             send_conflict_checker=self.message_manager.is_manga_sending,
+        )
+        # 阅读进度服务：WebUI 阅读器读写，文件存在性与页数补齐在服务层校验
+        self.reading_progress_service = ReadingProgressService(
+            self.reading_progress_repo,
+            self.manga_repo,
         )
         self.web_auth_service = WebAuthService(
             self.web_admin_repo,
@@ -318,6 +326,7 @@ class MangaBot:
                         database_maintenance_service=self.database_maintenance_service,
                         repair_service=self.repair_service,
                         scan_service=self.scan_service,
+                        reading_progress_service=self.reading_progress_service,
                         event_bus=self.event_bus,
                     ),
                     web_host=web_host,

@@ -127,3 +127,81 @@ def test_file_download_rejects_path_escape_symlink_and_non_pdf(db_manager) -> No
     # 错误响应不得出现绝对路径
     assert str(root) not in escape.text
     assert str(root) not in non_pdf.text
+
+
+def test_file_content_supports_range_requests(db_manager) -> None:
+    """Range 分段读取返回 206 与正确字节，越界范围返回 416。"""
+    client, root = _make_client(db_manager)
+    file_id, pdf_path = _add_manga_with_pdf(db_manager, root)
+    content = b"%PDF-1.4 range content for tests"
+    pdf_path.write_bytes(content)
+
+    with client:
+        setup_and_login(client)
+        full = client.get(f"/api/v1/files/{file_id}/content")
+        segment = client.get(
+            f"/api/v1/files/{file_id}/content",
+            headers={"Range": "bytes=0-9"},
+        )
+        out_of_range = client.get(
+            f"/api/v1/files/{file_id}/content",
+            headers={"Range": f"bytes={len(content)}-"},
+        )
+
+    assert full.status_code == 200
+    assert full.headers["accept-ranges"] == "bytes"
+    assert segment.status_code == 206
+    assert segment.content == content[:10]
+    assert segment.headers["content-range"] == f"bytes 0-9/{len(content)}"
+    assert out_of_range.status_code == 416
+    assert out_of_range.headers["content-range"] == f"bytes */{len(content)}"
+
+
+def test_file_content_disposition_inline_for_reading(db_manager) -> None:
+    """disposition=inline 供 PDF.js 内嵌读取；默认仍为附件下载。"""
+    client, root = _make_client(db_manager)
+    file_id, _pdf_path = _add_manga_with_pdf(db_manager, root)
+
+    with client:
+        setup_and_login(client)
+        inline = client.get(f"/api/v1/files/{file_id}/content?disposition=inline")
+        attachment = client.get(
+            f"/api/v1/files/{file_id}/content?disposition=attachment"
+        )
+        invalid = client.get(f"/api/v1/files/{file_id}/content?disposition=evil")
+
+    assert inline.status_code == 200
+    assert inline.headers["content-disposition"].startswith("inline")
+    assert attachment.status_code == 200
+    assert attachment.headers["content-disposition"].startswith("attachment")
+    assert invalid.status_code == 422
+    assert invalid.json()["code"] == "VALIDATION_ERROR"
+
+
+def test_file_content_large_range_reads_only_requested_segment(db_manager) -> None:
+    """大文件只返回请求区间（Content-Length 与片段一致），不整本返回。"""
+    client, root = _make_client(db_manager)
+    file_id, pdf_path = _add_manga_with_pdf(db_manager, root)
+    block = bytes(range(256)) * 4096  # 1 MiB 可校验模式
+    content = b"%PDF-1.4\n" + block * 4
+    pdf_path.write_bytes(content)
+
+    start = 2 * 1024 * 1024
+    end = start + 1023
+    with client:
+        setup_and_login(client)
+        segment = client.get(
+            f"/api/v1/files/{file_id}/content",
+            headers={"Range": f"bytes={start}-{end}"},
+        )
+        tail = client.get(
+            f"/api/v1/files/{file_id}/content",
+            headers={"Range": "bytes=-1024"},
+        )
+
+    assert segment.status_code == 206
+    assert len(segment.content) == 1024
+    assert segment.content == content[start : end + 1]
+    assert segment.headers["content-range"] == f"bytes {start}-{end}/{len(content)}"
+    assert tail.status_code == 206
+    assert tail.content == content[-1024:]
