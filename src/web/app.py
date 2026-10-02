@@ -24,7 +24,7 @@ from src.web.security import (
 def create_web_app(
     dependencies: WebDependencies,
     web_host: str = "127.0.0.1",
-    web_port: int = 8000,
+    web_port: int = 7999,
     status_interval_seconds: float = 2.0,
     extra_origins: set[str] | None = None,
 ) -> FastAPI:

@@ -151,7 +151,7 @@ class ConfigManager:
         webui_host = os.getenv("WEBUI_HOST", "127.0.0.1").strip()
         if not webui_host:
             raise ValueError("WEBUI_HOST 不能为空")
-        webui_port = _parse_int_config("WEBUI_PORT", 8000, 1, 65535)
+        webui_port = _parse_int_config("WEBUI_PORT", 7999, 1, 65535)
         webui_session_hours = _parse_int_config("WEBUI_SESSION_HOURS", 24, 1, 24 * 30)
         # 开发环境额外允许的页面来源（Vite 开发服务器），生产默认留空
         webui_dev_origins = self._parse_id_list(os.getenv("WEBUI_DEV_ORIGINS", ""))

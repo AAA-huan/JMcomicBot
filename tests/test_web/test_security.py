@@ -11,10 +11,10 @@ from src.web.security import allowed_web_origins
 def test_allowed_origins_include_configured_dev_origins() -> None:
     """开发服务器来源应可通过配置加入白名单。"""
     origins = allowed_web_origins(
-        "127.0.0.1", 8000, {"http://127.0.0.1:5173", "http://localhost:5173"}
+        "127.0.0.1", 7999, {"http://127.0.0.1:5173", "http://localhost:5173"}
     )
 
-    assert "http://127.0.0.1:8000" in origins
+    assert "http://127.0.0.1:7999" in origins
     assert "http://127.0.0.1:5173" in origins
     assert "http://localhost:5173" in origins
 

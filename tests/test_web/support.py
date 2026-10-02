@@ -250,7 +250,7 @@ def create_test_client(
     host: str = "127.0.0.1",
     status_interval_seconds: float = 2.0,
     web_host: str = "127.0.0.1",
-    web_port: int = 8000,
+    web_port: int = 7999,
     host_header: str = "127.0.0.1",
 ) -> TestClient:
     """构造带固定 Host 头的测试客户端。

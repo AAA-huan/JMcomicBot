@@ -8,7 +8,7 @@ from starlette.websockets import WebSocketDisconnect
 
 from tests.test_web.support import PASSWORD, build_web_context, create_test_client
 
-LAN_HOST = "172.23.7.69:8000"
+LAN_HOST = "172.23.7.69:7999"
 
 
 def _make_lan_client(db_manager) -> TestClient:

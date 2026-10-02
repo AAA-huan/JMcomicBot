@@ -23,7 +23,7 @@ export default defineConfig({
     proxy: {
       // 开发环境把 API 与事件推送代理到本机后端
       '/api': {
-        target: 'http://127.0.0.1:8000',
+        target: 'http://127.0.0.1:7999',
         changeOrigin: false,
         ws: true,
       },

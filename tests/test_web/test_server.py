@@ -42,7 +42,7 @@ def test_web_server_starts_and_stops_idempotently() -> None:
     server = WebServer(
         FastAPI(),
         "127.0.0.1",
-        8000,
+        7999,
         server_factory=create_server,
     )
 
@@ -61,7 +61,7 @@ def test_web_server_surfaces_startup_error() -> None:
     server = WebServer(
         FastAPI(),
         "127.0.0.1",
-        8000,
+        7999,
         server_factory=FailingUvicornServer,
     )
 
@@ -76,7 +76,7 @@ def test_constructing_web_server_does_not_start_thread() -> None:
     server = WebServer(
         FastAPI(),
         "127.0.0.1",
-        8000,
+        7999,
         server_factory=FakeUvicornServer,
     )
 

@@ -25,7 +25,7 @@ def test_webui_config_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
 
     assert manager.get("WEBUI_ENABLED") is True
     assert manager.get("WEBUI_HOST") == "127.0.0.1"
-    assert manager.get("WEBUI_PORT") == 8000
+    assert manager.get("WEBUI_PORT") == 7999
     assert manager.get("WEBUI_SESSION_HOURS") == 24
 
 
