@@ -46,7 +46,7 @@ function Ask ([string]$Prompt, [string]$Default = '') {
     if ($Default) {
         $promptText = "$Prompt（默认：$Default）: "
     } else {
-        $promptText = "$Prompt: "
+        $promptText = "${Prompt}: "
     }
     Write-Host -NoNewline $promptText
     $line = $null
@@ -150,25 +150,110 @@ function Ensure-Python {
     Die "请安装满足要求的 Python 后重新运行本脚本。"
 }
 
+# ============================ uv 安装（三源顺序 fallback） ============================
+
+# uv 安装候选源（按优先级）：
+#   1. astral.sh 官方安装器：最完整，自动检测平台、写入 ~/.local/bin 与 shell 配置
+#   2. GitHub Release 二进制直连：releases/latest/download/uv-<平台>.zip
+#   3. ghproxy 镜像 release：对 github.com 做代理，国内 github 不通时使用
+# 按顺序尝试，第一个成功即返回；全部失败则报错并给出手动安装指引（不静默兜底）
+
+# 安装后验证：把 ~/.local/bin 加入 PATH 并确认 uv 可用
+function Verify-UvAfterInstall {
+    $env:Path = (Join-Path $HOME '.local\bin') + ';' + $env:Path
+    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
+        Log-Warn "uv 安装后仍不在 PATH 中"
+        return $false
+    }
+    Log-Ok "uv 安装完成：$(uv --version)"
+    return $true
+}
+
+# 源1：astral.sh 官方安装器（最完整）
+function Install-UvFromAstral {
+    Log-Info "尝试源1：astral.sh 官方安装器"
+    try {
+        $resp = Invoke-WebRequest -Uri 'https://astral.sh/uv/install.ps1' -UseBasicParsing -TimeoutSec 30
+        & ([scriptblock]::Create($resp.Content))
+        return $true
+    } catch {
+        Log-Warn "源1（astral.sh 官方安装器）失败：$($_.Exception.Message)"
+        return $false
+    }
+}
+
+# 源2/3：GitHub Release 二进制（prefix 为空=直连，prefix=镜像前缀=走镜像）
+function Install-UvFromRelease ([string]$Prefix) {
+    $desc = if ($Prefix) { $Prefix } else { 'GitHub 直连' }
+    Log-Info "尝试源：GitHub Release 二进制（${desc}）"
+
+    # 平台资产映射：默认 x64，ARM64 设备用 aarch64
+    $asset = 'uv-x86_64-pc-windows-msvc.zip'
+    if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
+        $asset = 'uv-aarch64-pc-windows-msvc.zip'
+    }
+    $url = "${Prefix}https://github.com/astral-sh/uv/releases/latest/download/${asset}"
+
+    $tmpZip = Join-Path $env:TEMP "uv-download-$(Get-Random).zip"
+    try {
+        Invoke-WebRequest -Uri $url -OutFile $tmpZip -UseBasicParsing -TimeoutSec 60
+    } catch {
+        Log-Warn "下载失败（${desc}）"
+        Remove-Item $tmpZip -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+
+    $extractDir = Join-Path $env:TEMP "uv-extract-$(Get-Random)"
+    try {
+        Expand-Archive -Path $tmpZip -DestinationPath $extractDir -Force
+    } catch {
+        Log-Warn "解压失败（${desc}）"
+        Remove-Item $tmpZip, $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+
+    # 定位 uv.exe（结构：uv-<平台>/uv.exe 与 uv-<平台>/uvx.exe）
+    $uvExe = Get-ChildItem -Path $extractDir -Recurse -Filter 'uv.exe' -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if (-not $uvExe) {
+        Log-Warn "解压后未找到 uv.exe"
+        Remove-Item $tmpZip, $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+        return $false
+    }
+
+    # 复制到 ~/.local/bin（与官方安装器默认路径一致）
+    $binDir = Join-Path $HOME '.local\bin'
+    if (-not (Test-Path $binDir)) { New-Item -ItemType Directory -Path $binDir | Out-Null }
+    Copy-Item $uvExe.FullName (Join-Path $binDir 'uv.exe') -Force
+    $uvxExe = Get-ChildItem -Path $extractDir -Recurse -Filter 'uvx.exe' -ErrorAction SilentlyContinue |
+        Select-Object -First 1
+    if ($uvxExe) { Copy-Item $uvxExe.FullName (Join-Path $binDir 'uvx.exe') -Force }
+
+    Remove-Item $tmpZip, $extractDir -Recurse -Force -ErrorAction SilentlyContinue
+    return $true
+}
+
 function Ensure-Uv {
     if (Get-Command uv -ErrorAction SilentlyContinue) {
         Log-Ok "uv 已安装：$(uv --version)"
         return
     }
-    # astral 安装器默认路径
+    # 官方安装器与 release 二进制都写入此路径
     $uvPath = Join-Path $HOME '.local\bin\uv.exe'
     if (Test-Path $uvPath) {
         $env:Path = (Join-Path $HOME '.local\bin') + ';' + $env:Path
         Log-Ok "uv 已安装：$(uv --version)"
         return
     }
-    Log-Info "未检测到 uv，使用官方安装器安装..."
-    & ([scriptblock]::Create((Invoke-WebRequest -Uri 'https://astral.sh/uv/install.ps1' -UseBasicParsing).Content))
-    $env:Path = (Join-Path $HOME '.local\bin') + ';' + $env:Path
-    if (-not (Get-Command uv -ErrorAction SilentlyContinue)) {
-        Die "uv 安装失败，请手动安装后重试"
-    }
-    Log-Ok "uv 安装完成：$(uv --version)"
+
+    Log-Info "未检测到 uv，开始安装（三源顺序 fallback）"
+    if ((Install-UvFromAstral) -and (Verify-UvAfterInstall)) { return }
+    if ((Install-UvFromRelease -Prefix '') -and (Verify-UvAfterInstall)) { return }
+    if ((Install-UvFromRelease -Prefix 'https://ghproxy.net/') -and (Verify-UvAfterInstall)) { return }
+
+    Log-Error "uv 安装失败：所有候选源均不可用"
+    Log-Info "请手动安装 uv：https://docs.astral.sh/uv/getting-started/installation/"
+    Die "uv 安装失败，请手动安装后重试"
 }
 
 # ============================ 项目获取 / 更新 ============================
@@ -239,18 +324,25 @@ function Interactive-Config {
     $curWs = Get-Env 'NAPCAT_WS_URL' '.env'
     if ([string]::IsNullOrWhiteSpace($curWs) -or $curWs -eq $WsUrlPlaceholder) {
         Write-Host "NapCat WebSocket 地址是 bot 与 NapCat 通信的关键。"
-        Write-Host "格式形如 ws://主机:端口/路径，例如 ws://localhost:3001/qq"
+        Write-Host "NapCat 与 bot 同机时只需输入端口号（如 3001），将自动拼接为 ws://localhost:<端口>/qq"
+        Write-Host "若 NapCat 在远端或路径不同，可直接输入完整地址（如 ws://1.2.3.4:8080/qq）"
         while ($true) {
-            $ws = Ask "请输入 NAPCAT_WS_URL" ""
+            $ws = Ask "请输入 NapCat WebSocket 端口或完整地址" ""
             if ([string]::IsNullOrWhiteSpace($ws)) {
-                Log-Warn "NAPCAT_WS_URL 不能为空，请重新输入"
+                Log-Warn "不能为空，请重新输入"
                 continue
             }
+            # 纯数字：当作端口，拼接默认地址（NapCat 与 bot 同机的最常见场景）
+            if ($ws -match '^[0-9]+$') {
+                $ws = "ws://localhost:${ws}/qq"
+                break
+            }
+            # 完整 ws/wss 地址直接采用
             if ($ws -match '^wss?://.+') { break }
-            Log-Warn "格式应为 ws://host:port/path，请重新输入"
+            Log-Warn "格式应为端口号（如 3001）或 ws://host:port/path，请重新输入"
         }
         Set-Env 'NAPCAT_WS_URL' $ws '.env'
-        Log-Ok "NAPCAT_WS_URL 已写入"
+        Log-Ok "NAPCAT_WS_URL 已写入: $ws"
     } else {
         Log-Ok "NAPCAT_WS_URL 已配置（$curWs），跳过"
     }
