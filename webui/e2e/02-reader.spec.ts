@@ -158,3 +158,53 @@ test('移动端单页模式左右滑动翻页', async ({ page }, testInfo) => {
 
   await expect.poll(() => currentPage(page)).toBe(before + 1)
 })
+
+test('退出阅读器后再次进入仍能正常加载', async ({ page }) => {
+  await login(page)
+  await openReader(page)
+
+  // 返回详情页会销毁上一个 PDF 与它的 Worker
+  await page.getByRole('button', { name: '返回' }).click()
+  await expect(page).toHaveURL(/\/library\/900001/)
+
+  // 再次进入：Worker 生命周期重生，必须仍能渲染而不是停在加载/错误界面
+  const readButton = page.getByRole('button', { name: /阅读/ }).first()
+  await expect(readButton).toBeVisible()
+  await readButton.click()
+  await expect(page).toHaveURL(/\/reader\/\d+/)
+  const canvas = page.locator('canvas').first()
+  await expect(canvas).toBeVisible()
+  await expect
+    .poll(() => canvas.evaluate((el) => (el as HTMLCanvasElement).width), {
+      timeout: 15_000,
+    })
+    .toBeGreaterThan(0)
+  await expect(page.getByText('PDF 加载失败，请重试')).toBeHidden()
+})
+
+test('Worker 不可用时回退主线程仍能渲染', async ({ page }) => {
+  // 模拟不支持/无法加载 Web Worker 的手机浏览器：只拦截 Worker 线程的脚本请求，
+  // 主线程动态 import 的兜底路径不受影响，阅读器必须仍能渲染而不是报错。
+  await page.route(/pdf\.worker\.min-.*\.mjs$/, (route) => {
+    const destination = route.request().headers()['sec-fetch-dest']
+    if (destination === 'worker') {
+      void route.abort()
+    } else {
+      void route.continue()
+    }
+  })
+
+  await login(page)
+  await page.goto('/library/900001')
+  await page.getByRole('button', { name: /阅读/ }).first().click()
+  await expect(page).toHaveURL(/\/reader\/\d+/)
+
+  const canvas = page.locator('canvas').first()
+  await expect(canvas).toBeVisible({ timeout: 20_000 })
+  await expect
+    .poll(() => canvas.evaluate((el) => (el as HTMLCanvasElement).width), {
+      timeout: 20_000,
+    })
+    .toBeGreaterThan(0)
+  await expect(page.getByText('PDF 加载失败，请重试')).toBeHidden()
+})
