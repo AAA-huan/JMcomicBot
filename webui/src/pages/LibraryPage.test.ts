@@ -196,4 +196,20 @@ describe('LibraryPage', () => {
     wrapper.unmount()
   })
 
+  it('切换收藏、历史和本地时更新请求并重置分页排序', async () => {
+    vi.mocked(listMangas).mockResolvedValue({ items: [], page: 1, page_size: 20, total: 0, pages: 0 })
+    const { wrapper, router } = await mountPage('/library?page=3&sort=id_asc')
+    const tab = (text: string) => wrapper.findAll('[role="tab"]').find((item) => item.text().includes(text))!
+    expect(wrapper.text()).toContain('封面预览')
+    expect(wrapper.text()).not.toContain('仅看收藏')
+    await tab('收藏').trigger('click')
+    await vi.waitFor(() => expect(listMangas).toHaveBeenLastCalledWith(expect.objectContaining({ favorite_only: true, page: 1 })))
+    await tab('历史').trigger('click')
+    await vi.waitFor(() => expect(listMangas).toHaveBeenLastCalledWith(expect.objectContaining({ history_only: true, favorite_only: undefined, sort: 'read_at_desc', page: 1 })))
+    expect(router.currentRoute.value.query.collection).toBe('history')
+    await tab('本地').trigger('click')
+    await vi.waitFor(() => expect(listMangas).toHaveBeenLastCalledWith(expect.objectContaining({ history_only: undefined, favorite_only: undefined, sort: 'downloaded_at_desc' })))
+    wrapper.unmount()
+  })
+
 })

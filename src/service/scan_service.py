@@ -61,7 +61,7 @@ class ScanService:  # pylint: disable=too-few-public-methods
         Args:
             context: 操作来源上下文，缺省按系统来源记录
             dry_run: 仅统计将入库的内容，不创建任务、不写数据库
-            enrich: 扫描后联网补全作者与标签（WebUI 第一版不开放）
+            enrich: 扫描后联网补全作者与标签
 
         Returns:
             ScanRunResult: 扫描与同步统计

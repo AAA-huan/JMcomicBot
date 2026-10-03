@@ -60,6 +60,12 @@ const router = createRouter({
       meta: { title: '配置' },
     },
     {
+      path: '/documents',
+      name: 'documents',
+      component: () => import('@/pages/DocumentsPage.vue'),
+      meta: { title: '项目文档' },
+    },
+    {
       path: '/maintenance',
       name: 'maintenance',
       component: () => import('@/pages/MaintenancePage.vue'),

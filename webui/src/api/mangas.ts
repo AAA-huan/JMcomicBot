@@ -5,6 +5,7 @@ import type { Manga, MangaFile, PageResult } from '@/types/api'
 
 export interface MangaListQuery {
   favorite_only?: boolean
+  history_only?: boolean
   page?: number
   page_size?: number
   search?: string

@@ -65,6 +65,7 @@ def create_manga_router(
         tag: Optional[str] = None,
         sort: str = "downloaded_at_desc",
         favorite_only: bool = False,
+        history_only: bool = False,
     ) -> dict[str, object]:
         try:
             return asdict(
@@ -76,6 +77,7 @@ def create_manga_router(
                     tag,
                     sort,
                     favorite_only=favorite_only,
+                    history_only=history_only,
                     admin_id=authenticated.admin_id,
                 )
             )

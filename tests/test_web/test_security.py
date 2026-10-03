@@ -157,8 +157,19 @@ def test_module_worker_asset_is_served_as_javascript(db_manager) -> None:
     assert worker_files, "构建产物缺少 PDF.js Worker，请先执行 npm run build"
     worker_name = worker_files[0].name
     # 校验阅读器实际引用的 Worker，避免旧产物或扩展名变更导致误判。
-    reader_files = (static_root / "assets").glob("PdfReader-*.js")
-    assert any(worker_name in path.read_text() for path in reader_files)
+    # 封面预览与阅读器共用 PDF 加载模块，Vite 会提取为共享资源。
+    reader_files = list((static_root / "assets").glob("PdfReader-*.js"))
+    loader_files = list((static_root / "assets").glob("usePdfDocument-*.js"))
+    worker_users = [
+        path for path in reader_files + loader_files if worker_name in path.read_text()
+    ]
+    assert worker_users
+    if loader_files:
+        assert any(
+            loader.name in reader.read_text()
+            for loader in worker_users
+            for reader in reader_files
+        )
 
     with _create_client(db_manager) as client:
         response = client.get(f"/assets/{worker_name}")
