@@ -1,10 +1,13 @@
-﻿# ============================================================================
+# ============================================================================
 # JMComicBot 一键部署脚本（Windows PowerShell）
 #
 # 用法：
 #   irm https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.ps1 | iex
 # 或先下载后运行：
-#   powershell -ExecutionPolicy Bypass -File deploy.ps1
+#   powershell -ExecutionPolicy Bypass -Command "iex ([IO.File]::ReadAllText('deploy.ps1', [Text.Encoding]::UTF8))"
+#
+# 编码：保存为无 BOM 的 UTF-8，避免 irm | iex 将 BOM 与首行 # 当作命令。
+# Windows PowerShell 5.1 运行下载后的文件时，使用上面的命令显式按 UTF-8 读取。
 #
 # 行为：
 #   1. 检查 Python>=3.12，检测 / 安装 git、uv
