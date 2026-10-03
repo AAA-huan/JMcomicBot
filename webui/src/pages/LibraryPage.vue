@@ -9,6 +9,7 @@ import { batchDeleteMangas, deleteManga, listMangas } from '@/api/mangas'
 import { requestDownloads } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import { useCoverPreview } from '@/stores/coverPreview'
 import type { Manga } from '@/types/api'
 import { formatDateTime, parseMangaIds } from '@/utils/format'
 import {
@@ -18,6 +19,7 @@ import {
   MANGA_STATUS_LABELS,
 } from '@/utils/labels'
 
+const { coverPreview } = useCoverPreview()
 const route = useRoute()
 const router = useRouter()
 const { mobile } = useDisplay()
@@ -31,6 +33,7 @@ const statusOptions = [
   { value: 'deleted', title: '已删除' },
 ]
 const sortOptions = [
+  { value: 'read_at_desc', title: '阅读时间（新→旧）' },
   { value: 'downloaded_at_desc', title: '下载时间（新→旧）' },
   { value: 'downloaded_at_asc', title: '下载时间（旧→新）' },
   { value: 'title_asc', title: '标题（A→Z）' },
@@ -62,6 +65,7 @@ const filters = reactive({
   page: 1,
   pageSize: 20,
   favoriteOnly: false,
+  collection: 'local' as 'local' | 'favorites' | 'history',
 })
 
 interface LibraryListCache {
@@ -108,9 +112,12 @@ function readQuery(): void {
     filters.scope = rawTag ? 'tag' : 'keyword'
   }
   filters.keyword = rawTag || rawSearch
-  filters.favoriteOnly = query.favorite_only === 'true'
+  filters.collection = query.collection === 'history' ? 'history'
+    : query.collection === 'favorites' || query.favorite_only === 'true' ? 'favorites' : 'local'
+  filters.favoriteOnly = filters.collection === 'favorites'
   filters.status = typeof query.status === 'string' ? query.status : ''
-  filters.sort = typeof query.sort === 'string' ? query.sort : 'downloaded_at_desc'
+  filters.sort = typeof query.sort === 'string' ? query.sort
+    : filters.collection === 'history' ? 'read_at_desc' : 'downloaded_at_desc'
   const page = Number.parseInt(typeof query.page === 'string' ? query.page : '1', 10)
   filters.page = Number.isFinite(page) && page > 0 ? page : 1
   const size = Number.parseInt(
@@ -141,6 +148,7 @@ async function load(options: { silent?: boolean } = {}): Promise<void> {
       tag: filters.scope === 'tag' ? filters.keyword || undefined : undefined,
       sort: filters.sort,
       favorite_only: filters.favoriteOnly || undefined,
+      history_only: filters.collection === 'history' || undefined,
     })
     mangas.value = result.items
     total.value = result.total
@@ -165,6 +173,16 @@ function updateQuery(patch: Record<string, string | number | undefined>): void {
     query[key] = String(value)
   }
   void router.push({ query })
+}
+
+/** 切换分组时恢复默认排序并回到第一页。 */
+function switchCollection(collection: 'local' | 'favorites' | 'history'): void {
+  updateQuery({
+    collection: collection === 'local' ? undefined : collection,
+    favorite_only: undefined,
+    sort: collection === 'history' ? 'read_at_desc' : 'downloaded_at_desc',
+    page: 1,
+  })
 }
 
 function fileDownloadUrl(fileId: number): string {
@@ -413,15 +431,24 @@ watch(
         </v-row>
       </v-card-text>
       <v-divider />
+      <v-tabs
+        :model-value="filters.collection"
+        color="primary"
+        aria-label="漫画库分组"
+        @update:model-value="switchCollection($event as 'local' | 'favorites' | 'history')"
+      >
+        <v-tab value="local" prepend-icon="mdi-folder-outline">本地</v-tab>
+        <v-tab value="favorites" prepend-icon="mdi-star-outline">收藏</v-tab>
+        <v-tab value="history" prepend-icon="mdi-history">历史</v-tab>
+      </v-tabs>
       <v-card-actions class="flex-wrap">
         <v-switch
-          v-model="filters.favoriteOnly"
-          label="仅看收藏"
+          v-model="coverPreview"
+          label="封面预览"
           color="primary"
           hide-details
           density="compact"
           class="ml-2"
-          @update:model-value="updateQuery({ favorite_only: filters.favoriteOnly ? 'true' : undefined, page: 1 })"
         />
         <span class="text-body-2 text-medium-emphasis ml-2">
           共 {{ total }} 条

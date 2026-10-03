@@ -1,7 +1,9 @@
 """认证、系统状态、漫画和任务只读 API 集成测试。"""
 
+from datetime import timedelta
 from starlette.testclient import TestClient
 
+from src.database.models import MangaFile, ReadingProgress, utc_now
 from src.database.repositories import (
     MangaRepository,
     MangaTagRepository,
@@ -106,3 +108,63 @@ def test_task_read_api_supports_filters_and_details(db_manager) -> None:
     assert detail.status_code == 200
     assert detail.json()["id"] == wanted.id
     assert invalid.status_code == 400
+
+
+def test_history_uses_read_time_and_pagination(db_manager) -> None:
+    """历史按最近阅读排序，分页且排除未读漫画。"""
+    repository = MangaRepository(db_manager)
+    for manga_id in ("100", "200", "300"):
+        repository.upsert(manga_id, f"漫画{manga_id}", "作者", 2, 20)
+    now = utc_now()
+    with db_manager.get_session() as session:
+        for index, (manga_id, days) in enumerate((("100", 0), ("200", 1)), start=1):
+            file = MangaFile(
+                manga_id=manga_id,
+                display_name=f"章节{index}.pdf",
+                relative_path=f"{index}.pdf",
+                status="ready",
+            )
+            session.add(file)
+            session.flush()
+            session.add(
+                ReadingProgress(
+                    manga_file_id=file.id,
+                    page_number=2,
+                    page_count=10,
+                    percent=20,
+                    updated_at=now - timedelta(days=days),
+                )
+            )
+        session.commit()
+    with _create_client(db_manager) as client:
+        _setup_and_login(client)
+        first = client.get(
+            "/api/v1/mangas",
+            params={
+                "history_only": True,
+                "sort": "read_at_desc",
+                "page_size": 1,
+            },
+        )
+        assert first.status_code == 200
+        assert first.json()["total"] == 2
+        assert [item["id"] for item in first.json()["items"]] == ["100"]
+        second = client.get(
+            "/api/v1/mangas",
+            params={
+                "history_only": True,
+                "sort": "read_at_desc",
+                "page_size": 1,
+                "page": 2,
+            },
+        )
+        assert [item["id"] for item in second.json()["items"]] == ["200"]
+        searched = client.get(
+            "/api/v1/mangas",
+            params={
+                "history_only": True,
+                "sort": "read_at_desc",
+                "search": "200",
+            },
+        )
+        assert searched.json()["total"] == 1

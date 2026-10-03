@@ -6,13 +6,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-import os
-
 from sqlalchemy import Integer, Select, cast, delete, func, or_, select, update
 from sqlalchemy.orm import selectinload
 
+import os  # pylint: disable=wrong-import-order  # 项目规范要求直接 import 位于 from 导入之后
+
 from src.database.database import DatabaseManager
-from src.database.models import Manga, MangaFavorite, MangaFile, MangaTag, Tag, utc_now
+from src.database.models import (
+    Manga,
+    MangaFavorite,
+    MangaFile,
+    MangaTag,
+    ReadingProgress,
+    Tag,
+    utc_now,
+)
 
 from ._base import BaseRepository
 
@@ -121,12 +129,22 @@ class MangaRepository(BaseRepository):
         tag: Optional[str] = None,
         sort: str = "downloaded_at_desc",
         favorite_owner_id: Optional[str] = None,
+        history_only: bool = False,
     ) -> tuple[List[Manga], int]:
         """按白名单条件分页查询漫画并返回总数。"""
         # 漫画 ID 是数字字符串，排序必须按数值比较，避免 "101051" 排在 "2556" 之前；
         # 数值 ID 同时作为其他排序方式的稳定第二排序键。
         numeric_id = cast(Manga.id, Integer)
+        # 聚合所有章节的最近阅读时间，保证漫画去重和分页顺序正确。
+        last_read = (
+            select(func.max(ReadingProgress.updated_at))
+            .join(MangaFile, ReadingProgress.manga_file_id == MangaFile.id)
+            .where(MangaFile.manga_id == Manga.id)
+            .correlate(Manga)
+            .scalar_subquery()
+        )
         sort_columns = {
+            "read_at_desc": (last_read.desc(), numeric_id),
             "downloaded_at_desc": (Manga.downloaded_at.desc(), numeric_id),
             "downloaded_at_asc": (Manga.downloaded_at, numeric_id),
             "title_asc": (Manga.title, numeric_id),
@@ -137,6 +155,8 @@ class MangaRepository(BaseRepository):
         if sort not in sort_columns:
             raise ValueError(f"不支持的漫画排序方式: {sort}")
         base_statement = self._build_query(search, status, tag)
+        if history_only:
+            base_statement = base_statement.where(last_read.is_not(None))
         if favorite_owner_id is not None:
             base_statement = base_statement.where(
                 select(MangaFavorite.manga_id)
