@@ -47,9 +47,12 @@ def run_script(request, tmp_path: Path) -> Callable:
             script_path = _ps_string(_windows_path(PROJECT_ROOT / "scripts/deploy.ps1"))
             directory = _ps_string(_windows_path(tmp_path))
             source = (
-                ". ([scriptblock]::Create([IO.File]::ReadAllText("
+                # 模拟 irm 将原始 UTF-8 字节解码为字符串的路径；ReadAllText
+                # 会自动移除 BOM，从而掩盖脚本首行的 CommandNotFoundException。
+                "$ErrorActionPreference = 'Stop'\n"
+                + ". ([scriptblock]::Create([Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes("
                 + script_path
-                + ", [Text.Encoding]::UTF8)))\n"
+                + "))))\n"
                 + "Set-Location "
                 + directory
                 + "\n[Console]::SetIn([IO.StringReader]::new("
