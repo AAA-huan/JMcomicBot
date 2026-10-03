@@ -214,11 +214,11 @@ class DownloadManager:
                     self.download_queue.task_done()
                 except queue.Empty:
                     continue
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     self.logger.error(f"处理下载队列任务时出错: {e}")
                     try:
                         self.download_queue.task_done()
-                    except Exception:
+                    except Exception:  # pylint: disable=broad-exception-caught
                         pass
 
         self._queue_thread = threading.Thread(
@@ -278,7 +278,7 @@ class DownloadManager:
                     deleted_count += 1
 
             self.logger.info(f"低占用模式：已清空 {deleted_count} 个PDF文件")
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error(f"清空下载文件夹时出错: {e}")
             raise
 
@@ -299,7 +299,7 @@ class DownloadManager:
                     self.logger.info(
                         f"低占用模式：已延迟删除文件: {os.path.basename(file_path)}"
                     )
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 self.logger.error(f"延迟删除文件时出错: {e}")
 
         deletion_thread = threading.Thread(target=delete_after_delay, daemon=True)
@@ -405,12 +405,12 @@ class DownloadManager:
                         file_path=pdf_path,
                         page_count=total_pages,
                     )
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     self.logger.error(f"持久化漫画元数据失败: {e}")
             if self.tag_repo is not None:
                 try:
                     self._sync_tags_to_db(manga_id, album_tags)
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     self.logger.error(f"同步漫画标签失败: {e}")
             if self.task_log_repo is not None and item.context.source == "qq":
                 # TaskLog 只保留 QQ 来源的历史记录，Web 来源以操作任务与审计为准
@@ -424,7 +424,7 @@ class DownloadManager:
                         private=item.context.actor_group_id is None,
                         message=f"标题: {album_name}, 共{total_pages}页",
                     )
-                except Exception as e:
+                except Exception as e:  # pylint: disable=broad-exception-caught
                     self.logger.error(f"记录下载任务日志失败: {e}")
 
             # 生成响应消息；通知器为空表示 Web/系统来源，只记录状态不发送 QQ 消息
@@ -446,6 +446,8 @@ class DownloadManager:
                             f"低占用模式：已自动发送PDF文件: "
                             f"{os.path.basename(pdf_path)}"
                         )
+                    # 此边界记录发送失败并继续完成下载任务。
+                    # pylint: disable-next=broad-exception-caught
                     except Exception as send_error:
                         self.logger.error(f"发送PDF文件失败: {send_error}")
                 else:
@@ -470,7 +472,7 @@ class DownloadManager:
                     context=operation_context,
                 )
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error(f"下载漫画出错: {e}")
             if self.operation_task_service is not None and operation_task_id:
                 self.operation_task_service.fail(
@@ -490,7 +492,7 @@ class DownloadManager:
                         private=item.context.actor_group_id is None,
                         message=str(e),
                     )
-                except Exception as log_error:
+                except Exception as log_error:  # pylint: disable=broad-exception-caught
                     self.logger.error(f"记录下载失败日志出错: {log_error}")
             error_msg = f"❌ 下载失败：{str(e)}\n\n快让主人帮我检查一下∑(O_O；)"
             if item.notifier is not None:

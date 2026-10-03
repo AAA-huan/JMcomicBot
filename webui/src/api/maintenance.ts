@@ -1,7 +1,7 @@
 /** 维护操作接口：扫描、修复与备份。 */
 
 import { apiRequest } from './client'
-import type { BackupRecord, PageResult, ScanResultView } from '@/types/api'
+import type { BackupRecord, PageResult, ScanResultView, VerifyResult } from '@/types/api'
 
 export function scanLibrary(): Promise<ScanResultView> {
   return apiRequest<ScanResultView>('/maintenance/scan', { method: 'POST' })
@@ -9,6 +9,10 @@ export function scanLibrary(): Promise<ScanResultView> {
 
 export function repairLibrary(): Promise<{ cleaned_count: number }> {
   return apiRequest('/maintenance/repair', { method: 'POST' })
+}
+
+export function verifyLibrary(mangaIds: string[]): Promise<VerifyResult> {
+  return apiRequest('/maintenance/verify', { method: 'POST', body: { manga_ids: mangaIds } })
 }
 
 export interface BackupListQuery {

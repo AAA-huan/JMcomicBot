@@ -20,18 +20,20 @@ from src.service.web_auth_service import (
     MINIMUM_PASSWORD_LENGTH,
     AuthenticatedSession,
 )
-from src.web.api.common import SESSION_COOKIE_NAME, build_authenticate
-from src.web.api.file_routes import create_file_router
-from src.web.api.maintenance_routes import create_maintenance_router
-from src.web.api.manga_routes import create_manga_router
-from src.web.api.permission_routes import create_permission_router
-from src.web.api.setting_routes import create_setting_router
-from src.web.api.system_routes import create_system_router
-from src.web.api.task_routes import create_task_router
 from src.web.events.routes import create_events_router
 from src.web.dependencies import WebDependencies
 from src.web.errors import ApiError
 from src.web.security import CSRF_COOKIE_NAME, LoginRateLimiter
+
+from .audit_routes import create_audit_router
+from .common import SESSION_COOKIE_NAME, build_authenticate
+from .file_routes import create_file_router
+from .maintenance_routes import create_maintenance_router
+from .manga_routes import create_manga_router
+from .permission_routes import create_permission_router
+from .setting_routes import create_setting_router
+from .system_routes import create_system_router
+from .task_routes import create_task_router
 
 
 class PasswordRequest(BaseModel):
@@ -165,6 +167,7 @@ def create_api_router(  # pylint: disable=too-many-locals
     router.include_router(create_manga_router(dependencies, authenticate))
     router.include_router(create_file_router(dependencies, authenticate))
     router.include_router(create_task_router(dependencies, authenticate))
+    router.include_router(create_audit_router(dependencies, authenticate))
     router.include_router(create_permission_router(dependencies, authenticate))
     router.include_router(create_setting_router(dependencies, authenticate))
     router.include_router(create_maintenance_router(dependencies, authenticate))

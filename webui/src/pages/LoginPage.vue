@@ -58,6 +58,9 @@ async function submit(): Promise<void> {
     </v-alert>
 
     <v-form @submit.prevent="submit">
+      <v-alert v-if="route.query.password_changed === '1'" type="success" variant="tonal" class="mb-4">
+        密码已修改，请使用新密码重新登录。
+      </v-alert>
       <v-text-field
         v-model="password"
         label="管理员密码"

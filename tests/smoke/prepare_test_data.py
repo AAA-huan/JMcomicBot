@@ -141,8 +141,8 @@ def parse_args() -> argparse.Namespace:
     return args
 
 
-def _build_pdf(page_count: int) -> bytes:
-    """生成指定页数的最小合法 PDF，每页一行文字。"""
+def _build_pdf(page_count: int, page_padding_bytes: int = 0) -> bytes:
+    """生成指定页数的合法 PDF，可用注释填充流测试大文件 Range 读取。"""
     font_object = 3 + page_count * 2
     objects: List[bytes] = []
     kids = " ".join(f"{3 + index * 2} 0 R" for index in range(page_count))
@@ -160,6 +160,8 @@ def _build_pdf(page_count: int) -> bytes:
         stream = (
             f"BT /F1 24 Tf 72 770 Td (JMcomicBot test page {index + 1}) Tj ET"
         ).encode()
+        if page_padding_bytes:
+            stream += b"\n%" + b" " * page_padding_bytes + b"\n"
         objects.append(
             b"<< /Length "
             + str(len(stream)).encode()

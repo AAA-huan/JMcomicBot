@@ -3,16 +3,18 @@ import { onMounted, ref } from 'vue'
 import { useDisplay } from 'vuetify'
 
 import { errorMessage } from '@/api/client'
+import { useEventSubscription } from '@/api/eventStream'
 import {
   createBackup,
   listBackups,
   repairLibrary,
   scanLibrary,
+  verifyLibrary,
 } from '@/api/maintenance'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
-import type { BackupRecord, ScanResultView } from '@/types/api'
-import { formatBytes, formatDateTime } from '@/utils/format'
+import type { BackupRecord, OperationTask, ScanResultView, VerifyResult } from '@/types/api'
+import { formatBytes, formatDateTime, parseMangaIds } from '@/utils/format'
 import {
   BACKUP_STATUS_COLORS,
   BACKUP_STATUS_LABELS,
@@ -28,6 +30,36 @@ const actionNotice = ref('')
 
 const scanResult = ref<ScanResultView | null>(null)
 const scanLoading = ref(false)
+const verifyInput = ref('')
+const verifyLoading = ref(false)
+const verifyProgress = ref<number | null>(null)
+const verifyResult = ref<VerifyResult | null>(null)
+
+useEventSubscription((event) => {
+  if (event.type !== 'task.updated' || !verifyLoading.value) return
+  const task = event.data as OperationTask
+  if (task.task_type === 'verify') verifyProgress.value = task.progress
+})
+
+async function runVerify(): Promise<void> {
+  if (verifyLoading.value) return
+  actionError.value = ''
+  const ids = parseMangaIds(verifyInput.value)
+  if (!ids.length || ids.length > 100) {
+    actionError.value = '请输入 1 到 100 个漫画 ID'
+    return
+  }
+  verifyLoading.value = true
+  verifyProgress.value = null
+  verifyResult.value = null
+  try {
+    verifyResult.value = await verifyLibrary(ids)
+  } catch (err) {
+    actionError.value = errorMessage(err)
+  } finally {
+    verifyLoading.value = false
+  }
+}
 
 const repairDialog = ref(false)
 const repairLoading = ref(false)
@@ -218,7 +250,20 @@ onMounted(() => {
       </v-col>
     </v-row>
 
-    <v-card class="mt-1">
+    <v-card class="mt-4 pa-4">
+      <div class="text-subtitle-2 mb-2">校验 PDF 文件</div>
+      <p class="text-body-2 mb-3">检查登记文件的路径、存在性、大小、修改时间和 SHA-256。单次最多 100 个漫画，进度和结果会保存到任务列表。</p>
+      <v-textarea v-model="verifyInput" label="待校验漫画 ID" rows="2" placeholder="例如：900001, 900002" :disabled="verifyLoading" />
+      <v-btn color="primary" :loading="verifyLoading" @click="runVerify">开始校验</v-btn>
+      <v-progress-linear v-if="verifyLoading" class="mt-3" :model-value="verifyProgress ?? 0" :indeterminate="verifyProgress === null" />
+      <p v-if="verifyLoading" class="mt-2">正在校验{{ verifyProgress === null ? '' : `：${verifyProgress}%` }}，离开页面后可在任务列表查看结果。</p>
+      <v-alert v-if="verifyResult" :type="verifyResult.error_count || verifyResult.invalid_path_count || verifyResult.missing_count || verifyResult.corrupted_count ? 'warning' : 'success'" variant="tonal" class="mt-3">
+        校验完成：{{ verifyResult.file_count }} 个文件，就绪 {{ verifyResult.ready_count }}，缺失 {{ verifyResult.missing_count }}，摘要不符 {{ verifyResult.corrupted_count }}，非法路径 {{ verifyResult.invalid_path_count }}，读取错误 {{ verifyResult.error_count }}。
+        <v-btn class="mt-2" variant="text" to="/tasks?task_type=verify">查看校验任务</v-btn>
+      </v-alert>
+    </v-card>
+
+    <v-card class="mt-4">
       <v-card-title class="text-subtitle-1">
         数据库备份
         <span class="text-caption text-medium-emphasis ml-2">共 {{ backupTotal }} 个</span>

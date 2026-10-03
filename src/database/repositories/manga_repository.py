@@ -13,7 +13,8 @@ from sqlalchemy.orm import selectinload
 
 from src.database.database import DatabaseManager
 from src.database.models import Manga, MangaFile, MangaTag, Tag, utc_now
-from src.database.repositories._base import BaseRepository
+
+from ._base import BaseRepository
 
 _VALID_MANGA_STATUSES = {"downloaded", "missing_file", "invalid", "deleted"}
 _VALID_FILE_STATUSES = {
@@ -137,7 +138,9 @@ class MangaRepository(BaseRepository):
         base_statement = self._build_query(search, status, tag)
         with self._get_session() as session:
             total = session.scalar(
-                select(func.count()).select_from(base_statement.subquery())
+                select(func.count()).select_from(  # pylint: disable=not-callable
+                    base_statement.subquery()
+                )
             )
             statement = (
                 base_statement.options(selectinload(Manga.files))

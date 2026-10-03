@@ -22,6 +22,7 @@ const navItems: NavItem[] = [
   { title: '权限管理', to: '/permissions', icon: 'mdi-account-lock-outline' },
   { title: '配置', to: '/settings', icon: 'mdi-cog-outline' },
   { title: '维护', to: '/maintenance', icon: 'mdi-tools' },
+  { title: '操作审计', to: '/audit', icon: 'mdi-history' },
 ]
 
 const mobileNavItems = navItems.filter((item) =>
@@ -180,6 +181,7 @@ async function handleLogout(): Promise<void> {
         <v-list>
           <v-list-item title="管理员" subtitle="单管理员控制台" />
           <v-divider />
+          <v-list-item prepend-icon="mdi-lock-reset" title="修改密码" to="/password" />
           <v-list-item
             prepend-icon="mdi-logout"
             title="退出登录"

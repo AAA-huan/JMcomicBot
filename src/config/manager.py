@@ -1,10 +1,10 @@
 """配置管理器模块，负责加载和管理应用程序配置"""
 
-from typing import Dict, List, Union
+from typing import Dict, List, Optional, Union
 
 import os
 
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv, set_key
 
 from src.logging.logger_config import logger
 
@@ -37,19 +37,27 @@ def _parse_int_config(name: str, default: int, minimum: int, maximum: int) -> in
 class ConfigManager:
     """配置管理器类，负责加载和管理应用程序配置"""
 
-    def __init__(self):
+    def __init__(self, env_file: Optional[str] = None):
         """初始化配置管理器"""
+        self.env_file = os.path.abspath(env_file or find_dotenv() or ".env")
         self.logger = logger
         self.config_dict: Dict[str, Union[str, int, float, bool]] = {}
         self.group_whitelist: List[str] = []
         self.private_whitelist: List[str] = []
         self.global_blacklist: List[str] = []
         self.delete_permission_user: List[str] = []
+        self.webui_dev_origins: List[str] = []
+
+    def save_restart_setting(self, key: str, value: str) -> None:
+        """原子更新启动配置文件，不改变当前进程的环境变量或运行配置。"""
+        success, _key, _value = set_key(self.env_file, key, value)
+        if not success:
+            raise OSError("无法保存启动配置文件")
 
     def load_config(self):
         """加载.env文件到内存配置（覆盖默认配置中同名项）"""
         # 加载环境变量
-        load_dotenv()
+        load_dotenv(dotenv_path=self.env_file)
         # 初始化配置
         # 简化token配置，只使用NAPCAT_TOKEN作为唯一的token配置项
         token = os.getenv("NAPCAT_TOKEN", "")

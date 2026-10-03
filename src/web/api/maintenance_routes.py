@@ -1,18 +1,28 @@
 """维护操作 API：扫描、修复与数据库备份。"""
 
 from dataclasses import asdict
-from typing import Annotated, Callable, Optional
+from typing import Annotated, Callable, List, Optional
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel, Field
 
 from src.service import BackupConflictError, BackupDownloadError
 from src.service.web_auth_service import AuthenticatedSession
-from src.web.api.common import build_operation_context
 from src.web.dependencies import WebDependencies
 from src.web.errors import ApiError
 
+from .common import build_operation_context
+
 AuthenticateCallable = Callable[..., AuthenticatedSession]
+
+
+class VerifyRequest(BaseModel):
+    """受限的漫画校验请求，不接受客户端文件路径。"""
+
+    manga_ids: List[Annotated[str, Field(pattern=r"^\d{1,32}$")]] = Field(
+        min_length=1, max_length=100
+    )
 
 
 def create_maintenance_router(
@@ -20,6 +30,29 @@ def create_maintenance_router(
 ) -> APIRouter:
     """创建扫描、修复与备份路由。"""
     router = APIRouter(tags=["维护"])
+
+    @router.post("/maintenance/verify")
+    def verify_library(
+        body: VerifyRequest,
+        request: Request,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """复用校验服务及持久化任务；文件 I/O 在工作线程和事务外执行。"""
+        manga_ids = list(dict.fromkeys(body.manga_ids))
+        for manga_id in manga_ids:
+            if dependencies.manga_service.download_conflict_checker(
+                manga_id
+            ) or dependencies.manga_service.send_conflict_checker(manga_id):
+                raise ApiError(409, "MANGA_BUSY", "漫画正在下载或发送，暂时无法校验")
+        context = build_operation_context(request, authenticated)
+        try:
+            return asdict(dependencies.verify_service.verify(manga_ids, context))
+        except ValueError as error:
+            raise ApiError(400, "INVALID_VERIFY_REQUEST", str(error)) from error
+        except FileNotFoundError as error:
+            raise ApiError(
+                500, "DOWNLOAD_DIRECTORY_MISSING", "下载目录不存在，请检查配置"
+            ) from error
 
     @router.post("/maintenance/scan")
     def scan_library(

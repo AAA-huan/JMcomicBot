@@ -1,15 +1,19 @@
 """重要操作审计事件仓储。"""
 
+# 各仓储按资源定义查询参数，不要求抽象入口的可变参数签名。
+# pylint: disable=arguments-differ
+
 from datetime import datetime, timedelta
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from sqlalchemy import delete, func, select
 
 from src.database.models import AuditEvent
-from src.database.repositories._base import BaseRepository
-from src.database.repositories.operation_task_repository import serialize_metadata
 from src.logging.audit_messages import format_audit_message
 from src.logging.logger_config import logger
+
+from ._base import BaseRepository
+from .operation_task_repository import serialize_metadata
 
 _AUDIT_SOURCES = {"qq", "web", "system"}
 
@@ -107,6 +111,36 @@ class AuditEventRepository(BaseRepository):
                 )
             )
         return event
+
+    def search(
+        self,
+        page: int = 1,
+        page_size: int = 20,
+        event_type: Optional[str] = None,
+        source: Optional[str] = None,
+    ) -> Tuple[List[AuditEvent], int]:
+        """按事件类型与来源分页查询审计，以时间和 ID 保证稳定排序。"""
+        if page < 1 or not 1 <= page_size <= 100:
+            raise ValueError("分页参数非法")
+        if source is not None and source not in _AUDIT_SOURCES:
+            raise ValueError("不支持的审计来源")
+        statement = select(AuditEvent)
+        if event_type:
+            statement = statement.where(AuditEvent.event_type == event_type)
+        if source:
+            statement = statement.where(AuditEvent.source == source)
+        with self._get_session() as session:
+            total = session.scalar(
+                select(func.count()).select_from(  # pylint: disable=not-callable
+                    statement.subquery()
+                )
+            )
+            items = session.scalars(
+                statement.order_by(AuditEvent.created_at.desc(), AuditEvent.id.desc())
+                .offset((page - 1) * page_size)
+                .limit(page_size)
+            ).all()
+            return list(items), int(total or 0)
 
     @staticmethod
     def _expired_condition(now: datetime, retention_days: int):

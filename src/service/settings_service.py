@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 from typing import Any, Callable, Dict, Optional, Tuple
+from urllib.parse import urlparse
 
 from src.config.manager import ConfigManager
 from src.database.repositories import (
@@ -51,6 +52,7 @@ class SettingView:  # pylint: disable=too-many-instance-attributes
     apply_target: str
     value: Any
     is_set: bool
+    restart_required: bool = False
 
 
 SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
@@ -138,7 +140,7 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
         value_type="bool",
         default=False,
         group="下载与存储",
-        editable=False,
+        editable=True,
         sensitive=False,
         effect=EFFECT_RESTART,
         apply_target="重启机器人",
@@ -149,7 +151,7 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
         value_type="str",
         default="./downloads",
         group="路径",
-        editable=False,
+        editable=True,
         sensitive=False,
         effect=EFFECT_RESTART,
         apply_target="重启机器人",
@@ -160,7 +162,7 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
         value_type="str",
         default="./data",
         group="路径",
-        editable=False,
+        editable=True,
         sensitive=False,
         effect=EFFECT_RESTART,
         apply_target="重启机器人",
@@ -171,7 +173,7 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
         value_type="str",
         default="./data/backups",
         group="路径",
-        editable=False,
+        editable=True,
         sensitive=False,
         effect=EFFECT_RESTART,
         apply_target="重启机器人",
@@ -182,7 +184,7 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
         value_type="bool",
         default=True,
         group="WebUI",
-        editable=False,
+        editable=True,
         sensitive=False,
         effect=EFFECT_RESTART,
         apply_target="重启机器人",
@@ -193,7 +195,7 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
         value_type="str",
         default="127.0.0.1",
         group="WebUI",
-        editable=False,
+        editable=True,
         sensitive=False,
         effect=EFFECT_RESTART,
         apply_target="重启机器人",
@@ -204,7 +206,7 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
         value_type="int",
         default=7999,
         group="WebUI",
-        editable=False,
+        editable=True,
         sensitive=False,
         effect=EFFECT_RESTART,
         apply_target="重启机器人",
@@ -217,7 +219,7 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
         value_type="int",
         default=24,
         group="WebUI",
-        editable=False,
+        editable=True,
         sensitive=False,
         effect=EFFECT_RESTART,
         apply_target="重启机器人",
@@ -230,7 +232,7 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
         value_type="str",
         default="",
         group="NapCat",
-        editable=False,
+        editable=True,
         sensitive=True,
         effect=EFFECT_RESTART,
         apply_target="重启机器人",
@@ -241,7 +243,7 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
         value_type="str",
         default="",
         group="NapCat",
-        editable=False,
+        editable=True,
         sensitive=True,
         effect=EFFECT_RESTART,
         apply_target="重启机器人",
@@ -250,7 +252,7 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
 
 
 class SettingsService:
-    """通过注册表提供配置的查询、校验、持久化与即时生效。"""
+    """通过注册表提供配置查询、校验、即时应用与启动配置保存。"""
 
     def __init__(
         self,
@@ -269,6 +271,7 @@ class SettingsService:
             if definition.key in self.definitions:
                 raise ValueError(f"配置注册表存在重复键: {definition.key}")
             self.definitions[definition.key] = definition
+        self.pending_restart_values: Dict[str, Any] = {}
         self.appliers: Dict[str, Callable[[Any], None]] = {}
 
     def register_appliers(self, appliers: Dict[str, Callable[[Any], None]]) -> None:
@@ -297,7 +300,7 @@ class SettingsService:
             definition = self.definitions.get(setting.key)
             if definition is None:
                 raise ValueError(f"数据库中保存了未注册的配置项: {setting.key}")
-            if not definition.editable:
+            if not definition.editable or definition.effect != EFFECT_IMMEDIATE:
                 raise ValueError(f"配置项不允许通过数据库覆盖: {setting.key}")
             parsed_value = self._parse_stored(definition, setting.value)
             self.config_manager.config_dict[setting.key] = parsed_value
@@ -314,7 +317,7 @@ class SettingsService:
         raw_value: Any,
         context: Optional[OperationContext] = None,
     ) -> SettingView:
-        """校验并更新配置，立即调用目标组件的显式接口并写审计与历史。
+        """校验并更新配置，即时项调用组件接口，启动项写环境文件并记录历史。
 
         Raises:
             ValueError: 配置项不存在、不可编辑、类型或取值非法时
@@ -330,13 +333,18 @@ class SettingsService:
         if parsed_value == current_value:
             return self._view(definition)
 
-        applier = self.appliers.get(key)
-        if applier is None:
-            raise RuntimeError(f"配置项缺少显式应用接口: {key}")
-        # 先应用再持久化：应用失败时数据库保持旧值，不会出现“已保存但未生效”
-        applier(parsed_value)
-        self.setting_repository.set(key, self._serialize(parsed_value))
-        self.config_manager.config_dict[key] = parsed_value
+        if definition.effect == EFFECT_RESTART:
+            # 启动项必须在打开数据库、启动 WebUI 之前加载，不能保存到动态配置表。
+            self.config_manager.save_restart_setting(key, self._serialize(parsed_value))
+            self.pending_restart_values[key] = parsed_value
+        else:
+            applier = self.appliers.get(key)
+            if applier is None:
+                raise RuntimeError(f"配置项缺少显式应用接口: {key}")
+            # 先应用再持久化：应用失败时数据库保持旧值，不会出现“已保存但未生效”
+            applier(parsed_value)
+            self.setting_repository.set(key, self._serialize(parsed_value))
+            self.config_manager.config_dict[key] = parsed_value
 
         operation_context = context or OperationContext.system()
         self.history_repository.record(
@@ -362,6 +370,11 @@ class SettingsService:
     def _view(self, definition: SettingDefinition) -> SettingView:
         """按敏感性生成安全视图：敏感值只返回是否已设置。"""
         value = self._effective_value(definition)
+        restart_required = (
+            definition.key in self.pending_restart_values
+            and value
+            != self.config_manager.config_dict.get(definition.key, definition.default)
+        )
         if definition.sensitive:
             return SettingView(
                 key=definition.key,
@@ -374,6 +387,7 @@ class SettingsService:
                 apply_target=definition.apply_target,
                 value=None,
                 is_set=bool(value),
+                restart_required=restart_required,
             )
         return SettingView(
             key=definition.key,
@@ -386,10 +400,16 @@ class SettingsService:
             apply_target=definition.apply_target,
             value=value,
             is_set=True,
+            restart_required=restart_required,
         )
 
     def _effective_value(self, definition: SettingDefinition) -> Any:
         """数据库动态值优先，其次启动配置，最后注册表默认值。"""
+        if definition.effect == EFFECT_RESTART:
+            return self.pending_restart_values.get(
+                definition.key,
+                self.config_manager.config_dict.get(definition.key, definition.default),
+            )
         stored_value = self.setting_repository.get_optional(definition.key)
         if stored_value is not None:
             return self._parse_stored(definition, stored_value)
@@ -468,5 +488,20 @@ class SettingsService:
         if definition.value_type == "str":
             if not isinstance(raw_value, str):
                 raise ValueError(f"配置项 {definition.key} 需要字符串")
+            if any(character in raw_value for character in ("\n", "\r", "\x00")):
+                raise ValueError(f"配置项 {definition.key} 不能包含换行或空字符")
+            if definition.key != "NAPCAT_TOKEN" and not raw_value.strip():
+                raise ValueError(f"配置项 {definition.key} 不能为空")
+            if definition.key == "NAPCAT_WS_URL":
+                try:
+                    url = urlparse(raw_value)
+                    valid = url.scheme in ("ws", "wss") and bool(url.hostname)
+                    _port = url.port
+                except ValueError:
+                    valid = False
+                if not valid:
+                    raise ValueError(
+                        "NapCat WebSocket 地址需要有效的 ws:// 或 wss:// 地址"
+                    )
             return raw_value
         raise ValueError(f"配置项 {definition.key} 的类型非法: {definition.value_type}")

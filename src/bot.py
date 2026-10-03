@@ -46,8 +46,13 @@ from src.service import (
     RepairService,
     ScanService,
     SettingsService,
+    VerifyService,
 )
-from src.service.query_service import MangaQueryService, TaskQueryService
+from src.service.query_service import (
+    AuditQueryService,
+    MangaQueryService,
+    TaskQueryService,
+)
 from src.service.system_service import SystemService
 from src.service.web_auth_service import WebAuthService
 from src.utils.helpers import cleanup_failed_downloads
@@ -216,6 +221,13 @@ class MangaBot:
         )
         self.manga_query_service = MangaQueryService(self.manga_repo, self.tag_repo)
         self.task_query_service = TaskQueryService(self.operation_task_repo)
+        self.audit_query_service = AuditQueryService(self.audit_event_repo)
+        self.verify_service = VerifyService(
+            self.manga_repo,
+            self.scan_record_repo,
+            self.operation_task_service,
+            download_root=str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]),
+        )
         self.system_service = SystemService(
             version=self.VERSION,
             started_at=self._started_at,
@@ -328,6 +340,8 @@ class MangaBot:
                         scan_service=self.scan_service,
                         reading_progress_service=self.reading_progress_service,
                         event_bus=self.event_bus,
+                        audit_query_service=self.audit_query_service,
+                        verify_service=self.verify_service,
                     ),
                     web_host=web_host,
                     web_port=int(self.config_manager.config_dict["WEBUI_PORT"]),
@@ -357,7 +371,7 @@ class MangaBot:
             count = self.tag_repo.sync_from_manga()
             if count:
                 logger.info(f"标签表回填完成：共同步 {count} 条漫画标签记录")
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             logger.error(f"标签表回填失败: {e}")
 
     def _check_platform_compatibility(self) -> None:
@@ -442,8 +456,8 @@ class MangaBot:
             return input()
 
         try:
-            import termios
-            import tty
+            import termios  # pylint: disable=import-outside-toplevel
+            import tty  # pylint: disable=import-outside-toplevel
         except ImportError:
             return input()
 

@@ -153,9 +153,12 @@ def test_static_entry_and_assets_have_safe_cache_policy(db_manager) -> None:
 def test_module_worker_asset_is_served_as_javascript(db_manager) -> None:
     """PDF.js 的 ESM Worker 必须以 JavaScript MIME 提供，否则浏览器拒绝加载。"""
     static_root = Path(__file__).resolve().parents[2] / "src" / "web" / "static"
-    worker_files = sorted((static_root / "assets").glob("*.mjs"))
-    assert worker_files, "构建产物缺少 PDF.js Worker（.mjs），请先执行 npm run build"
+    worker_files = sorted((static_root / "assets").glob("pdf.worker-*"))
+    assert worker_files, "构建产物缺少 PDF.js Worker，请先执行 npm run build"
     worker_name = worker_files[0].name
+    # 校验阅读器实际引用的 Worker，避免旧产物或扩展名变更导致误判。
+    reader_files = (static_root / "assets").glob("PdfReader-*.js")
+    assert any(worker_name in path.read_text() for path in reader_files)
 
     with _create_client(db_manager) as client:
         response = client.get(f"/assets/{worker_name}")
