@@ -8,11 +8,11 @@
 #   bash deploy.sh
 #
 # 行为：
-#   1. 检测 / 安装 git、Python>=3.12、uv
+#   1. 检查 Python>=3.12，检测 / 安装 git、uv
 #   2. 克隆或更新项目到当前目录下的 JMcomicBot/ 子目录
 #   3. 创建虚拟环境并 uv sync 同步依赖
 #   4. 幂等复制 .env / option.yml（已存在则保留用户配置）
-#   5. 交互式写入 .env 关键项（已配置的项跳过）
+#   5. 校验 NapCat 地址并引导配置关键项（有效地址保留，其他项回车保留）
 #   6. 创建 downloads / data / logs 运行时目录
 #   7. 打印 NapCat 部署提示
 #   8. 询问是否立即启动 bot
@@ -28,8 +28,6 @@ REPO_URL="${JMBOT_REPO_URL:-https://github.com/AAA-huan/JMcomicBot.git}"
 PROJECT_DIR_NAME="JMcomicBot"
 REQUIRED_PY_MAJOR=3
 REQUIRED_PY_MINOR=12
-# 示例值（用于判断 .env 是否仍是模板，决定是否询问）
-WS_URL_PLACEHOLDER="ws://localhost:port/qq"
 
 # ============================ 颜色与日志 ============================
 if [[ -t 1 ]]; then
@@ -53,7 +51,7 @@ die() { log_error "$*"; exit 1; }
 #   2. curl|bash：stdin 是 curl 输出（脚本内容），需从 /dev/tty 读真实终端
 #   3. CI / 无 tty：/dev/tty 不可用，退回 stdin 读取（便于自动化喂入）
 # 用 (exec </dev/tty) 在子 shell 探测 /dev/tty 是否真正可打开，区分"设备不存在"
-# 与"读到 EOF"，避免误判导致死循环
+# 与"读到 EOF"；输入结束时明确报错，不把 EOF 当作回车
 # 用法：ask "提示语" "默认值"  → 输出用户输入或默认值
 ask() {
     local prompt="$1" default="${2:-}" result=""
@@ -63,10 +61,11 @@ ask() {
         printf "%s: " "$prompt" >&2
     fi
     if (exec </dev/tty) 2>/dev/null; then
-        IFS= read -r result < /dev/tty || result=""
+        IFS= read -r result < /dev/tty || { log_error "终端输入已结束，部署中止。"; return 1; }
     else
-        IFS= read -r result || result=""
+        IFS= read -r result || { log_error "标准输入已结束，请在可交互终端重新运行脚本。"; return 1; }
     fi
+    result=$(printf '%s' "$result" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
     printf '%s' "${result:-$default}"
 }
 
@@ -85,8 +84,17 @@ sed_inplace() {
 get_env() {
     local key="$1" file="$2"
     local line
-    line=$(grep -E "^${key}=" "$file" 2>/dev/null | head -1 || true)
-    echo "${line#"${key}="}"
+    line=$(grep -E "^[[:space:]]*${key}[[:space:]]*=" "$file" | head -1 || true)
+    local value="${line#*=}"
+    value=$(printf '%s' "$value" | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
+    # 引号内的 # 是值的一部分；只去除引号外的行尾注释。
+    local double_quoted='^"([^"]*)"([[:space:]]*#.*)?$'
+    local single_quoted="^'([^']*)'([[:space:]]*#.*)?$"
+    if [[ "$value" =~ $double_quoted ]] || [[ "$value" =~ $single_quoted ]]; then
+        printf '%s' "${BASH_REMATCH[1]}"
+    else
+        printf '%s' "$value" | sed 's/[[:space:]]#.*$//;s/[[:space:]]*$//'
+    fi
 }
 
 # 设置 .env 中某 key 的值（存在则替换整行，不存在则追加）
@@ -94,12 +102,52 @@ set_env() {
     local key="$1" val="$2" file="$3"
     # 转义 sed 替换中的特殊字符
     local escaped
-    escaped=$(printf '%s' "$val" | sed -e 's/[\\&]/\\&/g' -e 's/[/]/\\\//g')
-    if grep -q "^${key}=" "$file"; then
-        sed_inplace "$file" "s|^${key}=.*|${key}=${escaped}|"
+    escaped=$(printf '%s' "$val" | sed 's/[\\&|]/\\&/g')
+    if grep -q "^[[:space:]]*${key}[[:space:]]*=" "$file"; then
+        sed_inplace "$file" "s|^[[:space:]]*${key}[[:space:]]*=.*|${key}=${escaped}|"
     else
         printf '%s=%s\n' "$key" "$val" >> "$file"
     fi
+}
+
+# Python 已在部署前检查版本；使用标准 URL 解析器校验端口、主机与 IPv6。
+# 纯端口仅适用于 NapCat 与机器人同机，配置文件仍写入完整 WebSocket 地址。
+normalize_ws_url() {
+    local py
+    py=$(find_python) || return 1
+    "$py" -c '
+from urllib.parse import urlsplit
+import re
+import sys
+
+value = sys.argv[1].strip()
+if re.fullmatch(r"[0-9]+", value):
+    if len(value) > 5 or not 1 <= int(value) <= 65535:
+        sys.exit(1)
+    value = f"ws://localhost:{int(value)}/qq"
+try:
+    parsed = urlsplit(value)
+    if (parsed.scheme not in ("ws", "wss") or not parsed.hostname
+            or re.search(r"\s", value) or parsed.fragment
+            or parsed.netloc.endswith(":") or parsed.port == 0):
+        sys.exit(1)
+except ValueError:
+    sys.exit(1)
+print(value)
+' "$1"
+}
+
+# 布尔值必须明确识别，输入错误时重新询问，避免静默改动原配置。
+ask_boolean() {
+    local value
+    while true; do
+        value=$(ask "$1 (true/false)" "$2") || return 1
+        case "$value" in
+            true|True|TRUE|yes|y|Y|1|on) printf 'true'; return 0 ;;
+            false|False|FALSE|no|n|N|0|off) printf 'false'; return 0 ;;
+            *) log_warn "请输入 true 或 false。" >&2 ;;
+        esac
+    done
 }
 
 # ============================ 环境准备 ============================
@@ -295,7 +343,7 @@ clone_or_update() {
     if [[ -d "$PROJECT_DIR_NAME/.git" ]]; then
         log_step "更新现有项目（git pull）"
         if ! git -C "$PROJECT_DIR_NAME" pull --ff-only; then
-            log_warn "git pull 失败，可能存在本地改动或分叉。请手动处理 $PROJECT_DIR_NAME 目录。"
+            die "git pull 失败，部署已中止。请处理网络、本地改动或分叉后重新运行。"
         fi
     else
         log_step "克隆项目到 ./$PROJECT_DIR_NAME"
@@ -334,7 +382,7 @@ prepare_config_files() {
     else
         log_ok ".env 已存在，保留现有配置"
     fi
-    # option.yml：jmcomic 下载配置，缺失会导致下载静默失败
+    # option.yml：jmcomic 下载配置，缺失会导致创建下载配置时抛错
     if [[ ! -f "option.yml" ]]; then
         cp option_example.yml option.yml
         log_ok "已从 option_example.yml 生成 option.yml"
@@ -346,39 +394,40 @@ prepare_config_files() {
     log_ok "运行时目录就绪（downloads / data / logs）"
 }
 
-# 交互式写入 .env 关键项（仅当当前值仍是示例/默认值时才询问）
+# 有效 NapCat 地址保留；其余关键项每次确认，回车保留当前值。
 interactive_config() {
-    log_step "配置关键项（已配置的项将跳过）"
+    log_step "配置关键项（有效 NapCat 地址保留，其他项回车保留）"
 
     # 1. NAPCAT_WS_URL —— 必填
-    local cur_ws
+    local cur_ws normalized_ws
     cur_ws=$(get_env "NAPCAT_WS_URL" ".env")
-    if [[ -z "$cur_ws" ]] || [[ "$cur_ws" == "$WS_URL_PLACEHOLDER" ]]; then
+    if normalized_ws=$(normalize_ws_url "$cur_ws"); then
+        if [[ "$normalized_ws" != "$cur_ws" ]]; then
+            set_env "NAPCAT_WS_URL" "$normalized_ws" ".env"
+            log_ok "已将 NapCat 端口转换为完整地址：$normalized_ws"
+        else
+            log_ok "NAPCAT_WS_URL 地址格式有效（$cur_ws），保留现有配置"
+        fi
+    else
+        [[ -z "$cur_ws" ]] || log_warn "现有 NapCat 地址无效或仍是模板，请重新配置。"
         echo "NapCat WebSocket 地址是 bot 与 NapCat 通信的关键。" >&2
         echo "NapCat 与 bot 同机时只需输入端口号（如 3001），将自动拼接为 ws://localhost:<端口>/qq" >&2
         echo "若 NapCat 在远端或路径不同，可直接输入完整地址（如 ws://1.2.3.4:8080/qq）" >&2
         local ws=""
         while true; do
-            ws=$(ask "请输入 NapCat WebSocket 端口或完整地址" "")
+            ws=$(ask "请输入 NapCat WebSocket 端口（1–65535），远端可填完整地址" "") || return 1
             if [[ -z "$ws" ]]; then
                 log_warn "不能为空，请重新输入"
                 continue
             fi
-            # 纯数字：当作端口，拼接默认地址（NapCat 与 bot 同机的最常见场景）
-            if [[ "$ws" =~ ^[0-9]+$ ]]; then
-                ws="ws://localhost:${ws}/qq"
+            if normalized_ws=$(normalize_ws_url "$ws"); then
+                ws="$normalized_ws"
                 break
             fi
-            # 完整 ws/wss 地址直接采用
-            if [[ "$ws" =~ ^wss?://.+ ]]; then
-                break
-            fi
-            log_warn "格式应为端口号（如 3001）或 ws://host:port/path，请重新输入"
+            log_warn "请输入 1–65535 的端口，或主机、端口有效的 ws:// / wss:// 地址。"
         done
         set_env "NAPCAT_WS_URL" "$ws" ".env"
         log_ok "NAPCAT_WS_URL 已写入: $ws"
-    else
-        log_ok "NAPCAT_WS_URL 已配置（$cur_ws），跳过"
     fi
 
     # 2. NAPCAT_TOKEN —— 可选，当前值作为默认（回车即保留，便于幂等）
@@ -387,7 +436,7 @@ interactive_config() {
     # 去掉示例值两侧引号占位
     [[ "$cur_token" == '""' ]] && cur_token=""
     local token
-    token=$(ask "请输入 NAPCAT_TOKEN（NapCat 鉴权 token，可留空）" "$cur_token")
+    token=$(ask "请输入 NAPCAT_TOKEN（NapCat 鉴权 token，可留空）" "$cur_token") || return 1
     # 去掉用户输入两侧引号避免重复
     token="${token#\"}"; token="${token%\"}"
     set_env "NAPCAT_TOKEN" "$token" ".env"
@@ -397,13 +446,9 @@ interactive_config() {
     local cur_lm
     cur_lm=$(get_env "LOW_MEMORY_MODE" ".env")
     [[ -z "$cur_lm" ]] && cur_lm="false"
-    echo "低内存模式：开启后下载完立即发送并自动删除，适合存储/内存受限环境。" >&2
+    echo "低内存模式：开启后启动机器人会清空下载目录，下载完成后按配置延迟删除文件（默认 3 分钟）。" >&2
     local lm
-    lm=$(ask "是否开启低内存模式？(true/false)" "$cur_lm")
-    case "$lm" in
-        true|True|TRUE|yes|y|Y) lm="true" ;;
-        *) lm="false" ;;
-    esac
+    lm=$(ask_boolean "是否开启低内存模式？" "$cur_lm") || return 1
     set_env "LOW_MEMORY_MODE" "$lm" ".env"
     log_ok "LOW_MEMORY_MODE=$lm"
 
@@ -413,11 +458,7 @@ interactive_config() {
     [[ -z "$cur_webui" ]] && cur_webui="true"
     echo "WebUI 控制台：可在浏览器管理漫画库与任务，默认监听本机 127.0.0.1:7999。" >&2
     local webui
-    webui=$(ask "是否启用 WebUI？(true/false)" "$cur_webui")
-    case "$webui" in
-        false|False|FALSE|no|n|N) webui="false" ;;
-        *) webui="true" ;;
-    esac
+    webui=$(ask_boolean "是否启用 WebUI？" "$cur_webui") || return 1
     set_env "WEBUI_ENABLED" "$webui" ".env"
     log_ok "WEBUI_ENABLED=$webui"
 }
@@ -440,12 +481,15 @@ bot 本身无法独立工作，需要配合 NapCat（OneBot11 协议端）才能
 关键配置要点（踩坑高频区）：
   1. WebSocket 服务端 host 改为 0.0.0.0（容器化必须，否则宿主机连不上）
   2. token 与 .env 的 NAPCAT_TOKEN 必须一致（如启用了鉴权）
+     同机部署在脚本中只填端口即可；Docker 还需映射该 WebSocket 端口。
   3. Docker 部署时，把 downloads 目录同路径 bind mount 进容器：
        -v /绝对路径/JMcomicBot/downloads:/绝对路径/JMcomicBot/downloads
      否则 NapCat 找不到 bot 发送的文件，报 "识别URL失败"
+     使用自定义下载目录时，以 .env 的 MANGA_DOWNLOAD_PATH 为准。
   4. 在 NapCat WebUI 的 autoLoginAccount 填入 QQ 号，重启免扫码
 
-详细排障可参考项目根目录的 napcat-docker-部署总结.md（如有）。
+部署说明：docs/deployment/linux.md、docs/deployment/android.md
+WebUI 访问与排障：docs/webui.md
 ========================================================================
 EOF
 }
@@ -455,7 +499,7 @@ EOF
 ask_launch() {
     echo ""
     local ans
-    ans=$(ask "是否立即启动 bot？(y/n)" "n")
+    ans=$(ask "是否立即启动 bot？(y/n)" "n") || return 1
     case "$ans" in
         y|Y|yes)
             log_info "启动前请确认 NapCat 已就绪并完成 QQ 登录。"
@@ -491,4 +535,7 @@ main() {
     ask_launch
 }
 
-main "$@"
+# 允许测试加载函数，只有直接执行脚本时才启动部署。
+if [[ "${BASH_SOURCE[0]:-$0}" == "$0" ]]; then
+    main "$@"
+fi

@@ -9,7 +9,7 @@ import {
   PasswordException,
   RenderingCancelledException,
   ResponseException,
-} from 'pdfjs-dist'
+} from 'pdfjs-dist/legacy/build/pdf.mjs'
 
 export type ReaderErrorType =
   | 'auth'
