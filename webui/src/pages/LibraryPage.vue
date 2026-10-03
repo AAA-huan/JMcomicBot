@@ -583,7 +583,7 @@ watch(
                   size="small"
                   variant="text"
                   :loading="favoriteBusy[manga.id]"
-                  :disabled="favoriteBusy[manga.id]"
+                  :disabled="favoriteBusy[manga.id] || manga.status === 'deleted'"
                   :aria-label="manga.is_favorite ? '取消收藏' : '收藏'"
                   :aria-pressed="manga.is_favorite"
                   @click="toggleFavorite(manga)"
@@ -594,6 +594,7 @@ watch(
                   variant="text"
                   color="error"
                   aria-label="删除"
+                  :disabled="manga.status === 'deleted'"
                   @click="askDelete(manga)"
                 />
               </td>
@@ -671,7 +672,7 @@ watch(
                   size="small"
                   variant="text"
                   :loading="favoriteBusy[manga.id]"
-                  :disabled="favoriteBusy[manga.id]"
+                  :disabled="favoriteBusy[manga.id] || manga.status === 'deleted'"
                   :aria-label="manga.is_favorite ? '取消收藏' : '收藏'"
                   :aria-pressed="manga.is_favorite"
                   @click="toggleFavorite(manga)"
@@ -682,6 +683,7 @@ watch(
                   variant="text"
                   color="error"
                   aria-label="删除"
+                  :disabled="manga.status === 'deleted'"
                   @click="askDelete(manga)"
                 />
               </div>
@@ -715,7 +717,7 @@ watch(
     <ConfirmDialog
       v-model="deleteDialog"
       :title="`删除《${deleteTarget?.title ?? ''}》？`"
-      text="将删除该漫画的数据库记录与全部章节文件，此操作不可撤销。"
+      text="将删除全部章节文件和关联记录，保留已删除漫画的元数据供查询，此操作不可撤销。"
       confirm-text="确认删除"
       :loading="deleteLoading"
       @confirm="confirmDelete"
@@ -724,7 +726,7 @@ watch(
     <ConfirmDialog
       v-model="batchDeleteDialog"
       :title="`批量删除 ${selectedCount} 个漫画？`"
-      :text="`将删除选中的 ${selectedCount} 个漫画及其全部章节文件，此操作不可撤销。`"
+      :text="`将删除选中的 ${selectedCount} 个漫画的全部章节文件和关联记录，保留已删除漫画的元数据供查询，此操作不可撤销。`"
       confirm-text="确认批量删除"
       :loading="batchDeleteLoading"
       @confirm="confirmBatchDelete"

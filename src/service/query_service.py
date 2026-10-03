@@ -214,7 +214,7 @@ class MangaQueryService:
 
     def get(self, manga_id: str, admin_id: int = 1) -> Optional[MangaResult]:
         """按漫画 ID 查询公开详情。"""
-        manga = self.manga_repository.get(manga_id)
+        manga = self.manga_repository.get(manga_id, include_deleted=True)
         if manga is None:
             return None
         return replace(

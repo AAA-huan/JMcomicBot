@@ -3,15 +3,27 @@
 import { apiRequest } from './client'
 import type { BackupRecord, PageResult, ScanResultView, VerifyResult } from '@/types/api'
 
-export function scanLibrary(): Promise<ScanResultView> {
-  return apiRequest<ScanResultView>('/maintenance/scan', { method: 'POST' })
+export interface ScanOptions {
+  dry_run: boolean
+  enrich: boolean
 }
 
-export function repairLibrary(): Promise<{ cleaned_count: number }> {
-  return apiRequest('/maintenance/repair', { method: 'POST' })
+export interface RepairResult {
+  cleaned_count: number
+  dry_run: boolean
+  orphan_manga_ids: string[]
+  orphan_tag_names: string[]
 }
 
-export function verifyLibrary(mangaIds: string[]): Promise<VerifyResult> {
+export function scanLibrary(options: ScanOptions): Promise<ScanResultView> {
+  return apiRequest<ScanResultView>('/maintenance/scan', { method: 'POST', body: options })
+}
+
+export function repairLibrary(dryRun: boolean): Promise<RepairResult> {
+  return apiRequest('/maintenance/repair', { method: 'POST', body: { dry_run: dryRun } })
+}
+
+export function verifyLibrary(mangaIds: string[] | null): Promise<VerifyResult> {
   return apiRequest('/maintenance/verify', { method: 'POST', body: { manga_ids: mangaIds } })
 }
 

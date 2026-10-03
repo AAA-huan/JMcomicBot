@@ -291,6 +291,7 @@ onMounted(load)
             variant="tonal"
             color="error"
             prepend-icon="mdi-delete"
+            :disabled="manga.status === 'deleted'"
             @click="deleteDialog = true"
           >
             删除漫画
@@ -460,7 +461,7 @@ onMounted(load)
     <ConfirmDialog
       v-model="deleteDialog"
       :title="`删除《${manga?.title ?? ''}》？`"
-      text="将删除该漫画的数据库记录与全部章节文件，此操作不可撤销。"
+      text="将删除全部章节文件和关联记录，保留已删除漫画的元数据供查询，此操作不可撤销。"
       confirm-text="确认删除"
       :loading="deleteLoading"
       @confirm="confirmDelete"

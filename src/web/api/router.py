@@ -2,6 +2,7 @@
 
 from dataclasses import asdict
 from ipaddress import ip_address
+from pathlib import Path
 from secrets import token_urlsafe
 from typing import Annotated, Optional, Set
 
@@ -27,6 +28,7 @@ from src.web.security import CSRF_COOKIE_NAME, LoginRateLimiter
 
 from .audit_routes import create_audit_router
 from .common import SESSION_COOKIE_NAME, build_authenticate
+from .document_routes import create_document_router
 from .file_routes import create_file_router
 from .maintenance_routes import create_maintenance_router
 from .manga_routes import create_manga_router
@@ -163,6 +165,11 @@ def create_api_router(  # pylint: disable=too-many-locals
         response.delete_cookie(CSRF_COOKIE_NAME, path="/")
         return {"authenticated": False}
 
+    router.include_router(
+        create_document_router(
+            authenticate, Path(__file__).resolve().parents[3] / "docs"
+        )
+    )
     router.include_router(create_system_router(dependencies, authenticate))
     router.include_router(create_manga_router(dependencies, authenticate))
     router.include_router(create_file_router(dependencies, authenticate))

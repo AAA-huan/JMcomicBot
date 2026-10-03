@@ -145,6 +145,8 @@ export interface ReadingProgress {
 }
 
 export interface ScanResultView {
+  dry_run: boolean
+  pending_cleanup_count: number
   task_id: string | null
   scanned_files: number
   manga_count: number
