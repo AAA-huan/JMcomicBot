@@ -167,3 +167,8 @@ pr.md
 AGENTS.md
 /conftest.py
 TODO.md
+
+# 开发与验收文档仅保留本地，不发布到 GitHub
+/dev-docs/
+/docs/quality-checks.md
+/docs/acceptance-fixes.md
