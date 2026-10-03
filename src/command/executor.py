@@ -6,11 +6,11 @@ import os
 import threading
 import time
 
-from src.command.parser import CommandParser
 from src.database.repositories import MangaRepository, MangaTagRepository
 from src.download.manager import QQDownloadNotifier
 from src.logging.logger_config import logger
 from src.service import DownloadService, MangaService, OperationContext
+from src.service.manga_service import ADMIN_FAVORITE_DELETE_MESSAGE
 from src.service.results import MangaDeleteOutcome
 from src.utils.batch import (
     format_batch_response,
@@ -23,6 +23,8 @@ from src.utils.helpers import (
     get_file_size_mb,
     list_downloaded_mangas_with_size,
 )
+
+from .parser import CommandParser
 
 
 class CommandExecutor:
@@ -1236,6 +1238,8 @@ class CommandExecutor:
     ) -> str:
         """单个删除失败的 QQ 回复，保持既有文案。"""
         error_code = outcome.error_code or "delete_failed"
+        if error_code == "admin_favorite":
+            return f"❌ 漫画ID {manga_id} {ADMIN_FAVORITE_DELETE_MESSAGE}"
         if error_code == "download_conflict":
             return f"❌ 漫画ID {manga_id} 正在下载中，无法删除"
         if error_code == "send_conflict":
@@ -1253,6 +1257,8 @@ class CommandExecutor:
     def _format_batch_delete_failure(outcome: MangaDeleteOutcome) -> str:
         """批量删除失败的详情文案，保持既有提示。"""
         error_code = outcome.error_code or "delete_failed"
+        if error_code == "admin_favorite":
+            return ADMIN_FAVORITE_DELETE_MESSAGE
         if error_code == "download_conflict":
             return "正在下载中，已跳过"
         if error_code == "send_conflict":

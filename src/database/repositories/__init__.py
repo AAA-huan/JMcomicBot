@@ -1,25 +1,26 @@
 """仓储层统一导出，便于外部以 from src.database.repositories import ... 方式引用"""
 
-from src.database.repositories.audit_event_repository import AuditEventRepository
-from src.database.repositories.backup_repository import BackupRepository
-from src.database.repositories.manga_repository import MangaRepository
-from src.database.repositories.manga_tag_repository import MangaTagRepository
-from src.database.repositories.operation_task_repository import (
+from .audit_event_repository import AuditEventRepository
+from .backup_repository import BackupRepository
+from .favorite_repository import FavoriteRepository
+from .manga_repository import MangaRepository
+from .manga_tag_repository import MangaTagRepository
+from .operation_task_repository import (
     OperationTaskRepository,
     TaskEventRepository,
 )
-from src.database.repositories.permission_repository import PermissionRepository
-from src.database.repositories.reading_progress_repository import (
+from .permission_repository import PermissionRepository
+from .reading_progress_repository import (
     ReadingProgressRepository,
 )
-from src.database.repositories.scan_record_repository import ScanRecordRepository
-from src.database.repositories.setting_history_repository import (
+from .scan_record_repository import ScanRecordRepository
+from .setting_history_repository import (
     SettingHistoryRepository,
 )
-from src.database.repositories.setting_repository import SettingRepository
-from src.database.repositories.task_log_repository import TaskLogRepository
-from src.database.repositories.user_group_repository import UserGroupRepository
-from src.database.repositories.web_auth_repository import (
+from .setting_repository import SettingRepository
+from .task_log_repository import TaskLogRepository
+from .user_group_repository import UserGroupRepository
+from .web_auth_repository import (
     WebAdminRepository,
     WebSessionRepository,
 )
@@ -27,6 +28,7 @@ from src.database.repositories.web_auth_repository import (
 __all__ = [
     "AuditEventRepository",
     "BackupRepository",
+    "FavoriteRepository",
     "MangaRepository",
     "MangaTagRepository",
     "OperationTaskRepository",

@@ -26,3 +26,20 @@ export function removePermission(
     { method: 'DELETE' },
   )
 }
+
+export interface AdminQQResult {
+  qq_id: string | null
+  changed?: boolean
+}
+
+export function getAdminQQ(): Promise<AdminQQResult> {
+  return apiRequest('/permissions/admin-qq')
+}
+
+export function linkAdminQQ(qqId: string): Promise<AdminQQResult> {
+  return apiRequest('/permissions/admin-qq', { method: 'PUT', body: { qq_id: qqId } })
+}
+
+export function unlinkAdminQQ(): Promise<AdminQQResult> {
+  return apiRequest('/permissions/admin-qq', { method: 'DELETE' })
+}

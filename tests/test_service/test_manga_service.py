@@ -6,6 +6,7 @@ import pytest
 
 from src.database.repositories import (
     AuditEventRepository,
+    FavoriteRepository,
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
@@ -299,3 +300,73 @@ def test_patch_metadata_returns_false_for_missing_manga(
 
     assert updated is False
     assert _audit_event_types(db_manager) == []
+
+
+@pytest.mark.parametrize(
+    "context",
+    [
+        OperationContext.web("1", "127.0.0.1"),
+        OperationContext.qq("12345"),
+        OperationContext.qq("99999"),
+    ],
+)
+def test_admin_favorite_blocks_delete_for_every_actor(
+    tmp_path, db_manager, manga_repo, tag_repo, context
+):
+    """管理员本人和普通 QQ 删除都不能越过收藏保护，任何数据均保留。"""
+    _add_manga(manga_repo, tmp_path, "100")
+    file = manga_repo.get("100").files[0]
+    ReadingProgressRepository(db_manager).upsert(file.id, 3, 10, 0.3)
+    favorites = FavoriteRepository(db_manager)
+    favorites.set_favorite("web_admin", "1", "100", True)
+    favorites.set_favorite("qq", "99999", "100", True)
+    favorites.set_favorite("qq", "99999", "100", False)
+    service = _build_service(tmp_path, db_manager, manga_repo, tag_repo)
+    result = service.delete(["100"], context)
+    assert result.outcomes[0].error_code == "admin_favorite"
+    assert result.deleted_file_count == 0
+    assert manga_repo.get("100").files[0].status == "ready"
+    assert (tmp_path / file.relative_path).exists()
+    assert favorites.get("web_admin", "1", "100") is not None
+    assert ReadingProgressRepository(db_manager).get(file.id).page_number == 3
+    task = OperationTaskRepository(db_manager).get(result.task_id)
+    assert task.status == "failed" and task.error_code == "admin_favorite"
+    assert "不能删除" in task.error_message
+    favorites.set_favorite("web_admin", "1", "100", False)
+    assert service.delete(["100"], context).all_succeeded
+
+
+def test_batch_delete_skips_admin_favorites_but_deletes_qq_favorites(
+    tmp_path, db_manager, manga_repo, tag_repo
+):
+    """批量删除逐项保护管理员收藏，普通用户收藏不限制删除。"""
+    for manga_id in ["100", "200"]:
+        _add_manga(manga_repo, tmp_path, manga_id)
+    favorites = FavoriteRepository(db_manager)
+    favorites.set_favorite("web_admin", "1", "100", True)
+    favorites.set_favorite("qq", "12345", "200", True)
+    service = _build_service(tmp_path, db_manager, manga_repo, tag_repo)
+    result = service.delete(["100", "200"], OperationContext.qq("12345"))
+    assert result.failed_count == result.succeeded_count == 1
+    assert result.outcomes[0].error_code == "admin_favorite"
+    assert manga_repo.get("100") is not None
+    assert manga_repo.get("200") is None
+    assert favorites.get("web_admin", "1", "100") is not None
+    assert favorites.get("qq", "12345", "200") is None
+
+
+def test_admin_favorite_checked_before_conflicts_or_disk(
+    tmp_path, db_manager, manga_repo, tag_repo
+):
+    """无下载目录且漫画正在下载时，也先提示收藏保护并不调用冲突检查器。"""
+    _add_manga(manga_repo, tmp_path, "100", with_file=False)
+    FavoriteRepository(db_manager).set_favorite("web_admin", "1", "100", True)
+    service = _build_service(tmp_path, db_manager, manga_repo, tag_repo)
+    service.download_root = str(tmp_path / "absent")
+
+    def unexpected(_manga_id):
+        raise AssertionError("收藏保护应先于其他检查")
+
+    service.download_conflict_checker = unexpected
+    service.send_conflict_checker = unexpected
+    assert service.delete(["100"]).outcomes[0].error_code == "admin_favorite"

@@ -22,6 +22,7 @@ _LONG_RETENTION_PREFIXES = (
     "manga.deleted",
     "manga.delete_",
     "permission.changed",
+    "admin.qq.changed",
     "setting.changed",
     "bot.shutdown_",
     "web.login_",
@@ -30,6 +31,8 @@ _LONG_RETENTION_PREFIXES = (
 
 
 _AUDIT_METADATA_KEYS = {
+    "admin_id",
+    "qq_id",
     "action",
     "changed_fields",
     "cleaned_count",

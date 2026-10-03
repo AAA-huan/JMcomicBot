@@ -4,6 +4,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 
 import { errorMessage } from '@/api/client'
+import { setFavorite } from '@/api/favorites'
 import { batchDeleteMangas, deleteManga, listMangas } from '@/api/mangas'
 import { requestDownloads } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -60,6 +61,7 @@ const filters = reactive({
   sort: 'downloaded_at_desc',
   page: 1,
   pageSize: 20,
+  favoriteOnly: false,
 })
 
 interface LibraryListCache {
@@ -79,6 +81,7 @@ const libraryListCache: LibraryListCache = {
 
 const actionError = ref('')
 const actionNotice = ref('')
+const favoriteBusy = reactive<Record<string, boolean>>({})
 
 const deleteTarget = ref<Manga | null>(null)
 const deleteDialog = ref(false)
@@ -105,6 +108,7 @@ function readQuery(): void {
     filters.scope = rawTag ? 'tag' : 'keyword'
   }
   filters.keyword = rawTag || rawSearch
+  filters.favoriteOnly = query.favorite_only === 'true'
   filters.status = typeof query.status === 'string' ? query.status : ''
   filters.sort = typeof query.sort === 'string' ? query.sort : 'downloaded_at_desc'
   const page = Number.parseInt(typeof query.page === 'string' ? query.page : '1', 10)
@@ -136,6 +140,7 @@ async function load(options: { silent?: boolean } = {}): Promise<void> {
       status: filters.status || undefined,
       tag: filters.scope === 'tag' ? filters.keyword || undefined : undefined,
       sort: filters.sort,
+      favorite_only: filters.favoriteOnly || undefined,
     })
     mangas.value = result.items
     total.value = result.total
@@ -228,6 +233,27 @@ async function requestDownloadIds(ids: string[]): Promise<void> {
   }
 }
 
+/** 服务端确认成功后更新状态，失败时保留原收藏状态。 */
+async function toggleFavorite(manga: Manga): Promise<void> {
+  if (favoriteBusy[manga.id]) return
+  favoriteBusy[manga.id] = true
+  actionError.value = ''
+  actionNotice.value = ''
+  try {
+    const result = await setFavorite(manga.id, !manga.is_favorite)
+    manga.is_favorite = result.is_favorite
+    actionNotice.value = result.is_favorite ? `已收藏《${manga.title}》` : `已取消收藏《${manga.title}》`
+    if (filters.favoriteOnly && !result.is_favorite) {
+      if (mangas.value.length === 1 && filters.page > 1) updateQuery({ page: filters.page - 1 })
+      else await load()
+    }
+  } catch (err) {
+    actionError.value = errorMessage(err)
+  } finally {
+    favoriteBusy[manga.id] = false
+  }
+}
+
 function askDelete(manga: Manga): void {
   deleteTarget.value = manga
   deleteDialog.value = true
@@ -267,7 +293,7 @@ async function confirmBatchDelete(): Promise<void> {
     if (result.failed_count > 0) {
       const failed = result.items
         .filter((item) => !item.succeeded)
-        .map((item) => `${item.manga_id}（${item.error_code ?? '未知错误'}）`)
+        .map((item) => `${item.manga_id}（${item.error_message ?? item.error_code ?? '未知错误'}）`)
         .join('、')
       actionError.value = `批量删除完成：成功 ${result.succeeded_count} 个，失败 ${result.failed_count} 个：${failed}`
     } else {
@@ -388,6 +414,15 @@ watch(
       </v-card-text>
       <v-divider />
       <v-card-actions class="flex-wrap">
+        <v-switch
+          v-model="filters.favoriteOnly"
+          label="仅看收藏"
+          color="primary"
+          hide-details
+          density="compact"
+          class="ml-2"
+          @update:model-value="updateQuery({ favorite_only: filters.favoriteOnly ? 'true' : undefined, page: 1 })"
+        />
         <span class="text-body-2 text-medium-emphasis ml-2">
           共 {{ total }} 条
           <template v-if="selectedCount > 0">，已选 {{ selectedCount }} 条</template>
@@ -516,6 +551,17 @@ watch(
                   aria-label="没有可下载的文件"
                 />
                 <v-btn
+                  :icon="manga.is_favorite ? 'mdi-star' : 'mdi-star-outline'"
+                  :color="manga.is_favorite ? 'warning' : undefined"
+                  size="small"
+                  variant="text"
+                  :loading="favoriteBusy[manga.id]"
+                  :disabled="favoriteBusy[manga.id]"
+                  :aria-label="manga.is_favorite ? '取消收藏' : '收藏'"
+                  :aria-pressed="manga.is_favorite"
+                  @click="toggleFavorite(manga)"
+                />
+                <v-btn
                   icon="mdi-delete"
                   size="small"
                   variant="text"
@@ -591,6 +637,17 @@ watch(
                   variant="text"
                   disabled
                   aria-label="没有可下载的文件"
+                />
+                <v-btn
+                  :icon="manga.is_favorite ? 'mdi-star' : 'mdi-star-outline'"
+                  :color="manga.is_favorite ? 'warning' : undefined"
+                  size="small"
+                  variant="text"
+                  :loading="favoriteBusy[manga.id]"
+                  :disabled="favoriteBusy[manga.id]"
+                  :aria-label="manga.is_favorite ? '取消收藏' : '收藏'"
+                  :aria-pressed="manga.is_favorite"
+                  @click="toggleFavorite(manga)"
                 />
                 <v-btn
                   icon="mdi-delete"

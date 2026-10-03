@@ -8,6 +8,7 @@ import pytest
 from src.command.executor import CommandExecutor
 from src.database.repositories import (
     AuditEventRepository,
+    FavoriteRepository,
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
@@ -533,3 +534,45 @@ def test_batch_delete_partial_failure_marks_task_failed(
     assert (tmp_path / f"{good_id}-标题(1章).pdf").exists() is False
     assert (tmp_path / f"{busy_id}-标题(1章).pdf").exists() is True
     assert manga_repo.get(busy_id) is not None
+
+
+@pytest.mark.parametrize("batch", [False, True])
+def test_qq_delete_reports_admin_favorite_protection(
+    tmp_path, db_manager, manga_repo, tag_repo, operation_task_service, batch
+):
+    """已拥有删除权限的 QQ 用户也必须得到“不能删除”，不能移除管理员收藏。"""
+    for manga_id in ["350240", "350241"]:
+        pdf = tmp_path / f"{manga_id}.pdf"
+        pdf.write_bytes(b"%PDF")
+        _add_manga(manga_repo, manga_id, chapter_count=1)
+        manga_repo.add_file(manga_id, str(pdf))
+    favorites = FavoriteRepository(db_manager)
+    favorites.set_favorite("web_admin", "1", "350240", True)
+    download_manager = object.__new__(DownloadManager)
+    download_manager.queued_tasks = {}
+    download_manager.downloading_mangas = {}
+    messages = []
+    executor = _build_executor(
+        str(tmp_path),
+        messages,
+        download_manager=download_manager,
+        manga_repo=manga_repo,
+        tag_repo=tag_repo,
+        manga_service=_build_manga_service(
+            str(tmp_path),
+            manga_repo,
+            tag_repo,
+            operation_task_service,
+            AuditEventRepository(db_manager),
+            download_manager,
+        ),
+    )
+    executor._handle_manga_delete(
+        "10001", "350240,350241" if batch else "350240", None, True
+    )
+    assert "不能删除" in messages[-1]
+    assert "管理员先取消收藏" in messages[-1]
+    assert (tmp_path / "350240.pdf").exists()
+    assert favorites.get("web_admin", "1", "350240") is not None
+    if batch:
+        assert not (tmp_path / "350241.pdf").exists()

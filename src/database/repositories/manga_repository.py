@@ -12,7 +12,7 @@ from sqlalchemy import Integer, Select, cast, delete, func, or_, select, update
 from sqlalchemy.orm import selectinload
 
 from src.database.database import DatabaseManager
-from src.database.models import Manga, MangaFile, MangaTag, Tag, utc_now
+from src.database.models import Manga, MangaFavorite, MangaFile, MangaTag, Tag, utc_now
 
 from ._base import BaseRepository
 
@@ -120,6 +120,7 @@ class MangaRepository(BaseRepository):
         status: Optional[str] = None,
         tag: Optional[str] = None,
         sort: str = "downloaded_at_desc",
+        favorite_owner_id: Optional[str] = None,
     ) -> tuple[List[Manga], int]:
         """按白名单条件分页查询漫画并返回总数。"""
         # 漫画 ID 是数字字符串，排序必须按数值比较，避免 "101051" 排在 "2556" 之前；
@@ -136,6 +137,16 @@ class MangaRepository(BaseRepository):
         if sort not in sort_columns:
             raise ValueError(f"不支持的漫画排序方式: {sort}")
         base_statement = self._build_query(search, status, tag)
+        if favorite_owner_id is not None:
+            base_statement = base_statement.where(
+                select(MangaFavorite.manga_id)
+                .where(
+                    MangaFavorite.manga_id == Manga.id,
+                    MangaFavorite.owner_type == "web_admin",
+                    MangaFavorite.owner_id == favorite_owner_id,
+                )
+                .exists()
+            )
         with self._get_session() as session:
             total = session.scalar(
                 select(func.count()).select_from(  # pylint: disable=not-callable

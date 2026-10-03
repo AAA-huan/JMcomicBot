@@ -7,10 +7,12 @@ from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
 
 from src.service import MangaDeleteOutcome
+from src.service.manga_service import ADMIN_FAVORITE_DELETE_MESSAGE
 from src.service.web_auth_service import AuthenticatedSession
-from src.web.api.common import build_operation_context
 from src.web.dependencies import WebDependencies
 from src.web.errors import ApiError
+
+from .common import build_operation_context
 
 AuthenticateCallable = Callable[..., AuthenticatedSession]
 
@@ -34,6 +36,8 @@ class MangaBatchDeleteRequest(BaseModel):
 
 def _raise_delete_error(outcome: MangaDeleteOutcome) -> None:
     """把单个删除失败结果映射为明确的 HTTP 错误。"""
+    if outcome.error_code == "admin_favorite":
+        raise ApiError(409, "MANGA_ADMIN_FAVORITE", ADMIN_FAVORITE_DELETE_MESSAGE)
     if outcome.error_code == "file_not_found":
         raise ApiError(404, "MANGA_NOT_FOUND", "未找到指定漫画")
     if outcome.error_code == "download_conflict":
@@ -53,18 +57,26 @@ def create_manga_router(
 
     @router.get("/mangas")
     def list_mangas(  # pylint: disable=too-many-arguments,too-many-positional-arguments
-        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
         page: Annotated[int, Query(ge=1)] = 1,
         page_size: Annotated[int, Query(ge=1, le=100)] = 20,
         search: Optional[str] = None,
         manga_status: Annotated[Optional[str], Query(alias="status")] = None,
         tag: Optional[str] = None,
         sort: str = "downloaded_at_desc",
+        favorite_only: bool = False,
     ) -> dict[str, object]:
         try:
             return asdict(
                 dependencies.manga_query_service.list(
-                    page, page_size, search, manga_status, tag, sort
+                    page,
+                    page_size,
+                    search,
+                    manga_status,
+                    tag,
+                    sort,
+                    favorite_only=favorite_only,
+                    admin_id=authenticated.admin_id,
                 )
             )
         except ValueError as error:
@@ -73,9 +85,9 @@ def create_manga_router(
     @router.get("/mangas/{manga_id}")
     def get_manga(
         manga_id: str,
-        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
     ) -> dict[str, object]:
-        manga = dependencies.manga_query_service.get(manga_id)
+        manga = dependencies.manga_query_service.get(manga_id, authenticated.admin_id)
         if manga is None:
             raise ApiError(404, "MANGA_NOT_FOUND", "未找到指定漫画")
         return asdict(manga)
@@ -83,12 +95,48 @@ def create_manga_router(
     @router.get("/mangas/{manga_id}/files")
     def list_manga_files(
         manga_id: str,
-        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
     ) -> list[dict[str, object]]:
-        manga = dependencies.manga_query_service.get(manga_id)
+        manga = dependencies.manga_query_service.get(manga_id, authenticated.admin_id)
         if manga is None:
             raise ApiError(404, "MANGA_NOT_FOUND", "未找到指定漫画")
         return [asdict(item) for item in manga.files]
+
+    def change_favorite(
+        manga_id: str,
+        favorite: bool,
+        request: Request,
+        authenticated: AuthenticatedSession,
+    ) -> dict[str, object]:
+        """收藏归属只使用服务端认证账户，不接受客户端指定身份。"""
+        try:
+            changed = dependencies.favorite_service.set_favorite(
+                authenticated.admin_id,
+                manga_id,
+                favorite,
+                build_operation_context(request, authenticated),
+            )
+        except LookupError as error:
+            raise ApiError(404, "MANGA_NOT_FOUND", "未找到指定漫画") from error
+        return {"manga_id": manga_id, "is_favorite": favorite, "changed": changed}
+
+    @router.put("/mangas/{manga_id}/favorite")
+    def add_favorite(
+        manga_id: str,
+        request: Request,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """幂等收藏漫画。"""
+        return change_favorite(manga_id, True, request, authenticated)
+
+    @router.delete("/mangas/{manga_id}/favorite")
+    def remove_favorite(
+        manga_id: str,
+        request: Request,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """幂等取消收藏。"""
+        return change_favorite(manga_id, False, request, authenticated)
 
     @router.patch("/mangas/{manga_id}")
     def patch_manga(
@@ -108,7 +156,7 @@ def create_manga_router(
             raise ApiError(400, "INVALID_MANGA_METADATA", str(error)) from error
         if not updated:
             raise ApiError(404, "MANGA_NOT_FOUND", "未找到指定漫画")
-        manga = dependencies.manga_query_service.get(manga_id)
+        manga = dependencies.manga_query_service.get(manga_id, authenticated.admin_id)
         if manga is None:
             raise ApiError(404, "MANGA_NOT_FOUND", "未找到指定漫画")
         return asdict(manga)
@@ -149,6 +197,11 @@ def create_manga_router(
                     "succeeded": outcome.succeeded,
                     "error_code": outcome.error_code,
                     "deleted_file_count": outcome.deleted_file_count,
+                    "error_message": (
+                        ADMIN_FAVORITE_DELETE_MESSAGE
+                        if outcome.error_code == "admin_favorite"
+                        else None
+                    ),
                 }
                 for outcome in result.outcomes
             ],

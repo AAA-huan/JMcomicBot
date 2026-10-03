@@ -2,7 +2,7 @@
 
 from typing import List, Optional
 
-from src.database.repositories import PermissionRepository
+from src.database.repositories import PermissionRepository, WebAdminRepository
 from src.logging.logger_config import logger
 
 
@@ -35,6 +35,7 @@ class PermissionManager:
         seed_private_whitelist: Optional[List[str]] = None,
         seed_global_blacklist: Optional[List[str]] = None,
         seed_delete_permission_user: Optional[List[str]] = None,
+        admin_repository: Optional[WebAdminRepository] = None,
     ) -> None:
         """
         初始化权限管理器
@@ -46,6 +47,11 @@ class PermissionManager:
             seed_global_blacklist: 首次启动时的全局黑名单种子数据（来自.env）
             seed_delete_permission_user: 首次启动时的删除权限用户种子数据（来自.env）
         """
+        self.admin_repository = (
+            admin_repository
+            if admin_repository is not None
+            else WebAdminRepository(permission_repo.db_manager)
+        )
         self.permission_repo = permission_repo
         self.logger = logger
 
@@ -106,10 +112,11 @@ class PermissionManager:
 
         权限检查规则：
         1. 全局黑名单优先：如果用户在全局黑名单中，直接拒绝
-        2. 白名单检查：
+        2. 已关联管理员 QQ 绕过白名单，但不绕过黑名单
+        3. 白名单检查：
            - 私聊：检查用户是否在私信白名单中（如果白名单不为空）
            - 群聊：检查群组是否在群组白名单中（如果白名单不为空）
-        3. 白名单为空表示不限制
+        4. 白名单为空表示不限制
 
         Args:
             user_id: 用户ID
@@ -132,6 +139,9 @@ class PermissionManager:
             error_msg = f"用户 {user_label} 在全局黑名单中，拒绝访问"
             self.logger.warning(error_msg)
             raise ValueError(error_msg)
+
+        if self.is_admin(user_id):
+            return True
 
         if private:
             if self.private_whitelist and user_id not in self.private_whitelist:
@@ -256,13 +266,20 @@ class PermissionManager:
             self.logger.info(f"全局黑名单已更新: {len(global_blacklist)}个")
         self._reload_scopes()
 
+    def is_admin(self, user_id: str) -> bool:
+        """实时查询关联 QQ；黑名单用户不能获得管理员授权。"""
+        if user_id in self.global_blacklist:
+            return False
+        admin = self.admin_repository.get()
+        return admin is not None and admin.qq_id == user_id
+
     def check_delete_permission(self, user_id: str) -> bool:
         """
         检查用户是否有删除漫画的权限
 
         删除权限规则：
-        1. 删除权限用户名单为空时删除功能不可用
-        2. 用户必须在删除权限用户名单中
+        1. 黑名单用户拒绝访问；关联管理员 QQ 可删除
+        2. 普通用户仍必须在删除权限用户名单中，名单为空则不可用
 
         Args:
             user_id: 用户ID
@@ -273,6 +290,10 @@ class PermissionManager:
         Raises:
             ValueError: 当删除权限用户名单为空或用户不在名单中时
         """
+        if user_id in self.global_blacklist:
+            raise ValueError(f"用户 {user_id} 在全局黑名单中，拒绝访问")
+        if self.is_admin(user_id):
+            return True
         if len(self.delete_permission_user) == 0:
             error_msg = "删除功能不可用：未配置删除权限用户"
             self.logger.warning(error_msg)
