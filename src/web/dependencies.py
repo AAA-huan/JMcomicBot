@@ -18,6 +18,8 @@ from src.service.query_service import (
     MangaQueryService,
     TaskQueryService,
 )
+from src.service.admin_qq_service import AdminQQService
+from src.service.favorite_service import FavoriteService
 from src.service.system_service import SystemService
 from src.service.web_auth_service import WebAuthService
 from src.web.events.bus import WebEventBus
@@ -42,3 +44,5 @@ class WebDependencies:  # pylint: disable=too-many-instance-attributes
     event_bus: WebEventBus
     audit_query_service: AuditQueryService
     verify_service: VerifyService
+    favorite_service: FavoriteService
+    admin_qq_service: AdminQQService

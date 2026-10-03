@@ -4,6 +4,7 @@ import { apiRequest } from './client'
 import type { Manga, MangaFile, PageResult } from '@/types/api'
 
 export interface MangaListQuery {
+  favorite_only?: boolean
   page?: number
   page_size?: number
   search?: string
@@ -54,6 +55,7 @@ export interface BatchDeleteResult {
     manga_id: string
     succeeded: boolean
     error_code: string | null
+    error_message?: string | null
     deleted_file_count: number
   }[]
   succeeded_count: number

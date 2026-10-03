@@ -5,7 +5,7 @@
 from datetime import datetime
 from typing import List, Optional
 
-from sqlalchemy import delete, select
+from sqlalchemy import delete, or_, select, update
 
 from src.database.models import WebAdmin, WebSession, utc_now
 from src.database.repositories._base import BaseRepository
@@ -39,6 +39,24 @@ class WebAdminRepository(BaseRepository):
             session.commit()
             session.refresh(admin)
             return admin
+
+    def set_qq_id(self, qq_id: Optional[str], admin_id: int = 1) -> bool:
+        """仅在关联改变时更新账户，不改变密码版本与浏览器会话。"""
+        with self._get_session() as session:
+            if session.get(WebAdmin, admin_id) is None:
+                raise ValueError("WebUI 管理员尚未初始化")
+            changed_condition = (
+                WebAdmin.qq_id.is_not(None)
+                if qq_id is None
+                else or_(WebAdmin.qq_id.is_(None), WebAdmin.qq_id != qq_id)
+            )
+            result = session.execute(
+                update(WebAdmin)
+                .where(WebAdmin.id == admin_id, changed_condition)
+                .values(qq_id=qq_id, updated_at=utc_now())
+            )
+            session.commit()
+            return result.rowcount > 0
 
     def record_login(self, admin_id: int = 1) -> WebAdmin:
         """记录管理员最近一次成功登录时间。"""

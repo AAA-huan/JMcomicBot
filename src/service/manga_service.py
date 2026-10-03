@@ -7,13 +7,15 @@ import os
 
 from src.database.repositories import (
     AuditEventRepository,
+    FavoriteRepository,
     MangaRepository,
     MangaTagRepository,
 )
 from src.logging.logger_config import logger
-from src.service.contracts import TaskService
-from src.service.operation_context import OperationContext
-from src.service.results import MangaDeleteOutcome, MangaDeleteResult
+
+from .contracts import TaskService
+from .operation_context import OperationContext
+from .results import MangaDeleteOutcome, MangaDeleteResult
 
 # 元数据修改白名单与长度限制，避免越权字段与超长内容写库
 _VALID_METADATA_FIELDS = {"title", "author", "tags"}
@@ -22,8 +24,11 @@ _MAX_AUTHOR_LENGTH = 255
 _MAX_TAG_COUNT = 50
 _MAX_TAG_LENGTH = 64
 
+ADMIN_FAVORITE_DELETE_MESSAGE = "不能删除：该漫画已被管理员收藏，请管理员先取消收藏"
+
 # 删除任务的失败原因对用户展示的简短说明，不包含绝对路径或异常细节
 _DELETE_ERROR_MESSAGES = {
+    "admin_favorite": ADMIN_FAVORITE_DELETE_MESSAGE,
     "download_conflict": "漫画正在下载中，无法删除",
     "send_conflict": "漫画文件正在发送中，无法删除",
     "delete_directory_missing": "下载目录不存在",
@@ -53,7 +58,13 @@ class MangaService:
         download_root: str,
         download_conflict_checker: Callable[[str], bool],
         send_conflict_checker: Callable[[str], bool],
+        favorite_repository: Optional[FavoriteRepository] = None,
     ) -> None:
+        self.favorite_repository = (
+            favorite_repository
+            if favorite_repository is not None
+            else FavoriteRepository(manga_repository.db_manager)
+        )
         self.manga_repository = manga_repository
         self.tag_repository = tag_repository
         self.audit_repository = audit_repository
@@ -158,7 +169,7 @@ class MangaService:
     ) -> MangaDeleteResult:
         """统一执行单个或批量删除，返回每个漫画的结构化结果。
 
-        删除流程：冲突检查（下载/发送）→ 标记 deleting → 删除磁盘 PDF →
+        删除流程：管理员收藏保护检查 → 冲突检查（下载/发送）→ 标记 deleting → 删除磁盘 PDF →
         级联清理漫画、文件与标签记录。全部成功任务才 succeed，
         任一失败则任务失败并保留成功/失败计数。
         """
@@ -203,6 +214,9 @@ class MangaService:
 
     def _delete_one(self, manga_id: str) -> MangaDeleteOutcome:
         """删除单个漫画，冲突与预期失败返回结构化结果而不抛出。"""
+        if self.favorite_repository.has_admin_favorite(manga_id):
+            logger.warning(f"漫画 {manga_id} {ADMIN_FAVORITE_DELETE_MESSAGE}")
+            return MangaDeleteOutcome(manga_id, False, "admin_favorite", 0)
         if self.download_conflict_checker(manga_id):
             logger.warning(f"漫画 {manga_id} 正在下载中，跳过删除")
             return MangaDeleteOutcome(manga_id, False, "download_conflict", 0)

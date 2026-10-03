@@ -17,6 +17,7 @@ export interface MangaFile {
 }
 
 export interface Manga {
+  is_favorite: boolean
   id: string
   title: string
   author: string

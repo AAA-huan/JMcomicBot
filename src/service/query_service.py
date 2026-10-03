@@ -1,6 +1,6 @@
 """WebUI 漫画与任务只读查询服务。"""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import datetime
 from math import ceil
 from typing import Generic, Optional, TypeVar
@@ -8,6 +8,7 @@ from typing import Generic, Optional, TypeVar
 from src.database.models import Manga, MangaFile, OperationTask
 from src.database.repositories import (
     AuditEventRepository,
+    FavoriteRepository,
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
@@ -109,6 +110,7 @@ class MangaResult:  # pylint: disable=too-many-instance-attributes
     updated_at: datetime
     tags: tuple[str, ...]
     files: tuple[MangaFileResult, ...]
+    is_favorite: bool = False
 
 
 @dataclass(frozen=True)
@@ -135,10 +137,18 @@ class MangaQueryService:
     """提供漫画分页和详情只读查询。"""
 
     def __init__(
-        self, manga_repository: MangaRepository, tag_repository: MangaTagRepository
+        self,
+        manga_repository: MangaRepository,
+        tag_repository: MangaTagRepository,
+        favorite_repository: Optional[FavoriteRepository] = None,
     ) -> None:
         self.manga_repository = manga_repository
         self.tag_repository = tag_repository
+        self.favorite_repository = (
+            favorite_repository
+            if favorite_repository is not None
+            else FavoriteRepository(manga_repository.db_manager)
+        )
 
     def _to_result(self, manga: Manga) -> MangaResult:
         return MangaResult(
@@ -173,23 +183,45 @@ class MangaQueryService:
         status: Optional[str],
         tag: Optional[str],
         sort: str,
+        favorite_only: bool = False,
+        admin_id: int = 1,
     ) -> PageResult[MangaResult]:
         """按受控条件分页查询漫画。"""
         mangas, total = self.manga_repository.search(
-            page, page_size, search, status, tag, sort
+            page,
+            page_size,
+            search,
+            status,
+            tag,
+            sort,
+            favorite_owner_id=str(admin_id) if favorite_only else None,
+        )
+        favorite_ids = self.favorite_repository.ids_for_mangas(
+            "web_admin", str(admin_id), [manga.id for manga in mangas]
         )
         return PageResult(
-            items=tuple(self._to_result(manga) for manga in mangas),
+            items=tuple(
+                replace(self._to_result(manga), is_favorite=manga.id in favorite_ids)
+                for manga in mangas
+            ),
             page=page,
             page_size=page_size,
             total=total,
             pages=ceil(total / page_size),
         )
 
-    def get(self, manga_id: str) -> Optional[MangaResult]:
+    def get(self, manga_id: str, admin_id: int = 1) -> Optional[MangaResult]:
         """按漫画 ID 查询公开详情。"""
         manga = self.manga_repository.get(manga_id)
-        return self._to_result(manga) if manga is not None else None
+        if manga is None:
+            return None
+        return replace(
+            self._to_result(manga),
+            is_favorite=self.favorite_repository.get(
+                "web_admin", str(admin_id), manga_id
+            )
+            is not None,
+        )
 
 
 class TaskQueryService:

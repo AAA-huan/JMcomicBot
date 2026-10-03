@@ -13,6 +13,7 @@ from src.database.database import DatabaseManager
 from src.database.models import utc_now
 from src.database.repositories import (
     AuditEventRepository,
+    FavoriteRepository,
     BackupRepository,
     MangaRepository,
     MangaTagRepository,
@@ -59,6 +60,8 @@ from src.utils.helpers import cleanup_failed_downloads
 from src.utils.name_cache import NameCache
 from src.web import WebServer, create_web_app
 from src.web.events.bus import WebEventBus
+from src.service.admin_qq_service import AdminQQService
+from src.service.favorite_service import FavoriteService
 from src.web.dependencies import WebDependencies
 from src.websocket.client import WebSocketClient
 
@@ -102,6 +105,7 @@ class MangaBot:
         self.operation_task_repo = OperationTaskRepository(self.database_manager)
         self.task_event_repo = TaskEventRepository(self.database_manager)
         self.audit_event_repo = AuditEventRepository(self.database_manager)
+        self.favorite_repo = FavoriteRepository(self.database_manager)
         self.web_admin_repo = WebAdminRepository(self.database_manager)
         self.web_session_repo = WebSessionRepository(self.database_manager)
         self.backup_repo = BackupRepository(self.database_manager)
@@ -146,6 +150,7 @@ class MangaBot:
 
         self.permission_manager = PermissionManager(
             permission_repo=self.permission_repo,
+            admin_repository=self.web_admin_repo,
             seed_group_whitelist=self.config_manager.group_whitelist,
             seed_private_whitelist=self.config_manager.private_whitelist,
             seed_global_blacklist=self.config_manager.global_blacklist,
@@ -174,6 +179,7 @@ class MangaBot:
             tag_repo=self.tag_repo,
             operation_task_service=self.operation_task_service,
             send_conflict_checker=self.message_manager.is_manga_sending,
+            favorite_repository=self.favorite_repo,
         )
         self.download_service = DownloadQueueService(
             self.download_manager, self.operation_task_service
@@ -207,6 +213,7 @@ class MangaBot:
             download_root=str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]),
             download_conflict_checker=self.download_manager.is_download_active,
             send_conflict_checker=self.message_manager.is_manga_sending,
+            favorite_repository=self.favorite_repo,
         )
         # 阅读进度服务：WebUI 阅读器读写，文件存在性与页数补齐在服务层校验
         self.reading_progress_service = ReadingProgressService(
@@ -219,7 +226,15 @@ class MangaBot:
             self.audit_event_repo,
             int(self.config_manager.config_dict["WEBUI_SESSION_HOURS"]),
         )
-        self.manga_query_service = MangaQueryService(self.manga_repo, self.tag_repo)
+        self.favorite_service = FavoriteService(
+            self.favorite_repo, self.audit_event_repo
+        )
+        self.admin_qq_service = AdminQQService(
+            self.web_admin_repo, self.permission_manager, self.audit_event_repo
+        )
+        self.manga_query_service = MangaQueryService(
+            self.manga_repo, self.tag_repo, self.favorite_repo
+        )
         self.task_query_service = TaskQueryService(self.operation_task_repo)
         self.audit_query_service = AuditQueryService(self.audit_event_repo)
         self.verify_service = VerifyService(
@@ -342,6 +357,8 @@ class MangaBot:
                         event_bus=self.event_bus,
                         audit_query_service=self.audit_query_service,
                         verify_service=self.verify_service,
+                        favorite_service=self.favorite_service,
+                        admin_qq_service=self.admin_qq_service,
                     ),
                     web_host=web_host,
                     web_port=int(self.config_manager.config_dict["WEBUI_PORT"]),

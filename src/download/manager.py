@@ -1,6 +1,7 @@
 """下载管理器模块，负责漫画下载功能并对下载队列进行管理"""
 
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
 import os
@@ -13,12 +14,14 @@ import jmcomic
 from jmcomic.jm_option import DirRule
 
 from src.database.repositories import (
+    FavoriteRepository,
     MangaRepository,
     MangaTagRepository,
     TaskLogRepository,
 )
 from src.service import OperationContext, TaskService
 from src.service.contracts import DownloadNotifier
+from src.service.manga_service import ADMIN_FAVORITE_DELETE_MESSAGE
 from src.service.results import DownloadRequestItem
 from src.utils.helpers import sanitize_filename
 
@@ -134,6 +137,7 @@ class DownloadManager:
         tag_repo: Optional[MangaTagRepository] = None,
         operation_task_service: Optional[TaskService] = None,
         send_conflict_checker: Optional[Callable[[str], bool]] = None,
+        favorite_repository: Optional[FavoriteRepository] = None,
     ) -> None:
         """
         初始化下载管理器
@@ -152,6 +156,15 @@ class DownloadManager:
         self.config = config
         self.message_sender = message_sender
         self.file_sender = file_sender
+        self.favorite_repository = (
+            favorite_repository
+            if favorite_repository is not None
+            else (
+                FavoriteRepository(manga_repo.db_manager)
+                if manga_repo is not None
+                else None
+            )
+        )
         self.manga_repo = manga_repo
         self.task_log_repo = task_log_repo
         self.tag_repo = tag_repo
@@ -177,7 +190,7 @@ class DownloadManager:
             self.config.get("LOW_MEMORY_DELETE_DELAY", 3)
         )
 
-        # 如果启用低占用模式，启动时清空下载文件夹
+        # 如果启用低占用模式，启动时清理下载文件夹，保留管理员收藏文件
         if self.low_memory_mode:
             self._clear_download_folder()
 
@@ -257,9 +270,20 @@ class DownloadManager:
         self.logger.info("下载队列线程已停止")
         return True
 
+    def _is_admin_favorite_file(self, file_path: str) -> bool:
+        """清理前读取最新收藏状态，管理员在延迟期间收藏也会受到保护。"""
+        if self.favorite_repository is None:
+            return False
+        relative_path = str(
+            Path(file_path)
+            .absolute()
+            .relative_to(Path(str(self.config["MANGA_DOWNLOAD_PATH"])).absolute())
+        )
+        return self.favorite_repository.is_admin_favorite_file(relative_path)
+
     def _clear_download_folder(self) -> None:
         """
-        清空下载文件夹中的所有PDF文件
+        清理下载文件夹中的未受管理员收藏保护的 PDF 文件
         仅在低占用模式下启动时调用
         """
         download_path = str(self.config["MANGA_DOWNLOAD_PATH"])
@@ -273,11 +297,14 @@ class DownloadManager:
             for file_name in os.listdir(download_path):
                 if file_name.endswith(".pdf"):
                     file_path = os.path.join(download_path, file_name)
+                    if self._is_admin_favorite_file(file_path):
+                        self.logger.info(f"{file_name} {ADMIN_FAVORITE_DELETE_MESSAGE}")
+                        continue
                     os.remove(file_path)
                     self.logger.info(f"已删除PDF文件: {file_name}")
                     deleted_count += 1
 
-            self.logger.info(f"低占用模式：已清空 {deleted_count} 个PDF文件")
+            self.logger.info(f"低占用模式：已清理 {deleted_count} 个PDF文件")
         except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error(f"清空下载文件夹时出错: {e}")
             raise
@@ -295,6 +322,11 @@ class DownloadManager:
             try:
                 time.sleep(delay_minutes * 60)
                 if os.path.exists(file_path):
+                    if self._is_admin_favorite_file(file_path):
+                        self.logger.info(
+                            f"{os.path.basename(file_path)} {ADMIN_FAVORITE_DELETE_MESSAGE}"
+                        )
+                        return
                     os.remove(file_path)
                     self.logger.info(
                         f"低占用模式：已延迟删除文件: {os.path.basename(file_path)}"

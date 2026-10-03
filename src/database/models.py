@@ -1,7 +1,7 @@
 """SQLAlchemy ORM 模型定义，对应 SQLite 数据库中的各张表"""
 
 from datetime import datetime, timezone
-from typing import Optional
+from typing import List, Optional
 
 from sqlalchemy import (
     Boolean,
@@ -64,7 +64,7 @@ class Manga(Base):
         DateTime, nullable=True
     )
 
-    files: Mapped[list["MangaFile"]] = relationship(
+    files: Mapped[List["MangaFile"]] = relationship(
         back_populates="manga",
         cascade="all, delete-orphan",
     )
@@ -165,13 +165,39 @@ class MangaTag(Base):
     )
 
 
+class MangaFavorite(Base):
+    """按归属隔离的漫画收藏，预留 QQ 用户收藏的独立命名空间。"""
+
+    __tablename__ = "manga_favorite"
+    __table_args__ = (
+        CheckConstraint(
+            "owner_type IN ('web_admin', 'qq')", name="ck_favorite_owner_type"
+        ),
+        CheckConstraint("length(owner_id) > 0", name="ck_favorite_owner_id"),
+        Index("ix_manga_favorite_manga_id", "manga_id"),
+    )
+
+    owner_type: Mapped[str] = mapped_column(String(16), primary_key=True)
+    owner_id: Mapped[str] = mapped_column(String(20), primary_key=True)
+    manga_id: Mapped[str] = mapped_column(
+        ForeignKey("manga.id", ondelete="CASCADE"), primary_key=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utc_now
+    )
+
+
 class WebAdmin(Base):
     """WebUI 单管理员账户，只保存 Argon2 密码哈希。"""
 
     __tablename__ = "web_admin"
-    __table_args__ = (CheckConstraint("id = 1", name="ck_web_admin_singleton"),)
+    __table_args__ = (
+        CheckConstraint("id = 1", name="ck_web_admin_singleton"),
+        UniqueConstraint("qq_id", name="uq_web_admin_qq_id"),
+    )
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, default=1)
+    qq_id: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
     password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
     password_version: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
     created_at: Mapped[datetime] = mapped_column(
