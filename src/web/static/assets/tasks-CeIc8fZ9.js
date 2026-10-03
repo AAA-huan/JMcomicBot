@@ -1,0 +1,1 @@
+import{S as s}from"./index-CgbLmG8U.js";function n(e={}){return s("/tasks",{query:{...e}})}function t(e){return s("/tasks/downloads",{method:"POST",body:{manga_ids:e}})}function o(e){return s(`/tasks/${encodeURIComponent(e)}/cancel`,{method:"POST"})}function u(){return s("/tasks/cancel-queued",{method:"POST"})}export{u as a,o as c,n as l,t as r};

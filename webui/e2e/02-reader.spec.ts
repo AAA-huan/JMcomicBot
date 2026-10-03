@@ -39,6 +39,32 @@ async function currentPage(page: Page): Promise<number> {
 
 test.describe.configure({ mode: 'serial' })
 
+test('缺少新 JavaScript API 的手机浏览器仍能加载并再次进入阅读器', async ({ page }) => {
+  // 视口模拟不会改变浏览器 API；主线程与 Worker 都需要模拟旧版内核。
+  await page.addInitScript(() => {
+    Reflect.deleteProperty(Promise, 'withResolvers')
+    Reflect.deleteProperty(Map.prototype, 'getOrInsertComputed')
+    // 用独立入口先删除 Worker 环境中的 API，再加载实际打包的解析器。
+    // 浏览器自动化中的请求拦截并不总能覆盖 Worker 的初始脚本请求。
+    const NativeWorker = window.Worker
+    window.Worker = class extends NativeWorker {
+      constructor(url: string | URL, options?: WorkerOptions) {
+        const source = `Reflect.deleteProperty(Promise, 'withResolvers');
+Reflect.deleteProperty(Map.prototype, 'getOrInsertComputed');
+await import(${JSON.stringify(new URL(url, window.location.href).href)});`
+        super(URL.createObjectURL(new Blob([source], { type: 'text/javascript' })), options)
+      }
+    }
+  })
+
+  await login(page)
+  await openReader(page)
+  await page.getByRole('button', { name: '返回' }).click()
+  await expect(page).toHaveURL(/\/library\/900001/)
+  await openReader(page)
+  await expect(page.getByText('PDF 加载失败，请重试')).toBeHidden()
+})
+
 test('从详情页进入阅读器并渲染 PDF 页面', async ({ page }) => {
   await login(page)
   await openReader(page)
@@ -183,15 +209,15 @@ test('退出阅读器后再次进入仍能正常加载', async ({ page }) => {
 })
 
 test('Worker 不可用时回退主线程仍能渲染', async ({ page }) => {
-  // 模拟不支持/无法加载 Web Worker 的手机浏览器：只拦截 Worker 线程的脚本请求，
-  // 主线程动态 import 的兜底路径不受影响，阅读器必须仍能渲染而不是报错。
-  await page.route(/pdf\.worker\.min-.*\.mjs$/, (route) => {
-    const destination = route.request().headers()['sec-fetch-dest']
-    if (destination === 'worker') {
-      void route.abort()
-    } else {
-      void route.continue()
-    }
+  // 模拟无法创建 Web Worker 的浏览器，让 PDF.js 实际进入主线程解析路径。
+  await page.addInitScript(() => {
+    Object.defineProperty(window, 'Worker', {
+      value: class {
+        constructor() {
+          throw new Error('测试：浏览器无法创建 Worker')
+        }
+      },
+    })
   })
 
   await login(page)
