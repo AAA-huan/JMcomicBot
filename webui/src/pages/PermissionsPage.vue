@@ -2,7 +2,7 @@
 import { onMounted, reactive, ref } from 'vue'
 
 import { errorMessage } from '@/api/client'
-import { addPermission, getPermissions, removePermission } from '@/api/permissions'
+import { addPermission, getPermissions, removePermission, getAdminQQ, linkAdminQQ, unlinkAdminQQ } from '@/api/permissions'
 import EmptyState from '@/components/EmptyState.vue'
 import type { CachedGroup, CachedUser } from '@/types/api'
 import { formatDateTime } from '@/utils/format'
@@ -25,6 +25,9 @@ const loading = ref(false)
 const error = ref('')
 const actionError = ref('')
 const actionNotice = ref('')
+const linkedQQ = ref<string | null>(null)
+const qqInput = ref('')
+const qqBusy = ref(false)
 
 const addInputs = reactive<Record<string, string>>({
   group_whitelist: '',
@@ -43,7 +46,9 @@ async function load(): Promise<void> {
   loading.value = true
   error.value = ''
   try {
-    const data = await getPermissions()
+    const [data, adminQQ] = await Promise.all([getPermissions(), getAdminQQ()])
+    linkedQQ.value = adminQQ.qq_id
+    qqInput.value = adminQQ.qq_id ?? ''
     scopes.value = data.scopes
     cachedUsers.value = data.cached_users
     cachedGroups.value = data.cached_groups
@@ -51,6 +56,28 @@ async function load(): Promise<void> {
     error.value = errorMessage(err)
   } finally {
     loading.value = false
+  }
+}
+
+async function saveAdminQQ(unlink = false): Promise<void> {
+  if (qqBusy.value) return
+  actionError.value = ''
+  actionNotice.value = ''
+  const qq = qqInput.value.trim()
+  if (!unlink && !/^[1-9][0-9]{0,19}$/.test(qq)) {
+    actionError.value = 'QQ 号必须是 1–20 位正整数数字，不能含前导零'
+    return
+  }
+  qqBusy.value = true
+  try {
+    const result = unlink ? await unlinkAdminQQ() : await linkAdminQQ(qq)
+    linkedQQ.value = result.qq_id
+    qqInput.value = result.qq_id ?? ''
+    actionNotice.value = unlink ? '已解除管理员 QQ 关联' : `已关联管理员 QQ：${result.qq_id}`
+  } catch (err) {
+    actionError.value = errorMessage(err)
+  } finally {
+    qqBusy.value = false
   }
 }
 
@@ -134,6 +161,31 @@ onMounted(load)
     </v-alert>
 
     <v-progress-linear v-if="loading" indeterminate class="mb-4" />
+
+    <v-card class="mb-4">
+      <v-card-title class="text-subtitle-1">管理员关联 QQ</v-card-title>
+      <v-card-text>
+        <div class="mb-2">当前关联：{{ linkedQQ ?? '未关联' }}</div>
+        <p class="text-body-2 text-medium-emphasis mb-3">
+          关联后该 QQ 可绕过机器人白名单并删除漫画，黑名单仍优先拦截。解除关联会立即撤销这些权限，不改变其他名单。WebUI 登录仍需管理员密码。
+        </p>
+        <v-text-field
+          v-model="qqInput"
+          label="管理员 QQ 号"
+          inputmode="numeric"
+          maxlength="20"
+          :disabled="loading || qqBusy"
+          hide-details
+          @keyup.enter="saveAdminQQ()"
+        />
+      </v-card-text>
+      <v-card-actions class="flex-wrap">
+        <v-btn color="primary" variant="tonal" :loading="qqBusy" :disabled="loading || qqBusy" @click="saveAdminQQ()">
+          {{ linkedQQ ? '更换关联' : '关联 QQ' }}
+        </v-btn>
+        <v-btn v-if="linkedQQ" color="error" :disabled="loading || qqBusy" @click="saveAdminQQ(true)">解除关联</v-btn>
+      </v-card-actions>
+    </v-card>
 
     <v-row dense>
       <v-col v-for="scope in scopeOrder" :key="scope" cols="12" md="6">

@@ -10,6 +10,7 @@ from src.database.database import DatabaseManager
 from src.database.models import utc_now
 from src.database.repositories import (
     AuditEventRepository,
+    FavoriteRepository,
     BackupRepository,
     MangaRepository,
     MangaTagRepository,
@@ -48,6 +49,8 @@ from src.service.system_service import SystemService
 from src.service.web_auth_service import WebAuthService
 from src.web.app import create_web_app
 from src.config.manager import ConfigManager
+from src.service.admin_qq_service import AdminQQService
+from src.service.favorite_service import FavoriteService
 from src.web.dependencies import WebDependencies
 from src.web.events.bus import WebEventBus
 
@@ -139,6 +142,7 @@ def build_web_context(  # pylint: disable=too-many-locals
         audit_repo,
         event_publisher=event_bus,
     )
+    permission_manager = PermissionManager(PermissionRepository(db_manager))
     download_queue = FakeDownloadQueue(task_service)
 
     settings_service = SettingsService(
@@ -205,7 +209,7 @@ def build_web_context(  # pylint: disable=too-many-locals
         ),
         download_service=DownloadQueueService(download_queue, task_service),
         permission_service=PermissionService(
-            PermissionManager(PermissionRepository(db_manager)),
+            permission_manager,
             audit_repo,
             UserGroupRepository(db_manager),
         ),
@@ -232,6 +236,10 @@ def build_web_context(  # pylint: disable=too-many-locals
         ),
         reading_progress_service=ReadingProgressService(
             ReadingProgressRepository(db_manager), manga_repo
+        ),
+        favorite_service=FavoriteService(FavoriteRepository(db_manager), audit_repo),
+        admin_qq_service=AdminQQService(
+            WebAdminRepository(db_manager), permission_manager, audit_repo
         ),
         event_bus=event_bus,
         audit_query_service=AuditQueryService(audit_repo),

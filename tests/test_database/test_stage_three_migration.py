@@ -407,8 +407,8 @@ def test_migration_0022_upgrades_existing_database(tmp_path) -> None:
                     ) VALUES (1, 3, 10, 0.3, CURRENT_TIMESTAMP)
                     """))
 
-        command.upgrade(config, "head")
-        command.upgrade(config, "head")
+        command.upgrade(config, "0022_add_reading_maintenance_schema")
+        command.upgrade(config, "0022_add_reading_maintenance_schema")
 
         with engine.connect() as connection:
             assert (
@@ -471,7 +471,7 @@ def test_migration_0022_rejects_nonempty_placeholder(tmp_path) -> None:
                     """))
 
         with pytest.raises(RuntimeError, match="占位表 scan_record"):
-            command.upgrade(config, "head")
+            command.upgrade(config, "0022_add_reading_maintenance_schema")
 
         with engine.connect() as connection:
             assert (
@@ -499,7 +499,7 @@ def test_migration_0022_downgrade_restores_placeholder_schema(tmp_path) -> None:
     """回退应恢复占位表结构与旧任务类型约束。"""
     database_path = tmp_path / "downgrade.db"
     config = _alembic_config(database_path)
-    command.upgrade(config, "head")
+    command.upgrade(config, "0022_add_reading_maintenance_schema")
 
     engine = create_engine(f"sqlite:///{database_path}")
     try:
@@ -522,7 +522,7 @@ def test_migration_0022_downgrade_restores_placeholder_schema(tmp_path) -> None:
             assert "file_mtime" not in file_columns
 
         # 回退后仍可重新升级
-        command.upgrade(config, "head")
+        command.upgrade(config, "0022_add_reading_maintenance_schema")
         with engine.connect() as connection:
             assert (
                 connection.execute(

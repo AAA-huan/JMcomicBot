@@ -9,11 +9,14 @@ vi.mock('@/api/mangas', () => ({
   deleteManga: vi.fn(),
   batchDeleteMangas: vi.fn(),
 }))
+vi.mock('@/api/favorites', () => ({ setFavorite: vi.fn() }))
 vi.mock('@/api/tasks', () => ({
   requestDownloads: vi.fn(),
 }))
 
 import { listMangas } from '@/api/mangas'
+import { setFavorite } from '@/api/favorites'
+import { ApiError } from '@/api/client'
 import LibraryPage from '@/pages/LibraryPage.vue'
 import type { Manga } from '@/types/api'
 
@@ -21,6 +24,7 @@ function mangaFixture(id: string, title: string): Manga {
   return {
     id,
     title,
+    is_favorite: false,
     author: '作者',
     description: null,
     chapter_count: 3,
@@ -154,4 +158,42 @@ describe('LibraryPage', () => {
     expect(detailLink.attributes('href')).toContain('status=downloaded')
     expect(detailLink.attributes('href')).toContain('sort=id_asc')
   })
+
+  it('收藏成功切换按钮，失败保留原状态，取消后切回收藏', async () => {
+    vi.mocked(listMangas).mockResolvedValue({
+      items: [mangaFixture('100', '测试漫画')], page: 1, page_size: 20, total: 1, pages: 1,
+    })
+    vi.mocked(setFavorite).mockRejectedValueOnce(new ApiError(500, 'SAVE_FAILED', '收藏保存失败'))
+    const { wrapper } = await mountPage()
+    await wrapper.find('[aria-label="收藏"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('收藏保存失败')
+    expect(wrapper.find('[aria-label="收藏"]').exists()).toBe(true)
+    vi.mocked(setFavorite).mockResolvedValueOnce({ manga_id: '100', is_favorite: true, changed: true })
+    await wrapper.find('[aria-label="收藏"]').trigger('click')
+    await flushPromises()
+    expect(setFavorite).toHaveBeenLastCalledWith('100', true)
+    expect(wrapper.find('[aria-label="取消收藏"]').attributes('aria-pressed')).toBe('true')
+    vi.mocked(setFavorite).mockResolvedValueOnce({ manga_id: '100', is_favorite: false, changed: true })
+    await wrapper.find('[aria-label="取消收藏"]').trigger('click')
+    await flushPromises()
+    expect(setFavorite).toHaveBeenLastCalledWith('100', false)
+    expect(wrapper.find('[aria-label="收藏"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('恢复收藏筛选并在取消收藏后重新请求当前列表', async () => {
+    const manga = { ...mangaFixture('100', '测试漫画'), is_favorite: true }
+    vi.mocked(listMangas).mockResolvedValueOnce({ items: [manga], page: 1, page_size: 20, total: 1, pages: 1 })
+    vi.mocked(listMangas).mockResolvedValue({ items: [], page: 1, page_size: 20, total: 0, pages: 0 })
+    vi.mocked(setFavorite).mockResolvedValue({ manga_id: '100', is_favorite: false, changed: true })
+    const { wrapper } = await mountPage('/library?favorite_only=true&sort=id_asc')
+    expect(listMangas).toHaveBeenCalledWith(expect.objectContaining({ favorite_only: true, sort: 'id_asc' }))
+    await wrapper.find('[aria-label="取消收藏"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('没有找到漫画')
+    expect(listMangas).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
 })

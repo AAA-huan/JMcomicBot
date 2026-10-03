@@ -32,6 +32,8 @@ _EVENT_LABELS = {
     "web.logout": "退出登录",
     "setting.changed": "修改配置",
     "permission.changed": "修改权限名单",
+    "favorite.changed": "修改漫画收藏",
+    "admin.qq.changed": "修改管理员 QQ 关联",
     "napcat.reconnect_requested": "请求重连 NapCat",
     "maintenance.cleanup_completed": "清理过期数据",
     "bot.shutdown_requested": "请求关闭机器人",
