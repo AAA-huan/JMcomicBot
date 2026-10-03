@@ -98,6 +98,7 @@ export interface PermissionData {
 export type SettingValue = string | number | boolean | null
 
 export interface SettingView {
+  restart_required?: boolean
   key: string
   title: string
   value_type: string
@@ -155,4 +156,28 @@ export interface EventEnvelope<T = unknown> {
   type: string
   occurred_at: string
   data: T
+}
+
+export interface AuditEvent {
+  id: number
+  event_type: string
+  source: string
+  result: string
+  actor_user_id: string | null
+  actor_group_id: string | null
+  client_ip: string | null
+  target_type: string | null
+  target_id: string | null
+  error_code: string | null
+  created_at: string
+}
+
+export interface VerifyResult {
+  task_id: string
+  file_count: number
+  ready_count: number
+  missing_count: number
+  corrupted_count: number
+  invalid_path_count: number
+  error_count: number
 }

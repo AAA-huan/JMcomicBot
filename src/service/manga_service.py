@@ -14,7 +14,6 @@ from src.logging.logger_config import logger
 from src.service.contracts import TaskService
 from src.service.operation_context import OperationContext
 from src.service.results import MangaDeleteOutcome, MangaDeleteResult
-from src.utils.helpers import find_manga_pdf
 
 # 元数据修改白名单与长度限制，避免越权字段与超长内容写库
 _VALID_METADATA_FIELDS = {"title", "author", "tags"}
@@ -75,15 +74,24 @@ class MangaService:
         manga_file = self.manga_repository.get_file(file_id)
         if manga_file is None or not manga_file.relative_path:
             raise MangaFileDownloadError("FILE_NOT_FOUND", "未找到指定文件")
+        candidate = self._resolve_pdf_path(manga_file.relative_path)
+        if not candidate.is_file():
+            raise MangaFileDownloadError("FILE_MISSING", "文件不存在")
+        return candidate, manga_file.display_name or candidate.name
+
+    def _resolve_pdf_path(self, relative_path: str) -> Path:
+        """统一校验登记路径；允许缺失文件供删除流程清理遗留记录。"""
         root = Path(self.download_root).resolve()
-        candidate = (root / manga_file.relative_path).resolve()
+        if not relative_path or Path(relative_path).is_absolute():
+            raise MangaFileDownloadError("FILE_PATH_INVALID", "文件路径非法")
+        candidate = (root / relative_path).resolve()
         if not candidate.is_relative_to(root):
             raise MangaFileDownloadError("FILE_PATH_INVALID", "文件路径非法")
         if candidate.suffix.lower() != ".pdf":
             raise MangaFileDownloadError("FILE_TYPE_INVALID", "只允许下载 PDF 文件")
-        if not candidate.is_file():
-            raise MangaFileDownloadError("FILE_MISSING", "文件不存在")
-        return candidate, manga_file.display_name or candidate.name
+        if candidate.exists() and not candidate.is_file():
+            raise MangaFileDownloadError("FILE_TYPE_INVALID", "只允许操作 PDF 文件")
+        return candidate
 
     def patch_metadata(
         self,
@@ -205,18 +213,24 @@ class MangaService:
             logger.error(f"下载目录不存在，无法删除漫画 {manga_id}")
             return MangaDeleteOutcome(manga_id, False, "delete_directory_missing", 0)
 
-        pdf_paths = find_manga_pdf(self.download_root, manga_id) or []
-        if not pdf_paths:
-            logger.warning(f"未找到漫画 {manga_id} 的 PDF 文件，跳过删除")
+        manga = self.manga_repository.get(manga_id)
+        if manga is None:
+            logger.warning(f"未找到漫画 {manga_id} 的数据库记录，跳过删除")
             return MangaDeleteOutcome(manga_id, False, "file_not_found", 0)
 
         try:
+            # 删除目标只取数据库登记路径；缺失文件仅清理记录，不猜测其他文件。
+            pdf_paths = [
+                self._resolve_pdf_path(manga_file.relative_path)
+                for manga_file in manga.files
+            ]
             # 先标记 deleting 再删磁盘文件，便于并发方识别正在删除的文件
             self.manga_repository.mark_manga_deleting(manga_id)
             deleted_count = 0
             for pdf_path in pdf_paths:
-                self._remove_pdf(pdf_path)
-                deleted_count += 1
+                if pdf_path.exists():
+                    self._remove_pdf(str(pdf_path))
+                    deleted_count += 1
             # 文件记录由 MangaRepository 级联删除，标签与阅读进度一并清理
             self.manga_repository.delete(manga_id)
             self.tag_repository.delete_by_manga_id(manga_id)
@@ -233,8 +247,8 @@ class MangaService:
             Path(pdf_path).resolve().relative_to(Path(self.download_root).resolve())
         except ValueError as error:
             raise ValueError("待删除的 PDF 文件不在下载根目录内") from error
-        logger.info(f"成功删除漫画PDF文件: {pdf_path}")
         os.remove(pdf_path)
+        logger.info(f"成功删除漫画PDF文件: {pdf_path}")
 
     @staticmethod
     def _normalize_text(value: object, label: str, max_length: int) -> str:

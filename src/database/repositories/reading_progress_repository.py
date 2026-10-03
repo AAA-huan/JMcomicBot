@@ -1,12 +1,16 @@
 """PDF 阅读进度仓储，负责阅读位置的读写与最近阅读列表。"""
 
+# 各仓储按资源定义查询参数，不要求抽象入口的可变参数签名。
+# pylint: disable=arguments-differ
+
 from datetime import datetime
 from typing import List, Optional
 
 from sqlalchemy import delete, select
 
 from src.database.models import ReadingProgress, utc_now
-from src.database.repositories._base import BaseRepository
+
+from ._base import BaseRepository
 
 
 class ReadingProgressRepository(BaseRepository):

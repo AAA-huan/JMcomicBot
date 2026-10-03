@@ -66,6 +66,18 @@ const router = createRouter({
       meta: { title: '维护' },
     },
     {
+      path: '/audit',
+      name: 'audit',
+      component: () => import('@/pages/AuditPage.vue'),
+      meta: { title: '操作审计' },
+    },
+    {
+      path: '/password',
+      name: 'password',
+      component: () => import('@/pages/PasswordPage.vue'),
+      meta: { title: '修改密码' },
+    },
+    {
       path: '/:pathMatch(.*)*',
       name: 'not-found',
       component: () => import('@/pages/NotFoundPage.vue'),

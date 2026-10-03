@@ -21,6 +21,7 @@ const editKey = ref('')
 const editTitle = ref('')
 const editValueType = ref('')
 const editEffect = ref('')
+const editSensitive = ref(false)
 const editValue = ref<SettingValue>(null)
 const editError = ref('')
 const saving = ref(false)
@@ -60,7 +61,8 @@ function openEdit(item: SettingView): void {
   editTitle.value = item.title
   editValueType.value = item.value_type
   editEffect.value = item.effect
-  editValue.value = item.value
+  editSensitive.value = item.sensitive
+  editValue.value = item.sensitive ? '' : item.value
   editError.value = ''
   editDialog.value = true
 }
@@ -184,7 +186,7 @@ onMounted(load)
                   variant="tonal"
                   :color="SETTING_EFFECT_COLORS[item.effect] ?? 'medium-emphasis'"
                 >
-                  {{ SETTING_EFFECT_LABELS[item.effect] ?? item.effect }}
+                  {{ item.restart_required ? '待重启' : (SETTING_EFFECT_LABELS[item.effect] ?? item.effect) }}
                 </v-chip>
                 <span class="text-body-2 text-no-wrap" style="min-width: 72px; text-align: right">
                   {{ displayValue(item) }}
@@ -194,6 +196,7 @@ onMounted(load)
                   size="small"
                   variant="text"
                   color="primary"
+                  :aria-label="`修改${item.title}`"
                   @click="openEdit(item)"
                 >
                   修改
@@ -243,9 +246,14 @@ onMounted(load)
           <v-text-field
             v-else
             v-model="editValue"
+            :type="editSensitive ? 'password' : 'text'"
+            :hint="editSensitive ? '敏感值不回显，请输入新值；令牌留空可清除' : undefined"
+            persistent-hint
+            autocomplete="new-password"
             label="新值"
           />
           <div class="text-caption text-medium-emphasis mt-3">
+            <div v-if="editKey === 'DB_PATH' || editKey === 'MANGA_DOWNLOAD_PATH'">更改目录不会自动迁移已有数据库或漫画文件。</div>
             生效方式：{{ SETTING_EFFECT_LABELS[editEffect] ?? editEffect }}
           </div>
         </v-card-text>

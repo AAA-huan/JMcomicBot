@@ -36,6 +36,19 @@ if row is None:
 target = Path(os.environ["MANGA_DOWNLOAD_PATH"]) / row[0]
 target.write_bytes(b"this is not a valid pdf")
 print(f"E2E 损坏 PDF 已就绪: {target.name}")
+
+# 大文件按需加载使用独立漫画，避免改变其他阅读进度用例的数据。
+from src.database.database import DatabaseManager
+from src.database.repositories import MangaRepository
+from tests.smoke.prepare_test_data import _build_pdf
+
+root = Path(os.environ["MANGA_DOWNLOAD_PATH"])
+large = root / "900007-大文件读取测试.pdf"
+large.write_bytes(_build_pdf(20, page_padding_bytes=256 * 1024))
+with DatabaseManager(os.environ["DB_PATH"], download_root=str(root)) as db:
+    mangas = MangaRepository(db, str(root))
+    mangas.upsert("900007", "大文件读取测试", "测试作者", 1, 20)
+    mangas.add_file("900007", str(large), page_count=20)
 PY
 
 exec uv run python main.py

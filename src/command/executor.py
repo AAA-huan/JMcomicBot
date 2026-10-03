@@ -224,6 +224,7 @@ class CommandExecutor:
         self, user_id: str, args: str, group_id: Optional[str], private: bool
     ) -> None:
         """发送帮助信息"""
+        del args  # 保留命令处理器签名，此命令无需参数。
         help_text = f"📚 帮助 📚(版本{self.VERSION})\n\n"
 
         if not private:
@@ -383,7 +384,7 @@ class CommandExecutor:
                 if request_result.duplicate_count:
                     manga_blocks.append(f"• {manga_id} — 已在下载队列中")
 
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 self.logger.error(f"下载漫画 {manga_id} 出错: {e}")
                 manga_blocks.append(f"• {manga_id} — ❌ {str(e)}")
 
@@ -551,7 +552,7 @@ class CommandExecutor:
                             self.message_sender(user_id, progress, group_id, private)
                             batch_interval = self.send_batch_interval
                             time.sleep(batch_interval)
-                    except Exception as e:
+                    except Exception as e:  # pylint: disable=broad-exception-caught
                         self.logger.error(f"发送章节文件失败: {pdf_path}, {e}")
 
                 results.append(
@@ -563,7 +564,7 @@ class CommandExecutor:
                     )
                 )
 
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 self.logger.error(f"发送漫画 {manga_id} 出错: {e}")
                 results.append((manga_id, False, str(e)))
 
@@ -812,7 +813,7 @@ class CommandExecutor:
 
             except FileNotFoundError:
                 manga_blocks.append(f"• {manga_id} — ❌ 查询失败")
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 self.logger.error(f"查询漫画 {manga_id} 出错: {e}")
                 manga_blocks.append(f"• {manga_id} — ❌ {str(e)}")
 
@@ -848,7 +849,7 @@ class CommandExecutor:
 
         try:
             manga_ids = self.tag_repo.get_manga_ids_by_tags(tags)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error(f"按标签查询漫画出错: {e}")
             error_msg = f"❌ 标签查询失败：{str(e)}\n快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
             self.message_sender(user_id, error_msg, group_id, private)
@@ -903,7 +904,7 @@ class CommandExecutor:
 
         try:
             mangas = self.manga_repo.find_by_author(author)
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error(f"按作者查询漫画出错: {e}")
             error_msg = f"❌ 作者查询失败：{str(e)}\n快让主人帮我检查一下ヽ(ﾟДﾟ)ﾉ"
             self.message_sender(user_id, error_msg, group_id, private)
@@ -945,6 +946,7 @@ class CommandExecutor:
         self, user_id: str, args: str, group_id: Optional[str], private: bool
     ) -> None:
         """发送版本信息"""
+        del args  # 保留命令处理器签名，此命令无需参数。
         version_text = (
             f"🔖 JMComic QQ机器人\n"
             f"📌 当前版本: {self.VERSION}\n"
@@ -957,6 +959,7 @@ class CommandExecutor:
         self, user_id: str, args: str, group_id: Optional[str], private: bool
     ) -> None:
         """显示当前下载队列的进度信息"""
+        del args  # 保留命令处理器签名，此命令无需参数。
         self.logger.info(f"显示下载进度请求 - 用户{user_id}")
 
         downloading_mangas = list(self.download_manager.downloading_mangas.keys())
@@ -990,6 +993,7 @@ class CommandExecutor:
         self, user_id: str, args: str, group_id: Optional[str], private: bool
     ) -> None:
         """显示当前文件发送队列的进度信息"""
+        del args  # 保留命令处理器签名，此命令无需参数。
         self.logger.info(f"显示发送进度请求 - 用户{user_id}")
 
         if self.send_status_provider is None:
@@ -1032,6 +1036,7 @@ class CommandExecutor:
         self, user_id: str, args: str, group_id: Optional[str], private: bool
     ) -> None:
         """测试命令，显示当前SELF_ID状态"""
+        del args  # 保留命令处理器签名，此命令无需参数。
         self_id = self.self_id_getter()
         if self_id:
             self.message_sender(user_id, f"✅ 机器人ID: {self_id}", group_id, private)
@@ -1042,6 +1047,7 @@ class CommandExecutor:
         self, user_id: str, args: str, group_id: Optional[str], private: bool
     ) -> None:
         """测试文件发送功能"""
+        del args  # 保留命令处理器签名，此命令无需参数。
         self.message_sender(user_id, "🔍 开始测试文件发送功能...", group_id, private)
 
         test_file_path = os.path.join(os.getcwd(), "test_file.txt")
@@ -1062,7 +1068,7 @@ class CommandExecutor:
                 os.remove(test_file_path)
                 self.logger.debug(f"已清理测试文件: {test_file_path}")
 
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error(f"创建测试文件失败: {e}")
             self.message_sender(
                 user_id, f"❌ 创建测试文件失败: {str(e)}", group_id, private
@@ -1072,6 +1078,7 @@ class CommandExecutor:
         self, user_id: str, args: str, group_id: Optional[str], private: bool
     ) -> None:
         """发送欢迎消息"""
+        del args  # 保留命令处理器签名，此命令无需参数。
         response = (
             "你好！我是高性能JM机器人૮₍♡>𖥦<₎ა，"
             "可以帮你下载JMComic的漫画哦~~~\n"
@@ -1083,6 +1090,7 @@ class CommandExecutor:
         self, user_id: str, args: str, group_id: Optional[str], private: bool
     ) -> None:
         """处理断线留存文件的确认重发请求"""
+        del args  # 保留命令处理器签名，此命令无需参数。
         self.logger.info(f"处理重发请求 - 用户{user_id}")
 
         if self.resend_handler is None:
@@ -1257,6 +1265,9 @@ class CommandExecutor:
 
     def _handle_egg(self, user_id, args, group_id, private):
         """这才是真正的新宿之战，五条老师没有输！！！！！"""
+        del args  # 保留命令处理器统一参数签名，此命令无需参数。
+        # 彩蛋原文保留完整字符串，局部放宽行长检查。
+        # pylint: disable=line-too-long
         responses = [
             "真拿你没办法，坐好喽~",
             "「苍」和「赫」互相碰撞就是能产生假想质量爆发的「虚式·茈」",
@@ -1276,6 +1287,7 @@ class CommandExecutor:
             "五条悟：「不指定对象，连我自己都会被卷进去的无限制的「茈」……」「但是…好像受伤的程度不太一样呢」「看来是不是自己的咒力影响很大啊」「不过…结果好就行了吧」「急性创作的远距离操作「茈」」「好像完成的还不错？」「这还是我第一次自爆呢」",
             "「也就是说……」\n「没错 是五条悟赢了！」",
         ]
+        # pylint: enable=line-too-long
         count = 0
         for response in responses:
             count += 1

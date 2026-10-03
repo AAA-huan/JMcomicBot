@@ -1,0 +1,20 @@
+[DESIGN]
+# 机器人装配中心、ORM 和命令分发器有较多依赖；保留结构，按现有规模检查。
+max-args=10
+max-positional-arguments=12
+max-attributes=60
+max-locals=40
+max-statements=110
+max-branches=30
+max-returns=20
+
+[FORMAT]
+max-module-lines=1500
+
+[BASIC]
+# OneBot 身份字段沿用既有公开名称。
+good-names=i,j,k,ex,Run,_,SELF_ID
+
+[MESSAGES CONTROL]
+# ORM/结果对象无需凑公共方法；相似的仓储事务和错误映射保持独立职责。
+disable=too-few-public-methods,duplicate-code

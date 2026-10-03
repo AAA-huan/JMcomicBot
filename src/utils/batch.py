@@ -1,3 +1,5 @@
+"""批量命令参数解析工具。"""
+
 from typing import List, Tuple
 
 

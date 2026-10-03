@@ -81,10 +81,12 @@ class DownloadRequestResult:
 
     @property
     def queued_count(self) -> int:
+        """实际入队的请求数量。"""
         return len(self.queued_items)
 
     @property
     def duplicate_count(self) -> int:
+        """已有活动任务的请求数量。"""
         return len(self.duplicate_items)
 
 
@@ -108,18 +110,22 @@ class MangaDeleteResult:
 
     @property
     def succeeded_count(self) -> int:
+        """删除成功的漫画数量。"""
         return sum(1 for outcome in self.outcomes if outcome.succeeded)
 
     @property
     def failed_count(self) -> int:
+        """删除失败的漫画数量。"""
         return len(self.outcomes) - self.succeeded_count
 
     @property
     def all_succeeded(self) -> bool:
+        """批量删除是否全部成功。"""
         return self.failed_count == 0
 
     @property
     def deleted_file_count(self) -> int:
+        """实际删除的文件总数。"""
         return sum(outcome.deleted_file_count for outcome in self.outcomes)
 
 

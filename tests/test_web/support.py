@@ -35,23 +35,32 @@ from src.service import (
     RepairService,
     ScanService,
     SettingsService,
+    VerifyService,
 )
-from src.service.query_service import MangaQueryService, TaskQueryService
+from src.service.query_service import (
+    AuditQueryService,
+    MangaQueryService,
+    TaskQueryService,
+)
 from src.service.results import DownloadRequestItem
 from src.service.settings_service import EFFECT_IMMEDIATE, SETTING_DEFINITIONS
 from src.service.system_service import SystemService
 from src.service.web_auth_service import WebAuthService
 from src.web.app import create_web_app
+from src.config.manager import ConfigManager
 from src.web.dependencies import WebDependencies
 from src.web.events.bus import WebEventBus
 
 PASSWORD = "correct-horse-battery-staple"
 
 
-class _ConfigManagerStub:
+class _ConfigManagerStub(ConfigManager):
     """仅提供 config_dict 的配置管理器替身。"""
 
-    def __init__(self, config_dict: Optional[Dict[str, object]] = None) -> None:
+    def __init__(
+        self, config_dict: Optional[Dict[str, object]] = None, env_file=None
+    ) -> None:
+        super().__init__(env_file=env_file)
         self.config_dict: Dict[str, object] = dict(config_dict or {})
 
 
@@ -136,7 +145,7 @@ def build_web_context(  # pylint: disable=too-many-locals
         SettingRepository(db_manager),
         SettingHistoryRepository(db_manager),
         audit_repo,
-        _ConfigManagerStub(config_dict),  # type: ignore[arg-type]
+        _ConfigManagerStub(config_dict, str(Path(db_manager.db_dir) / ".env")),  # type: ignore[arg-type]
     )
 
     def make_applier(key: str):
@@ -225,6 +234,13 @@ def build_web_context(  # pylint: disable=too-many-locals
             ReadingProgressRepository(db_manager), manga_repo
         ),
         event_bus=event_bus,
+        audit_query_service=AuditQueryService(audit_repo),
+        verify_service=VerifyService(
+            manga_repo,
+            ScanRecordRepository(db_manager),
+            task_service,
+            download_root=str(download_root),
+        ),
     )
     return WebTestContext(
         dependencies=dependencies,

@@ -207,7 +207,7 @@ class MessageManager:
                 private=task.private,
                 message=f"{message} {task.file_path}".strip(),
             )
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error(f"记录发送任务日志失败: {e}")
 
     def _process_send_task(self, task: SendTask) -> None:
@@ -217,7 +217,7 @@ class MessageManager:
             self._send_file_with_retry(task)
             task.status = "done"
             self._log_send_task(task, "success", "")
-        except Exception as e:
+        except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error(f"发送文件失败: {task.file_path}, {e}")
             task.status = "failed"
             task.error = str(e)
@@ -268,7 +268,7 @@ class MessageManager:
                 send_interval = self.file_send_interval
                 self._stop_event.wait(send_interval)
                 return
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 self.logger.warning(f"发送文件时连接异常，重试中: {e}")
                 self._stop_event.wait(0.5)
 
@@ -512,7 +512,7 @@ class MessageManager:
                     f"已补发连接中断期间留存的 {len(text_entries)} 条文本，"
                     f"并提醒 {len(new_file_entries)} 个文件待重发"
                 )
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 self.logger.error(f"补发留存消息失败: {e}")
 
     def resend_pending_files(

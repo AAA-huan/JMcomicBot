@@ -58,6 +58,9 @@ export function usePdfDocument(): {
       task = getDocument({
         url: fileContentUrl(fileId),
         withCredentials: true,
+        // 禁止后台预取和完整流读取，保留 Range 按页面请求所需数据。
+        disableAutoFetch: true,
+        disableStream: true,
       })
       loadingTask = task
       doc.value = await task.promise

@@ -1,5 +1,8 @@
 """数据库备份记录仓储。"""
 
+# 各仓储按资源定义查询参数，不要求抽象入口的可变参数签名。
+# pylint: disable=arguments-differ
+
 from datetime import datetime
 from typing import List, Optional
 
@@ -8,7 +11,8 @@ import os
 from sqlalchemy import func, select
 
 from src.database.models import BackupRecord, utc_now
-from src.database.repositories._base import BaseRepository
+
+from ._base import BaseRepository
 
 _BACKUP_STATUSES = {"creating", "ready", "failed", "deleted"}
 
@@ -55,7 +59,9 @@ class BackupRepository(BaseRepository):
         """统计备份记录数量，可按状态过滤。"""
         if status is not None and status not in _BACKUP_STATUSES:
             raise ValueError(f"不支持的备份状态: {status}")
-        statement = select(func.count()).select_from(BackupRecord)
+        statement = select(func.count()).select_from(  # pylint: disable=not-callable
+            BackupRecord
+        )
         if status is not None:
             statement = statement.where(BackupRecord.status == status)
         with self._get_session() as session:

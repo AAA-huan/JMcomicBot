@@ -1,8 +1,11 @@
+"""运行平台及依赖兼容性检查。"""
+
+from typing import List
+
 import os
 import platform
 import subprocess
 import sys
-from typing import List
 
 from src.logging.logger_config import logger
 
@@ -75,10 +78,12 @@ class PlatformChecker:
         required_commands: List[str] = ["python3", "pip3"]
         for cmd in required_commands:
             try:
-                result = subprocess.run(["which", cmd], capture_output=True, text=True)
+                result = subprocess.run(
+                    ["which", cmd], capture_output=True, text=True, check=False
+                )
                 if result.returncode != 0:
                     self.logger.warning(f"未找到命令: {cmd}。请确保已安装")
-            except Exception as e:
+            except Exception as e:  # pylint: disable=broad-exception-caught
                 self.logger.warning(f"检查命令 {cmd} 时出错: {e}")
 
         current_dir = os.getcwd()
