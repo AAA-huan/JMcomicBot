@@ -8,6 +8,14 @@ import vuetify from 'vite-plugin-vuetify'
 // 构建产物直接输出到后端静态目录，随仓库发布
 export default defineConfig({
   plugins: [vue(), vuetify({ autoImport: true })],
+  worker: {
+    format: 'es',
+    // PDF.js 会在 Worker 无法创建时动态导入入口，必须保留解析器导出。
+    plugins: () => [{
+      name: 'preserve-pdf-worker-exports',
+      options: (options) => ({ ...options, preserveEntrySignatures: 'strict' }),
+    }],
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

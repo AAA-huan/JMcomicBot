@@ -9,13 +9,17 @@
 
 ## ⚡ 一键快速部署
 
-如果你希望最快完成部署，可直接使用powershell运行一键部署脚本：它会自动安装 git/Python/uv、克隆项目、同步依赖、生成配置并引导填写关键项。
+先安装 Python 3.12 或更高版本，再使用 PowerShell 运行一键部署脚本：它会检查 Python 版本、检测并安装 git/uv、克隆项目、同步依赖、生成配置并引导填写关键项。
 
 ```powershell
 irm https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.ps1 | iex
 ```
 
 脚本完成后会打印 NapCat 部署要点。若希望了解手动步骤再操作，可继续阅读下文。
+
+NapCat 与机器人同机时，在脚本中只需填写 WebSocket 服务端端口（如 `3001`，有效范围 `1–65535`），脚本会写入 `NAPCAT_WS_URL=ws://localhost:3001/qq`。远端部署或自定义路径可填写完整 `ws://` / `wss://` 地址。手动编辑 `.env` 时仍须使用完整地址。
+
+已有的纯端口配置会自动转换；有效地址会保留，模板或非法地址会重新询问。输入结束或代码更新失败时脚本会中止，处理原因后可重新运行。
 
 > 脚本支持重复运行：再次执行等同于「拉取最新代码 + 同步依赖」，不会覆盖已填写的 `.env` / `option.yml`。
 
@@ -123,9 +127,9 @@ LOW_MEMORY_MODE=false
    - 下载并安装 NapCat：https://github.com/NapNeko/NapCatQQ
    - 启动 NapCat 并扫码登录 QQ 账号
 
-2. **加载配置文件**
-   - 启动NapCat时，确保它能够加载到您配置的`napcat_config.yml`文件
-   - 您也可以通过NapCat的WebUI界面进行配置（WebUI地址可在NapCat启动面板查看）
+2. **配置网络连接**
+   - 本项目不会生成 NapCat 配置文件；请在 NapCat WebUI 的「网络配置」中启用 WebSocket 服务端
+   - WebUI 地址可在 NapCat 启动面板查看，监听端口须与机器人 `.env` 中的地址一致
 
 3. **验证配置**
    - 访问 NapCat 的 WebUI

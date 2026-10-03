@@ -1,6 +1,6 @@
 /** PDF.js 异常到中文错误界面的映射。 */
 
-import { InvalidPDFException, PasswordException, ResponseException } from 'pdfjs-dist'
+import { InvalidPDFException, PasswordException, ResponseException } from 'pdfjs-dist/legacy/build/pdf.mjs'
 import { describe, expect, it } from 'vitest'
 
 import { mapPdfError } from './pdfErrors'

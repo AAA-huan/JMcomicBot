@@ -9,13 +9,17 @@
 
 ## ⚡ 一键快速部署
 
-先看下面proot的部署方式，然后在 proot Ubuntu 环境内，可直接运行一键部署脚本：它会自动安装 git/Python/uv、克隆项目、同步依赖、生成配置并引导填写关键项。
+先按下文准备 proot Ubuntu 环境，并安装 Python 3.12 或更高版本，再运行一键部署脚本：它会检查 Python 版本、检测并安装 git/uv、克隆项目、同步依赖、生成配置并引导填写关键项。
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.sh | bash
 ```
 
 脚本完成后会打印 NapCat 部署要点。若希望了解手动步骤再操作，可继续阅读下文。
+
+NapCat 与机器人同机时，在脚本中只需填写 WebSocket 服务端端口（如 `3001`，有效范围 `1–65535`），脚本会写入 `NAPCAT_WS_URL=ws://localhost:3001/qq`。远端部署或自定义路径可填写完整 `ws://` / `wss://` 地址。手动编辑 `.env` 时仍须使用完整地址。
+
+已有的纯端口配置会自动转换；有效地址会保留，模板或非法地址会重新询问。输入结束或代码更新失败时脚本会中止，处理原因后可重新运行。
 
 > 脚本支持重复运行：再次执行等同于「拉取最新代码 + 同步依赖」，不会覆盖已填写的 `.env` / `option.yml`。
 

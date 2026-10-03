@@ -1,4 +1,4 @@
-# ============================================================================
+﻿# ============================================================================
 # JMComicBot 一键部署脚本（Windows PowerShell）
 #
 # 用法：
@@ -7,11 +7,11 @@
 #   powershell -ExecutionPolicy Bypass -File deploy.ps1
 #
 # 行为：
-#   1. 检测 / 安装 git、Python>=3.12、uv
+#   1. 检查 Python>=3.12，检测 / 安装 git、uv
 #   2. 克隆或更新项目到当前目录下的 JMcomicBot\ 子目录
 #   3. 创建虚拟环境并 uv sync 同步依赖
 #   4. 幂等复制 .env / option.yml（已存在则保留用户配置）
-#   5. 交互式写入 .env 关键项（已配置的项跳过）
+#   5. 校验 NapCat 地址并引导配置关键项（有效地址保留，其他项回车保留）
 #   6. 创建 downloads / data / logs 运行时目录
 #   7. 打印 NapCat 部署提示
 #   8. 询问是否立即启动 bot
@@ -30,7 +30,6 @@ if ($env:JMBOT_REPO_URL) { $RepoUrl = $env:JMBOT_REPO_URL } else { $RepoUrl = 'h
 $ProjectDirName   = 'JMcomicBot'
 $RequiredPyMajor  = 3
 $RequiredPyMinor  = 12
-$WsUrlPlaceholder = 'ws://localhost:port/qq'
 
 # ============================ 日志函数 ============================
 function Log-Info  ($msg) { Write-Host "[信息] $msg" -ForegroundColor Cyan }
@@ -40,11 +39,10 @@ function Log-Error($msg) { Write-Host "[错误] $msg" -ForegroundColor Red }
 function Log-Step  ($msg) { Write-Host ""; Write-Host "=== $msg ===" -ForegroundColor Blue }
 function Die       ($msg) { Log-Error $msg; exit 1 }
 
-# 交互输入：兼容 irm | iex 管道与无终端场景
-# [Console]::In 可能在管道下不可用，故优先尝试，失败则退回标准 stdin
+# 交互输入：兼容 irm | iex 和标准输入；EOF 与用户回车必须区分。
 function Ask ([string]$Prompt, [string]$Default = '') {
     if ($Default) {
-        $promptText = "$Prompt（默认：$Default）: "
+        $promptText = "${Prompt}（默认：${Default}）: "
     } else {
         $promptText = "${Prompt}: "
     }
@@ -53,11 +51,9 @@ function Ask ([string]$Prompt, [string]$Default = '') {
     try {
         $line = [Console]::ReadLine()
     } catch {
-        # [Console]::In 不可用（管道模式），尝试从 $input 读取
-        if ($input) {
-            $line = ($input | Select-Object -First 1)
-        }
+        throw "无法读取终端输入，请在可交互终端运行脚本：$($_.Exception.Message)"
     }
+    if ($null -eq $line) { throw '输入已结束，部署中止。请在可交互终端重新运行脚本。' }
     if ([string]::IsNullOrWhiteSpace($line)) { return $Default }
     return $line.Trim()
 }
@@ -67,31 +63,65 @@ function Ask ([string]$Prompt, [string]$Default = '') {
 # 获取 .env 中某个 key 的值
 function Get-Env ([string]$Key, [string]$File) {
     if (-not (Test-Path $File)) { return '' }
-    $line = Get-Content $File -ErrorAction SilentlyContinue |
-        Where-Object { $_ -match "^$Key=" } |
+    $line = Get-Content $File -Encoding UTF8 |
+        Where-Object { $_ -match "^\s*$Key\s*=" } |
         Select-Object -First 1
     if (-not $line) { return '' }
-    return ($line -replace "^$Key=", '')
+    $value = ($line -replace "^\s*$Key\s*=", '').Trim()
+    # 引号内的 # 属于值；只去除引号外或未加引号值的行尾注释。
+    if ($value -match '^"([^"]*)"\s*(?:#.*)?$' -or $value -match "^'([^']*)'\s*(?:#.*)?$") {
+        return $Matches[1]
+    }
+    return ($value -replace '\s+#.*$', '').Trim()
 }
 
 # 设置 .env 中某个 key 的值（存在则替换整行，不存在则追加）
 function Set-Env ([string]$Key, [string]$Value, [string]$File) {
-    if (-not (Test-Path $File)) {
-        "$Key=$Value" | Out-File -FilePath $File -Append -Encoding UTF8
-        return
-    }
-    $lines = Get-Content $File -Encoding UTF8
+    $lines = if (Test-Path $File) { @(Get-Content $File -Encoding UTF8) } else { @() }
     $found = $false
-    $newLines = foreach ($l in $lines) {
-        if ($l -match "^$Key=") {
+    $newLines = @(foreach ($l in $lines) {
+        if ($l -match "^\s*$Key\s*=") {
             $found = $true
             "$Key=$Value"
         } else {
             $l
         }
-    }
+    })
     if (-not $found) { $newLines += "$Key=$Value" }
-    $newLines | Out-File -FilePath $File -Encoding UTF8
+    # Windows PowerShell 5.1 的 Out-File UTF8 会写 BOM，导致 Python dotenv
+    # 可能无法识别首行配置；配置文件统一使用无 BOM 的 UTF-8。
+    $filePath = $ExecutionContext.SessionState.Path.GetUnresolvedProviderPathFromPSPath($File)
+    [IO.File]::WriteAllLines($filePath, [string[]]$newLines, [Text.UTF8Encoding]::new($false))
+}
+
+# 纯端口只适用于同机部署，.env 中始终保存完整 WebSocket 地址。
+# 非法值返回空字符串，交互流程会明确要求重新输入。
+function Normalize-WsUrl ([string]$Value) {
+    $value = $Value.Trim()
+    if ($value -match '^[0-9]+$') {
+        $port = 0
+        if ($value.Length -gt 5 -or -not [int]::TryParse($value, [ref]$port) -or $port -lt 1 -or $port -gt 65535) {
+            return ''
+        }
+        return "ws://localhost:${port}/qq"
+    }
+    $uri = $null
+    if ($value -match '\s' -or -not [Uri]::TryCreate($value, [UriKind]::Absolute, [ref]$uri)) { return '' }
+    if ($uri.Scheme -notin @('ws', 'wss') -or -not $uri.Host -or $uri.Port -eq 0 -or $uri.Fragment) { return '' }
+    # 空端口不是合法的显式端口，避免 Uri 自动替换为默认值。
+    if ($uri.Authority.EndsWith(':') -or $value -match '^wss?://[^/?#]*:(?:[/?#]|$)') { return '' }
+    return $value
+}
+
+function Ask-Boolean ([string]$Prompt, [string]$Default) {
+    while ($true) {
+        $value = Ask "$Prompt (true/false)" $Default
+        switch -Regex ($value.ToLower()) {
+            '^(true|yes|y|1|on)$' { return 'true' }
+            '^(false|no|n|0|off)$' { return 'false' }
+            default { Log-Warn '请输入 true 或 false。' }
+        }
+    }
 }
 
 # ============================ 环境准备 ============================
@@ -264,7 +294,7 @@ function Clone-Or-Update {
         Log-Step "更新现有项目（git pull）"
         & git -C $repoDir pull --ff-only
         if ($LASTEXITCODE -ne 0) {
-            Log-Warn "git pull 失败，可能存在本地改动或分叉，请手动处理 $ProjectDirName 目录。"
+            Die "git pull 失败，部署已中止。请处理网络、本地改动或分叉后重新运行。"
         }
     } else {
         Log-Step "克隆项目到 .\$ProjectDirName"
@@ -318,33 +348,38 @@ function Prepare-ConfigFiles {
 }
 
 function Interactive-Config {
-    Log-Step "配置关键项（已配置的项将跳过）"
+    Log-Step "配置关键项（有效 NapCat 地址保留，其他项回车保留）"
 
     # 1. NAPCAT_WS_URL —— 必填
     $curWs = Get-Env 'NAPCAT_WS_URL' '.env'
-    if ([string]::IsNullOrWhiteSpace($curWs) -or $curWs -eq $WsUrlPlaceholder) {
+    $normalizedWs = Normalize-WsUrl $curWs
+    if ($normalizedWs) {
+        if ($normalizedWs -ne $curWs) {
+            Set-Env 'NAPCAT_WS_URL' $normalizedWs '.env'
+            Log-Ok "已将 NapCat 端口转换为完整地址：$normalizedWs"
+        } else {
+            Log-Ok "NAPCAT_WS_URL 地址格式有效（$curWs），保留现有配置"
+        }
+    } else {
+        if ($curWs) { Log-Warn '现有 NapCat 地址无效或仍是模板，请重新配置。' }
         Write-Host "NapCat WebSocket 地址是 bot 与 NapCat 通信的关键。"
         Write-Host "NapCat 与 bot 同机时只需输入端口号（如 3001），将自动拼接为 ws://localhost:<端口>/qq"
         Write-Host "若 NapCat 在远端或路径不同，可直接输入完整地址（如 ws://1.2.3.4:8080/qq）"
         while ($true) {
-            $ws = Ask "请输入 NapCat WebSocket 端口或完整地址" ""
+            $ws = Ask "请输入 NapCat WebSocket 端口（1–65535），远端可填完整地址" ""
             if ([string]::IsNullOrWhiteSpace($ws)) {
                 Log-Warn "不能为空，请重新输入"
                 continue
             }
-            # 纯数字：当作端口，拼接默认地址（NapCat 与 bot 同机的最常见场景）
-            if ($ws -match '^[0-9]+$') {
-                $ws = "ws://localhost:${ws}/qq"
+            $normalizedWs = Normalize-WsUrl $ws
+            if ($normalizedWs) {
+                $ws = $normalizedWs
                 break
             }
-            # 完整 ws/wss 地址直接采用
-            if ($ws -match '^wss?://.+') { break }
-            Log-Warn "格式应为端口号（如 3001）或 ws://host:port/path，请重新输入"
+            Log-Warn "请输入 1–65535 的端口，或主机、端口有效的 ws:// / wss:// 地址。"
         }
         Set-Env 'NAPCAT_WS_URL' $ws '.env'
         Log-Ok "NAPCAT_WS_URL 已写入: $ws"
-    } else {
-        Log-Ok "NAPCAT_WS_URL 已配置（$curWs），跳过"
     }
 
     # 2. NAPCAT_TOKEN —— 可选，当前值作为默认（回车即保留，便于幂等）
@@ -358,12 +393,8 @@ function Interactive-Config {
     # 3. LOW_MEMORY_MODE —— 当前值作为默认，每次都确认（回车即保留）
     $curLm = Get-Env 'LOW_MEMORY_MODE' '.env'
     if ([string]::IsNullOrWhiteSpace($curLm)) { $curLm = 'false' }
-    Write-Host "低内存模式：开启后下载完立即发送并自动删除，适合存储/内存受限环境。"
-    $lm = Ask "是否开启低内存模式？(true/false)" $curLm
-    switch -Regex ($lm.ToLower()) {
-        '^(true|yes|y)$' { $lm = 'true' }
-        default          { $lm = 'false' }
-    }
+    Write-Host "低内存模式：开启后启动机器人会清空下载目录，下载完成后按配置延迟删除文件（默认 3 分钟）。"
+    $lm = Ask-Boolean "是否开启低内存模式？" $curLm
     Set-Env 'LOW_MEMORY_MODE' $lm '.env'
     Log-Ok "LOW_MEMORY_MODE=$lm"
 
@@ -371,11 +402,7 @@ function Interactive-Config {
     $curWebui = Get-Env 'WEBUI_ENABLED' '.env'
     if ([string]::IsNullOrWhiteSpace($curWebui)) { $curWebui = 'true' }
     Write-Host "WebUI 控制台：可在浏览器管理漫画库与任务，默认监听本机 127.0.0.1:7999。"
-    $webui = Ask "是否启用 WebUI？(true/false)" $curWebui
-    switch -Regex ($webui.ToLower()) {
-        '^(false|no|n)$' { $webui = 'false' }
-        default          { $webui = 'true' }
-    }
+    $webui = Ask-Boolean "是否启用 WebUI？" $curWebui
     Set-Env 'WEBUI_ENABLED' $webui '.env'
     Log-Ok "WEBUI_ENABLED=$webui"
 }
@@ -391,19 +418,21 @@ bot 本身无法独立工作，需要配合 NapCat（OneBot11 协议端）才能
 两种安装方式：
   - Docker 镜像：mlikiowa/napcat-docker
       文档：https://github.com/NapNeko/NapCatQQ
-  - Shell 原生版（适合服务器 / Termux）：
-      curl -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh
-      sudo bash napcat.sh --docker n --cli y
+  - Windows 原生版：
+      按 NapCatQQ 文档安装并启动，随后在 NapCat WebUI 配置 WebSocket 服务端。
 
 关键配置要点（踩坑高频区）：
   1. WebSocket 服务端 host 改为 0.0.0.0（容器化必须，否则宿主机连不上）
   2. token 与 .env 的 NAPCAT_TOKEN 必须一致（如启用了鉴权）
+     同机部署在脚本中只填端口即可；Docker 还需映射该 WebSocket 端口。
   3. Docker 部署时，把 downloads 目录同路径 bind mount 进容器：
        -v /绝对路径/JMcomicBot/downloads:/绝对路径/JMcomicBot/downloads
      否则 NapCat 找不到 bot 发送的文件，报 "识别URL失败"
+     使用自定义下载目录时，以 .env 的 MANGA_DOWNLOAD_PATH 为准。
   4. 在 NapCat WebUI 的 autoLoginAccount 填入 QQ 号，重启免扫码
 
-详细排障可参考项目根目录的 napcat-docker-部署总结.md（如有）。
+部署说明：docs/deployment/windows.md
+WebUI 访问与排障：docs/webui.md
 ========================================================================
 '@
 }
@@ -446,4 +475,5 @@ function Main {
     Ask-Launch
 }
 
-Main
+# 点导入时只加载函数，便于测试；直接执行或 irm | iex 仍启动部署。
+if ($MyInvocation.InvocationName -ne '.') { Main }
