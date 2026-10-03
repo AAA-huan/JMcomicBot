@@ -7,9 +7,10 @@ from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
 
 from src.service.web_auth_service import AuthenticatedSession
-from src.web.api.common import build_operation_context
 from src.web.dependencies import WebDependencies
 from src.web.errors import ApiError
+
+from .common import build_operation_context
 
 AuthenticateCallable = Callable[..., AuthenticatedSession]
 
@@ -42,7 +43,7 @@ def create_setting_router(
         request: Request,
         authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
     ) -> dict[str, object]:
-        """修改配置并立即生效；只读与敏感配置明确拒绝。"""
+        """修改配置；启动项保存后重启生效，敏感值不回显。"""
         context = build_operation_context(request, authenticated)
         if key not in dependencies.settings_service.definitions:
             raise ApiError(404, "SETTING_NOT_FOUND", "不支持的配置项")

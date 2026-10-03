@@ -1,1 +1,0 @@
-import{S as e}from"./index-CgbLmG8U.js";function t(n){return`/api/v1/files/${n}/content?disposition=inline`}function o(n){return`/api/v1/files/${n}/content`}function r(n){return e(`/files/${n}/progress`)}export{t as a,o as f,r as g};

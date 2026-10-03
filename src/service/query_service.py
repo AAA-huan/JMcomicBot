@@ -7,6 +7,7 @@ from typing import Generic, Optional, TypeVar
 
 from src.database.models import Manga, MangaFile, OperationTask
 from src.database.repositories import (
+    AuditEventRepository,
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
@@ -24,6 +25,62 @@ class PageResult(Generic[T]):
     page_size: int
     total: int
     pages: int
+
+
+@dataclass(frozen=True)
+class AuditEventResult:
+    """审计公开摘要；不回传任意元数据、请求正文或内部异常。"""
+
+    id: int
+    event_type: str
+    source: str
+    result: str
+    actor_user_id: Optional[str]
+    actor_group_id: Optional[str]
+    client_ip: Optional[str]
+    target_type: Optional[str]
+    target_id: Optional[str]
+    error_code: Optional[str]
+    created_at: datetime
+
+
+class AuditQueryService:
+    """提供认证后可查看的分页审计摘要。"""
+
+    def __init__(self, repository: AuditEventRepository) -> None:
+        self.repository = repository
+
+    def list(
+        self,
+        page: int,
+        page_size: int,
+        event_type: Optional[str],
+        source: Optional[str],
+    ) -> PageResult[AuditEventResult]:
+        """查询审计记录，并显式限定浏览器可见字段。"""
+        events, total = self.repository.search(page, page_size, event_type, source)
+        return PageResult(
+            items=tuple(
+                AuditEventResult(
+                    id=event.id,
+                    event_type=event.event_type,
+                    source=event.source,
+                    result=event.result,
+                    actor_user_id=event.actor_user_id,
+                    actor_group_id=event.actor_group_id,
+                    client_ip=event.client_ip,
+                    target_type=event.target_type,
+                    target_id=event.target_id,
+                    error_code=event.error_code,
+                    created_at=event.created_at,
+                )
+                for event in events
+            ),
+            page=page,
+            page_size=page_size,
+            total=total,
+            pages=ceil(total / page_size),
+        )
 
 
 @dataclass(frozen=True)

@@ -9,6 +9,7 @@ from src.database.repositories import (
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
+    ReadingProgressRepository,
     TaskEventRepository,
 )
 from src.service import MangaService, OperationContext, OperationTaskService
@@ -144,10 +145,10 @@ def test_delete_send_conflict_preserves_records(
     assert task.error_code == "send_conflict"
 
 
-def test_delete_missing_pdf_reports_file_not_found(
+def test_delete_missing_pdf_cleans_database_record(
     tmp_path, db_manager, manga_repo: MangaRepository, tag_repo: MangaTagRepository
 ) -> None:
-    """磁盘没有 PDF 时应报告 file_not_found，不删除数据库记录。"""
+    """磁盘没有 PDF 时仍可清理已登记漫画，不删除其他文件。"""
     manga_repo.upsert(
         manga_id="100", title="标题", author="作者", chapter_count=1, page_count=10
     )
@@ -155,11 +156,70 @@ def test_delete_missing_pdf_reports_file_not_found(
 
     result = service.delete(["100"], OperationContext.qq("10001"))
 
-    assert result.outcomes[0].error_code == "file_not_found"
-    assert manga_repo.get("100") is not None
+    assert result.outcomes[0].succeeded is True
+    assert result.outcomes[0].deleted_file_count == 0
+    assert manga_repo.get("100") is None
     task = OperationTaskRepository(db_manager).list()[0]
-    assert task.status == "failed"
-    assert task.error_code == "file_not_found"
+    assert task.status == "succeeded"
+    assert task.error_code is None
+
+
+@pytest.mark.parametrize("relative_path", ["renamed.pdf", "nested/renamed.pdf"])
+def test_delete_uses_registered_path_only(
+    relative_path, tmp_path, db_manager, manga_repo, tag_repo
+) -> None:
+    """改名和子目录文件按登记路径删除，同前缀未登记文件必须保留。"""
+    _add_manga(manga_repo, tmp_path, "100", with_file=False)
+    registered = tmp_path / relative_path
+    registered.parent.mkdir(parents=True, exist_ok=True)
+    registered.write_bytes(b"%PDF")
+    manga_repo.add_file("100", str(registered))
+    unrelated = tmp_path / "100-unregistered.pdf"
+    unrelated.write_bytes(b"%PDF unrelated")
+
+    result = _build_service(tmp_path, db_manager, manga_repo, tag_repo).delete(["100"])
+
+    assert result.all_succeeded
+    assert result.deleted_file_count == 1
+    assert not registered.exists()
+    assert unrelated.exists()
+
+
+def test_delete_missing_registered_file_cleans_progress(
+    tmp_path, db_manager, manga_repo, tag_repo
+) -> None:
+    """文件丢失后删除应级联清理记录与阅读进度。"""
+    _add_manga(manga_repo, tmp_path, "100")
+    file = manga_repo.list_files("100")[0]
+    progress = ReadingProgressRepository(db_manager)
+    progress.upsert(file.id, 1, 10, 0.1)
+    (tmp_path / file.relative_path).unlink()
+
+    result = _build_service(tmp_path, db_manager, manga_repo, tag_repo).delete(["100"])
+
+    assert result.all_succeeded
+    assert result.deleted_file_count == 0
+    assert progress.get(file.id) is None
+
+
+def test_delete_rejects_symlink_escape_before_marking_deleting(
+    tmp_path, db_manager, manga_repo, tag_repo
+) -> None:
+    """登记后被替换为越界符号链接时，保留记录和目标且明确失败。"""
+    _add_manga(manga_repo, tmp_path, "100")
+    registered = tmp_path / "100-标题(1章).pdf"
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.pdf"
+    outside.write_bytes(b"%PDF outside")
+    registered.unlink()
+    registered.symlink_to(outside)
+
+    result = _build_service(tmp_path, db_manager, manga_repo, tag_repo).delete(["100"])
+
+    assert not result.all_succeeded
+    assert result.outcomes[0].error_code == "delete_failed"
+    assert outside.read_bytes() == b"%PDF outside"
+    assert registered.is_symlink()
+    assert manga_repo.list_files("100")[0].status == "ready"
 
 
 def test_delete_missing_directory_reports_directory_missing(

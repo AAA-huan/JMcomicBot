@@ -1,5 +1,8 @@
 """持久化操作任务与任务事件仓储。"""
 
+# 各仓储按资源定义查询参数，不要求抽象入口的可变参数签名。
+# pylint: disable=arguments-differ
+
 from datetime import datetime, timedelta
 from typing import Any, Dict, List, Optional
 from uuid import uuid4
@@ -10,7 +13,8 @@ from sqlalchemy import delete, func, select, update
 from sqlalchemy.orm import selectinload
 
 from src.database.models import OperationTask, TaskEvent, utc_now
-from src.database.repositories._base import BaseRepository
+
+from ._base import BaseRepository
 
 _TASK_TYPES = {"download", "scan", "repair", "delete", "backup", "verify"}
 _TASK_SOURCES = {"qq", "web", "system"}
@@ -109,7 +113,9 @@ class OperationTaskRepository(BaseRepository):
             statement = statement.where(OperationTask.manga_id == manga_id)
         with self._get_session() as session:
             total = session.scalar(
-                select(func.count()).select_from(statement.subquery())
+                select(func.count()).select_from(  # pylint: disable=not-callable
+                    statement.subquery()
+                )
             )
             paged = (
                 statement.order_by(OperationTask.created_at.desc(), OperationTask.id)

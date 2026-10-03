@@ -301,8 +301,10 @@ def test_setting_endpoints_mask_and_update(db_manager) -> None:
     assert updated.status_code == 200
     assert updated.json()["value"] == 2.5
     assert context.applied_settings["FILE_SEND_INTERVAL"] == 2.5
-    assert readonly.status_code == 400
-    assert readonly.json()["code"] == "SETTING_INVALID_VALUE"
+    assert readonly.status_code == 200
+    assert readonly.json()["value"] is None
+    assert readonly.json()["restart_required"] is True
+    assert "leak" not in readonly.text
     assert unknown.status_code == 404
     assert unknown.json()["code"] == "SETTING_NOT_FOUND"
     assert invalid.status_code == 400

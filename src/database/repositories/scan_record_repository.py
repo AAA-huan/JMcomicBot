@@ -1,5 +1,8 @@
 """扫描、修复和校验任务的统计记录仓储。"""
 
+# 各仓储按资源定义查询参数，不要求抽象入口的可变参数签名。
+# pylint: disable=arguments-differ
+
 from datetime import datetime
 from typing import List, Optional
 
@@ -8,7 +11,8 @@ import os
 from sqlalchemy import select
 
 from src.database.models import ScanRecord, utc_now
-from src.database.repositories._base import BaseRepository
+
+from ._base import BaseRepository
 
 _MAINTENANCE_TASK_TYPES = {"scan", "repair", "verify"}
 
