@@ -185,6 +185,7 @@ class MangaQueryService:
         sort: str,
         favorite_only: bool = False,
         admin_id: int = 1,
+        history_only: bool = False,
     ) -> PageResult[MangaResult]:
         """按受控条件分页查询漫画。"""
         mangas, total = self.manga_repository.search(
@@ -195,6 +196,7 @@ class MangaQueryService:
             tag,
             sort,
             favorite_owner_id=str(admin_id) if favorite_only else None,
+            history_only=history_only,
         )
         favorite_ids = self.favorite_repository.ids_for_mangas(
             "web_admin", str(admin_id), [manga.id for manga in mangas]
@@ -212,7 +214,7 @@ class MangaQueryService:
 
     def get(self, manga_id: str, admin_id: int = 1) -> Optional[MangaResult]:
         """按漫画 ID 查询公开详情。"""
-        manga = self.manga_repository.get(manga_id)
+        manga = self.manga_repository.get(manga_id, include_deleted=True)
         if manga is None:
             return None
         return replace(

@@ -17,11 +17,24 @@ from .common import build_operation_context
 AuthenticateCallable = Callable[..., AuthenticatedSession]
 
 
+class ScanRequest(BaseModel):
+    """扫描参数与命令行脚本保持一致。"""
+
+    dry_run: bool = False
+    enrich: bool = False
+
+
+class RepairRequest(BaseModel):
+    """修复支持只读差异预览。"""
+
+    dry_run: bool = False
+
+
 class VerifyRequest(BaseModel):
     """受限的漫画校验请求，不接受客户端文件路径。"""
 
-    manga_ids: List[Annotated[str, Field(pattern=r"^\d{1,32}$")]] = Field(
-        min_length=1, max_length=100
+    manga_ids: Optional[List[Annotated[str, Field(pattern=r"^\d{1,32}$")]]] = Field(
+        default=None, min_length=1, max_length=100
     )
 
 
@@ -38,8 +51,19 @@ def create_maintenance_router(
         authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
     ) -> dict[str, object]:
         """复用校验服务及持久化任务；文件 I/O 在工作线程和事务外执行。"""
-        manga_ids = list(dict.fromkeys(body.manga_ids))
-        for manga_id in manga_ids:
+        manga_ids = (
+            list(dict.fromkeys(body.manga_ids)) if body.manga_ids is not None else None
+        )
+        # 全部校验也检查活动下载与发送，避免绕过指定漫画模式的冲突检查。
+        target_ids = (
+            manga_ids
+            if manga_ids is not None
+            else {
+                file.manga_id
+                for file in dependencies.manga_service.manga_repository.list_verifiable_files()
+            }
+        )
+        for manga_id in target_ids:
             if dependencies.manga_service.download_conflict_checker(
                 manga_id
             ) or dependencies.manga_service.send_conflict_checker(manga_id):
@@ -58,11 +82,14 @@ def create_maintenance_router(
     def scan_library(
         request: Request,
         authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+        body: ScanRequest = ScanRequest(),
     ) -> dict[str, object]:
         """扫描下载目录并同步漫画记录。"""
         context = build_operation_context(request, authenticated)
         try:
-            result = dependencies.scan_service.run(context)
+            result = dependencies.scan_service.run(
+                context, dry_run=body.dry_run, enrich=body.enrich
+            )
         except FileNotFoundError as error:
             raise ApiError(
                 500, "DOWNLOAD_DIRECTORY_MISSING", "下载目录不存在，请检查配置"
@@ -74,22 +101,33 @@ def create_maintenance_router(
             "new_count": result.new_count,
             "updated_count": result.updated_count,
             "marked_missing_count": result.marked_missing_count,
+            "pending_cleanup_count": result.pending_cleanup_count,
+            "dry_run": result.dry_run,
         }
 
     @router.post("/maintenance/repair")
     def repair_library(
         request: Request,
         authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+        body: RepairRequest = RepairRequest(),
     ) -> dict[str, object]:
         """清理数据库孤儿记录；危险操作确认由前端对话框承担。"""
         context = build_operation_context(request, authenticated)
         try:
+            if body.dry_run:
+                diff = dependencies.repair_service.preview()
+                return {"dry_run": True, "cleaned_count": 0, **asdict(diff)}
             cleaned_count = dependencies.repair_service.repair(context)
         except FileNotFoundError as error:
             raise ApiError(
                 500, "DOWNLOAD_DIRECTORY_MISSING", "下载目录不存在，请检查配置"
             ) from error
-        return {"cleaned_count": cleaned_count}
+        return {
+            "cleaned_count": cleaned_count,
+            "dry_run": False,
+            "orphan_manga_ids": [],
+            "orphan_tag_names": [],
+        }
 
     @router.get("/maintenance/backups")
     def list_backups(

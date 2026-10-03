@@ -6,13 +6,21 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-import os
-
 from sqlalchemy import Integer, Select, cast, delete, func, or_, select, update
 from sqlalchemy.orm import selectinload
 
+import os  # pylint: disable=wrong-import-order  # 项目规范要求直接 import 位于 from 导入之后
+
 from src.database.database import DatabaseManager
-from src.database.models import Manga, MangaFavorite, MangaFile, MangaTag, Tag, utc_now
+from src.database.models import (
+    Manga,
+    MangaFavorite,
+    MangaFile,
+    MangaTag,
+    ReadingProgress,
+    Tag,
+    utc_now,
+)
 
 from ._base import BaseRepository
 
@@ -27,7 +35,7 @@ _VALID_FILE_STATUSES = {
 }
 
 
-class MangaRepository(BaseRepository):
+class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-methods
     """漫画元数据仓储，提供已下载漫画及相关 PDF 文件的增删改查"""
 
     def __init__(
@@ -36,11 +44,12 @@ class MangaRepository(BaseRepository):
         super().__init__(db_manager)
         self.download_root = Path(download_root).resolve() if download_root else None
 
-    def get(self, manga_id: str) -> Optional[Manga]:
+    def get(self, manga_id: str, include_deleted: bool = False) -> Optional[Manga]:
         """按漫画ID查询漫画记录
 
         Args:
             manga_id: 漫画ID
+            include_deleted: 显式读取保留的已删除元数据，默认只查询有效记录
 
         Returns:
             Optional[Manga]: 漫画记录，不存在时返回 None
@@ -51,6 +60,8 @@ class MangaRepository(BaseRepository):
                 .where(Manga.id == manga_id)
                 .options(selectinload(Manga.files))
             )
+            if not include_deleted:
+                stmt = stmt.where(Manga.status != "deleted")
             return session.scalar(stmt)
 
     def list(self, page: int = 1, page_size: int = 50) -> List[Manga]:
@@ -66,6 +77,7 @@ class MangaRepository(BaseRepository):
         with self._get_session() as session:
             stmt = (
                 select(Manga)
+                .where(Manga.status != "deleted")
                 .options(selectinload(Manga.files))
                 .order_by(Manga.downloaded_at.desc(), cast(Manga.id, Integer), Manga.id)
                 .offset((page - 1) * page_size)
@@ -78,6 +90,7 @@ class MangaRepository(BaseRepository):
         with self._get_session() as session:
             stmt = (
                 select(Manga)
+                .where(Manga.status != "deleted")
                 .options(selectinload(Manga.files))
                 .order_by(Manga.downloaded_at.desc(), cast(Manga.id, Integer), Manga.id)
             )
@@ -102,6 +115,8 @@ class MangaRepository(BaseRepository):
             if status not in _VALID_MANGA_STATUSES:
                 raise ValueError(f"不支持的漫画状态: {status}")
             statement = statement.where(Manga.status == status)
+        else:
+            statement = statement.where(Manga.status != "deleted")
         if tag:
             normalized_tag = " ".join(tag.split()).casefold()
             tagged_mangas = (
@@ -121,12 +136,22 @@ class MangaRepository(BaseRepository):
         tag: Optional[str] = None,
         sort: str = "downloaded_at_desc",
         favorite_owner_id: Optional[str] = None,
+        history_only: bool = False,
     ) -> tuple[List[Manga], int]:
         """按白名单条件分页查询漫画并返回总数。"""
         # 漫画 ID 是数字字符串，排序必须按数值比较，避免 "101051" 排在 "2556" 之前；
         # 数值 ID 同时作为其他排序方式的稳定第二排序键。
         numeric_id = cast(Manga.id, Integer)
+        # 聚合所有章节的最近阅读时间，保证漫画去重和分页顺序正确。
+        last_read = (
+            select(func.max(ReadingProgress.updated_at))
+            .join(MangaFile, ReadingProgress.manga_file_id == MangaFile.id)
+            .where(MangaFile.manga_id == Manga.id)
+            .correlate(Manga)
+            .scalar_subquery()
+        )
         sort_columns = {
+            "read_at_desc": (last_read.desc(), numeric_id),
             "downloaded_at_desc": (Manga.downloaded_at.desc(), numeric_id),
             "downloaded_at_asc": (Manga.downloaded_at, numeric_id),
             "title_asc": (Manga.title, numeric_id),
@@ -137,6 +162,8 @@ class MangaRepository(BaseRepository):
         if sort not in sort_columns:
             raise ValueError(f"不支持的漫画排序方式: {sort}")
         base_statement = self._build_query(search, status, tag)
+        if history_only:
+            base_statement = base_statement.where(last_read.is_not(None))
         if favorite_owner_id is not None:
             base_statement = base_statement.where(
                 select(MangaFavorite.manga_id)
@@ -173,7 +200,7 @@ class MangaRepository(BaseRepository):
         with self._get_session() as session:
             stmt = (
                 select(Manga)
-                .where(Manga.author.like(f"%{author}%"))
+                .where(Manga.author.like(f"%{author}%"), Manga.status != "deleted")
                 .options(selectinload(Manga.files))
                 .order_by(Manga.downloaded_at.desc(), cast(Manga.id, Integer), Manga.id)
             )
@@ -234,6 +261,23 @@ class MangaRepository(BaseRepository):
             if manga is None:
                 return False
             session.delete(manga)
+            session.commit()
+            return True
+
+    def mark_manga_deleted(self, manga_id: str) -> bool:
+        """保留漫画元数据供删除筛选查询，清除文件、进度、标签及收藏关联。"""
+        with self._get_session() as session:
+            manga = session.get(Manga, manga_id)
+            if manga is None or manga.status == "deleted":
+                return False
+            # 清空文件关系由 ORM 级联删除文件，数据库外键级联清理阅读进度。
+            manga.files.clear()
+            session.execute(
+                delete(MangaFavorite).where(MangaFavorite.manga_id == manga_id)
+            )
+            session.execute(delete(MangaTag).where(MangaTag.manga_id == manga_id))
+            manga.status = "deleted"
+            manga.updated_at = utc_now()
             session.commit()
             return True
 
@@ -461,7 +505,7 @@ class MangaRepository(BaseRepository):
         """将漫画及其文件标记为缺失，不删除数据库记录。"""
         with self._get_session() as session:
             manga = session.get(Manga, manga_id)
-            if manga is None:
+            if manga is None or manga.status == "deleted":
                 return False
             manga.status = "missing_file"
             manga.updated_at = utc_now()
@@ -520,6 +564,12 @@ class MangaRepository(BaseRepository):
             return result.rowcount or 0
 
     def count(self) -> int:
-        """统计漫画记录总数"""
+        """统计有效漫画记录总数，不包含仅供查询的已删除元数据。"""
         with self._get_session() as session:
-            return len(list(session.scalars(select(Manga)).all()))
+            return len(
+                list(
+                    session.scalars(
+                        select(Manga).where(Manga.status != "deleted")
+                    ).all()
+                )
+            )

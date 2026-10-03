@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from 'vue'
+import { onMounted, reactive, ref } from 'vue'
 import { useDisplay } from 'vuetify'
 
 import { errorMessage } from '@/api/client'
@@ -11,6 +11,7 @@ import {
   scanLibrary,
   verifyLibrary,
 } from '@/api/maintenance'
+import type { RepairResult } from '@/api/maintenance'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import type { BackupRecord, OperationTask, ScanResultView, VerifyResult } from '@/types/api'
@@ -28,6 +29,10 @@ const error = ref('')
 const actionError = ref('')
 const actionNotice = ref('')
 
+const scanOptions = reactive({ dry_run: false, enrich: false })
+const repairPreview = ref(false)
+const repairResult = ref<RepairResult | null>(null)
+const verifyScope = ref('selected')
 const scanResult = ref<ScanResultView | null>(null)
 const scanLoading = ref(false)
 const verifyInput = ref('')
@@ -45,7 +50,7 @@ async function runVerify(): Promise<void> {
   if (verifyLoading.value) return
   actionError.value = ''
   const ids = parseMangaIds(verifyInput.value)
-  if (!ids.length || ids.length > 100) {
+  if (verifyScope.value === 'selected' && (!ids.length || ids.length > 100)) {
     actionError.value = '请输入 1 到 100 个漫画 ID'
     return
   }
@@ -53,7 +58,7 @@ async function runVerify(): Promise<void> {
   verifyProgress.value = null
   verifyResult.value = null
   try {
-    verifyResult.value = await verifyLibrary(ids)
+    verifyResult.value = await verifyLibrary(verifyScope.value === 'all' ? null : ids)
   } catch (err) {
     actionError.value = errorMessage(err)
   } finally {
@@ -85,7 +90,7 @@ async function runScan(): Promise<void> {
   actionNotice.value = ''
   scanLoading.value = true
   try {
-    scanResult.value = await scanLibrary()
+    scanResult.value = await scanLibrary({ ...scanOptions })
   } catch (err) {
     actionError.value = errorMessage(err)
   } finally {
@@ -98,8 +103,9 @@ async function confirmRepair(): Promise<void> {
   actionNotice.value = ''
   repairLoading.value = true
   try {
-    const result = await repairLibrary()
-    repairedCount.value = result.cleaned_count
+    const result = await repairLibrary(repairPreview.value)
+    repairResult.value = result
+    repairedCount.value = result.dry_run ? null : result.cleaned_count
     repairDialog.value = false
   } catch (err) {
     actionError.value = errorMessage(err)
@@ -193,6 +199,9 @@ onMounted(() => {
           <p class="text-body-2 text-medium-emphasis flex-grow-1">
             对比磁盘上的漫画文件与数据库记录，补录新文件并标记缺失记录。适合在手动增删文件后运行。
           </p>
+          <v-checkbox v-model="scanOptions.dry_run" label="仅预览，不写入数据库" hide-details :disabled="scanLoading" />
+          <v-checkbox v-model="scanOptions.enrich" label="联网补全作者和标签" hide-details :disabled="scanLoading" />
+          <p v-if="scanOptions.enrich" class="text-caption text-medium-emphasis mb-3">联网补全会访问漫画站点，预览模式下也会读取网络元数据。</p>
           <div>
             <v-btn
               color="primary"
@@ -200,7 +209,7 @@ onMounted(() => {
               :loading="scanLoading"
               @click="runScan"
             >
-              开始扫描
+              {{ scanOptions.dry_run ? '预览扫描' : '开始扫描' }}
             </v-btn>
           </div>
           <v-expand-transition>
@@ -212,7 +221,8 @@ onMounted(() => {
               <div class="text-body-2">扫描文件：{{ scanResult.scanned_files }}</div>
               <div class="text-body-2">识别漫画：{{ scanResult.manga_count }}</div>
               <div class="text-body-2">新增：{{ scanResult.new_count }}，更新：{{ scanResult.updated_count }}</div>
-              <div class="text-body-2">标记缺失：{{ scanResult.marked_missing_count }}</div>
+              <div v-if="scanResult.dry_run" class="text-body-2">预览完成，待标记缺失：{{ scanResult.pending_cleanup_count }}（未写入数据库）</div>
+              <div v-else class="text-body-2">标记缺失：{{ scanResult.marked_missing_count }}</div>
             </v-sheet>
           </v-expand-transition>
         </v-card>
@@ -225,18 +235,25 @@ onMounted(() => {
             <span class="text-subtitle-2">修复资料库</span>
           </div>
           <p class="text-body-2 text-medium-emphasis flex-grow-1">
-            清理数据库中的孤儿记录（数据库存在但磁盘文件已丢失）。操作只影响记录，不会删除现有文件。
+            将文件已丢失的漫画标记为缺失，并清理无关联的孤儿标签。
           </p>
+          <v-checkbox v-model="repairPreview" label="仅预览修复差异，不写入数据库" hide-details :disabled="repairLoading" />
           <div>
             <v-btn
               variant="tonal"
               color="warning"
               prepend-icon="mdi-broom"
-              @click="repairDialog = true"
+              :loading="repairLoading"
+              @click="repairPreview ? confirmRepair() : repairDialog = true"
             >
-              开始修复
+              {{ repairPreview ? '预览修复差异' : '开始修复' }}
             </v-btn>
           </div>
+          <v-alert v-if="repairResult?.dry_run" type="info" variant="tonal" class="mt-3">
+            预览完成，未写入数据库。待标记缺失漫画：{{ repairResult.orphan_manga_ids.length }}，孤儿标签：{{ repairResult.orphan_tag_names.length }}。
+            <p v-if="repairResult.orphan_manga_ids.length">漫画 ID：{{ repairResult.orphan_manga_ids.join('、') }}</p>
+            <p v-if="repairResult.orphan_tag_names.length">标签：{{ repairResult.orphan_tag_names.join('、') }}</p>
+          </v-alert>
           <v-expand-transition>
             <v-sheet
               v-if="repairedCount !== null"
@@ -252,8 +269,12 @@ onMounted(() => {
 
     <v-card class="mt-4 pa-4">
       <div class="text-subtitle-2 mb-2">校验 PDF 文件</div>
-      <p class="text-body-2 mb-3">检查登记文件的路径、存在性、大小、修改时间和 SHA-256。单次最多 100 个漫画，进度和结果会保存到任务列表。</p>
-      <v-textarea v-model="verifyInput" label="待校验漫画 ID" rows="2" placeholder="例如：900001, 900002" :disabled="verifyLoading" />
+      <p class="text-body-2 mb-3">检查登记文件的路径、存在性、大小、修改时间和 SHA-256。指定漫画单次最多 100 个，也可选择校验全部漫画。进度和结果会保存到任务列表。</p>
+      <v-radio-group v-model="verifyScope" inline label="校验范围" :disabled="verifyLoading">
+        <v-radio label="指定漫画" value="selected" />
+        <v-radio label="全部漫画" value="all" />
+      </v-radio-group>
+      <v-textarea v-if="verifyScope === 'selected'" v-model="verifyInput" label="待校验漫画 ID" rows="2" placeholder="例如：900001, 900002" :disabled="verifyLoading" />
       <v-btn color="primary" :loading="verifyLoading" @click="runVerify">开始校验</v-btn>
       <v-progress-linear v-if="verifyLoading" class="mt-3" :model-value="verifyProgress ?? 0" :indeterminate="verifyProgress === null" />
       <p v-if="verifyLoading" class="mt-2">正在校验{{ verifyProgress === null ? '' : `：${verifyProgress}%` }}，离开页面后可在任务列表查看结果。</p>
@@ -381,7 +402,7 @@ onMounted(() => {
     <ConfirmDialog
       v-model="repairDialog"
       title="确认修复资料库？"
-      text="将清理数据库中文件已丢失的孤儿记录，不会删除磁盘上的现有文件。"
+      text="将文件已丢失的漫画标记为缺失，并删除无关联的孤儿标签。"
       confirm-text="确认修复"
       confirm-color="warning"
       :loading="repairLoading"

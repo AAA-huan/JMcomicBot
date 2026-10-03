@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 
@@ -9,6 +9,8 @@ import { deleteManga, getManga, patchManga } from '@/api/mangas'
 import { requestDownloads } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import MangaCover from '@/components/MangaCover.vue'
+import { useCoverPreview } from '@/stores/coverPreview'
 import type { Manga, MangaFile, ReadingProgress } from '@/types/api'
 import { formatBytes, formatDateTime, parseTags } from '@/utils/format'
 import {
@@ -20,6 +22,7 @@ import {
   MANGA_STATUS_LABELS,
 } from '@/utils/labels'
 
+const { coverPreview } = useCoverPreview()
 const route = useRoute()
 const router = useRouter()
 const { mobile } = useDisplay()
@@ -27,6 +30,10 @@ const { mobile } = useDisplay()
 const mangaId = String(route.params.mangaId ?? '')
 
 const manga = ref<Manga | null>(null)
+// 最早添加的可阅读章节用于展示漫画第一页。
+const coverFile = computed(() => manga.value?.files
+  .filter((file) => file.status === 'ready')
+  .slice().sort((left, right) => left.id - right.id)[0])
 const loading = ref(false)
 const error = ref('')
 const notice = ref('')
@@ -167,6 +174,8 @@ onMounted(load)
         @click="router.push({ name: 'library', query: route.query })"
       />
       <h1 class="text-h6 text-truncate">{{ manga?.title ?? '漫画详情' }}</h1>
+      <v-spacer />
+      <v-switch v-model="coverPreview" label="封面预览" color="primary" hide-details density="compact" />
     </div>
 
     <v-alert v-if="error" type="error" variant="tonal" density="comfortable" class="mb-4">
@@ -203,6 +212,10 @@ onMounted(load)
     <template v-if="manga">
       <v-card class="mb-4">
         <v-card-text>
+          <template v-if="coverPreview">
+            <MangaCover v-if="coverFile" :key="coverFile.id" :file-id="coverFile.id" />
+            <p v-else class="text-body-2 text-medium-emphasis mb-4">暂无可预览的章节文件</p>
+          </template>
           <div class="d-flex flex-wrap align-center ga-2 mb-3">
             <v-chip
               variant="tonal"
@@ -278,6 +291,7 @@ onMounted(load)
             variant="tonal"
             color="error"
             prepend-icon="mdi-delete"
+            :disabled="manga.status === 'deleted'"
             @click="deleteDialog = true"
           >
             删除漫画
@@ -447,7 +461,7 @@ onMounted(load)
     <ConfirmDialog
       v-model="deleteDialog"
       :title="`删除《${manga?.title ?? ''}》？`"
-      text="将删除该漫画的数据库记录与全部章节文件，此操作不可撤销。"
+      text="将删除全部章节文件和关联记录，保留已删除漫画的元数据供查询，此操作不可撤销。"
       confirm-text="确认删除"
       :loading="deleteLoading"
       @confirm="confirmDelete"

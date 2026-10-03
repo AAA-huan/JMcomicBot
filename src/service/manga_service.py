@@ -245,9 +245,8 @@ class MangaService:
                 if pdf_path.exists():
                     self._remove_pdf(str(pdf_path))
                     deleted_count += 1
-            # 文件记录由 MangaRepository 级联删除，标签与阅读进度一并清理
-            self.manga_repository.delete(manga_id)
-            self.tag_repository.delete_by_manga_id(manga_id)
+            # 保留已删除漫画元数据供 WebUI 查询，关联文件、标签、收藏和进度一并清理
+            self.manga_repository.mark_manga_deleted(manga_id)
             return MangaDeleteOutcome(manga_id, True, None, deleted_count)
         except Exception as error:  # pylint: disable=broad-exception-caught
             logger.error(f"删除漫画 {manga_id} 失败: {error}")

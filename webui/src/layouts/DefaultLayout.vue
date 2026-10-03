@@ -21,6 +21,7 @@ const navItems: NavItem[] = [
   { title: '下载任务', to: '/tasks', icon: 'mdi-download-outline' },
   { title: '权限管理', to: '/permissions', icon: 'mdi-account-lock-outline' },
   { title: '配置', to: '/settings', icon: 'mdi-cog-outline' },
+  { title: '文档', to: '/documents', icon: 'mdi-book-open-outline' },
   { title: '维护', to: '/maintenance', icon: 'mdi-tools' },
   { title: '操作审计', to: '/audit', icon: 'mdi-history' },
 ]

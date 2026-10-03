@@ -87,7 +87,8 @@ class FavoriteRepository(BaseRepository):
     ) -> bool:
         """原子插入或删除；仅目标联合主键冲突时视为已收藏。"""
         with self._get_session() as session:
-            if session.get(Manga, manga_id) is None:
+            manga = session.get(Manga, manga_id)
+            if manga is None or manga.status == "deleted":
                 raise LookupError("未找到指定漫画")
             if favorite:
                 statement = (
