@@ -48,10 +48,21 @@ def create_web_app(
     @asynccontextmanager
     async def lifespan(_app: FastAPI) -> AsyncIterator[None]:
         """应用生命周期内运行状态广播，退出时取消任务。"""
+
+        async def cleanup_jm_sessions() -> None:
+            while True:
+                dependencies.jm_favorite_service.cleanup_expired()
+                await asyncio.sleep(30)
+
         task = asyncio.create_task(broadcaster.run())
+        cleanup_task = asyncio.create_task(cleanup_jm_sessions())
         try:
             yield
         finally:
+            dependencies.jm_favorite_service.shutdown()
+            cleanup_task.cancel()
+            with suppress(asyncio.CancelledError):
+                await cleanup_task
             task.cancel()
             with suppress(asyncio.CancelledError):
                 await task

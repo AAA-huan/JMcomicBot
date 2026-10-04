@@ -6,12 +6,14 @@ from typing import Dict, List, Optional, Tuple
 from argon2 import PasswordHasher
 from starlette.testclient import TestClient
 
+from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
 from src.database.models import utc_now
 from src.database.repositories import (
     AuditEventRepository,
-    FavoriteRepository,
     BackupRepository,
+    FavoriteRepository,
+    JmFavoriteRepository,
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
@@ -38,6 +40,9 @@ from src.service import (
     SettingsService,
     VerifyService,
 )
+from src.service.admin_qq_service import AdminQQService
+from src.service.favorite_service import FavoriteService
+from src.service.jm_favorite_service import JmFavoriteService
 from src.service.query_service import (
     AuditQueryService,
     MangaQueryService,
@@ -48,9 +53,6 @@ from src.service.settings_service import EFFECT_IMMEDIATE, SETTING_DEFINITIONS
 from src.service.system_service import SystemService
 from src.service.web_auth_service import WebAuthService
 from src.web.app import create_web_app
-from src.config.manager import ConfigManager
-from src.service.admin_qq_service import AdminQQService
-from src.service.favorite_service import FavoriteService
 from src.web.dependencies import WebDependencies
 from src.web.events.bus import WebEventBus
 
@@ -238,6 +240,7 @@ def build_web_context(  # pylint: disable=too-many-locals
             ReadingProgressRepository(db_manager), manga_repo
         ),
         favorite_service=FavoriteService(FavoriteRepository(db_manager), audit_repo),
+        jm_favorite_service=JmFavoriteService(JmFavoriteRepository(db_manager)),
         admin_qq_service=AdminQQService(
             WebAdminRepository(db_manager), permission_manager, audit_repo
         ),

@@ -191,6 +191,54 @@ class MangaFavorite(Base):
     )
 
 
+class JmRemoteFavorite(Base):
+    """远端收藏索引，不为尚未下载的漫画创建本地漫画或文件记录。"""
+
+    __tablename__ = "jm_remote_favorite"
+    __table_args__ = (
+        CheckConstraint("admin_id > 0", name="ck_jm_remote_favorite_admin"),
+    )
+
+    # 与本地管理员收藏采用相同归属语义，管理员重置不删除收藏数据。
+    admin_id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    username: Mapped[str] = mapped_column(String(128), primary_key=True)
+    manga_id: Mapped[str] = mapped_column(String(32), primary_key=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    folders: Mapped[Dict[str, str]] = mapped_column(JSON, nullable=False)
+    pending_local_favorite: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=True
+    )
+    imported_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
+class JmFavoriteImport(Base):
+    """收藏导入任务的分页进度，重启后保留已完成结果。"""
+
+    __tablename__ = "jm_favorite_import"
+    __table_args__ = (
+        CheckConstraint("admin_id > 0", name="ck_jm_favorite_import_admin"),
+        CheckConstraint(
+            "status IN ('running', 'succeeded', 'failed', 'interrupted')",
+            name="ck_jm_favorite_import_status",
+        ),
+        Index("ix_jm_favorite_import_admin_created", "admin_id", "created_at"),
+    )
+
+    id: Mapped[str] = mapped_column(String(36), primary_key=True)
+    admin_id: Mapped[int] = mapped_column(Integer, nullable=False)
+    username: Mapped[str] = mapped_column(String(128), nullable=False)
+    folder_ids: Mapped[List[str]] = mapped_column(JSON, nullable=False)
+    status: Mapped[str] = mapped_column(String(16), nullable=False, default="running")
+    pages_done: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    imported_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    duplicate_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    local_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
+    error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+    updated_at: Mapped[datetime] = mapped_column(DateTime, default=utc_now)
+
+
 class WebAdmin(Base):
     """WebUI 单管理员账户，只保存 Argon2 密码哈希。"""
 
