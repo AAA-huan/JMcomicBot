@@ -69,8 +69,8 @@ configure_proot_functions() {
     }
 
     ensure_python() {
-        if ! uv python find --managed-python --no-project --no-python-downloads 3.12 >/dev/null; then
-            log_info "uv 中没有托管 Python 3.12，开始安装。"
+        if ! uv python find --managed-python --no-project --no-python-downloads 3.12 >/dev/null 2>&1; then
+            log_info "uv 中没有托管 Python 3.12，将通过 uv 下载，无需在 Termux 或 proot 中另装 Python。"
             uv python install 3.12 || die "uv 托管 Python 安装失败"
         fi
         local interpreter
@@ -93,11 +93,11 @@ configure_proot_functions() {
         case "$answer" in
             y|Y|yes)
                 log_info "启动前请确认 NapCat 已就绪并完成 QQ 登录。"
-                exec uv run --managed-python --python 3.12 python main.py
+                exec uv run --no-dev --managed-python --python 3.12 python main.py
                 ;;
             *)
                 log_ok "部署完成。后续请在 proot 内启动："
-                printf '  cd %q && uv run --managed-python --python 3.12 python main.py\n' "$(pwd)"
+                printf '  cd %q && uv run --no-dev --managed-python --python 3.12 python main.py\n' "$(pwd)"
                 ;;
         esac
     }

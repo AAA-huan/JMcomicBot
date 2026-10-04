@@ -133,6 +133,8 @@ def test_get_env(run_script: Callable, tmp_path: Path, line: str, expected: str)
     [
         ("3001", "\n\n\n"),
         ('"ws://localhost:port/qq" # 模板', "0\n65536\n3001\n\n\n\n"),
+        ('"ws://localhost:port/qq" # 模板', "\n\n\n\n"),
+        ("", "\n\n\n\n"),
         ("ws://localhost:65536/qq", "3001\n\n\n\n"),
         ("ws://localhost:3001/qq", "\n\n\n"),
     ],
@@ -155,6 +157,127 @@ def test_interactive_config(
     assert "LOW_MEMORY_MODE=true" in content
     assert "WEBUI_ENABLED=false" in content
     assert "UNRELATED=keep-me" in content
+
+
+def test_port_recommendation_preserves_custom_port(
+    run_script: Callable, tmp_path: Path
+):
+    """推荐范围不是限制，已有自定义端口不被默认值覆盖。"""
+    env_file = tmp_path / ".env"
+    env_file.write_text("NAPCAT_WS_URL=ws://localhost:9001/qq\n", encoding="utf-8")
+    result = run_script("interactive_config", "Interactive-Config", "\n\n\n")
+    assert result.returncode == 0, result.stderr
+    assert "NAPCAT_WS_URL=ws://localhost:9001/qq" in env_file.read_text(
+        encoding="utf-8-sig"
+    )
+
+
+def test_existing_python_is_used_without_download(run_script: Callable):
+    """已有符合要求的系统 Python 时，仅确保 uv 可用。"""
+    result = run_script(
+        """
+find_system_python() { echo /bin/true; }
+ensure_uv() { echo UV_READY; }
+uv() { echo SHOULD_NOT_INSTALL; return 99; }
+ensure_python
+printf 'SELECTED:%s\n' "$DEPLOY_PYTHON"
+""",
+        """
+function TestPython { $global:LASTEXITCODE = 0; 'Python 3.12.8' }
+function Find-SystemPython { 'TestPython' }
+function Ensure-Uv { 'UV_READY' }
+function uv { throw 'SHOULD_NOT_INSTALL' }
+Ensure-Python
+"SELECTED:$script:DeployPython"
+""",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "UV_READY" in result.stdout
+    assert "SELECTED:" in result.stdout
+    assert "SHOULD_NOT_INSTALL" not in result.stdout + result.stderr
+
+
+@pytest.mark.parametrize("already_installed", [False, True])
+def test_managed_python_install_or_reuse(run_script: Callable, already_installed: bool):
+    """没有系统 Python 时先查 uv，缺失才安装，已安装时直接复用。"""
+    result = run_script(
+        f"installed={int(already_installed)}\n" + """
+find_system_python() { return 1; }
+ensure_uv() { echo UV_READY; }
+uv() {
+    if [[ "$1 $2" == 'python find' ]]; then
+        [[ "$*" == 'python find --managed-python --no-project --no-python-downloads >=3.12' ]] || return 99
+        [[ -f installed ]] || [[ $installed == 1 ]] || return 1
+        echo /bin/true
+    elif [[ "$*" == 'python install 3.12' ]]; then
+        touch installed
+        echo INSTALLED
+    else
+        return 99
+    fi
+}
+ensure_python
+printf 'SELECTED:%s\n' "$DEPLOY_PYTHON"
+""",
+        "$script:installed = $" + str(already_installed).lower() + "\n" + """
+function TestPython { $global:LASTEXITCODE = 0; 'Python 3.12.8' }
+function Find-SystemPython { $null }
+function Ensure-Uv { 'UV_READY' }
+function uv {
+    if ($args[0] -eq 'python' -and $args[1] -eq 'find') {
+        if (($args -join ' ') -ne 'python find --managed-python --no-project --no-python-downloads >=3.12') { throw 'Unexpected arguments' }
+        if (-not $script:installed) { $global:LASTEXITCODE = 1; return }
+        $global:LASTEXITCODE = 0
+        'TestPython'
+    } elseif (($args -join ' ') -eq 'python install 3.12') {
+        $script:installed = $true
+        $global:LASTEXITCODE = 0
+        'INSTALLED'
+    } else { throw 'Unexpected command' }
+}
+Ensure-Python
+"SELECTED:$script:DeployPython"
+""",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "SELECTED:" in result.stdout
+    assert ("INSTALLED" in result.stdout) is (not already_installed)
+    assert ("将通过 uv 下载 Python 3.12" in result.stdout) is (not already_installed)
+
+
+def test_python_install_failure_stops(run_script: Callable):
+    """下载失败直接退出，不继续克隆或创建环境。"""
+    result = run_script(
+        "find_system_python() { return 1; }; ensure_uv() { :; }; uv() { return 1; }; ensure_python; echo SHOULD_NOT_CONTINUE",
+        "function Find-SystemPython { $null }; function Ensure-Uv {}; function uv { $global:LASTEXITCODE = 1 }; Ensure-Python; 'SHOULD_NOT_CONTINUE'",
+    )
+    assert result.returncode != 0
+    assert "uv 安装 Python 失败" in result.stdout + result.stderr
+    assert "SHOULD_NOT_CONTINUE" not in result.stdout
+
+
+def test_sync_uses_selected_interpreter_with_spaces(
+    run_script: Callable, tmp_path: Path
+):
+    """同步依赖明确使用已选解释器，路径含空格时保持单个参数。"""
+    (tmp_path / "JMcomicBot").mkdir()
+    result = run_script(
+        """
+DEPLOY_PYTHON='/tmp/Python path/python'
+uv() { printf '<%s>' "$@"; }
+setup_python_env
+""",
+        r"""
+$script:DeployPython = 'C:\Python path\python.exe'
+function uv { foreach ($argument in $args) { Write-Host "<$argument>" -NoNewline }; $global:LASTEXITCODE = 0 }
+Setup-PythonEnv
+""",
+    )
+    assert result.returncode == 0, result.stderr
+    assert "<sync><--no-dev><--python>" in result.stdout
+    assert "<--no-python-downloads>" in result.stdout
+    assert "<venv>" not in result.stdout
+    assert "Python path" in result.stdout
 
 
 def test_set_env_special_characters(run_script: Callable, tmp_path: Path):
