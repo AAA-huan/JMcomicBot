@@ -23,6 +23,7 @@ from src.database.models import (
 )
 
 from ._base import BaseRepository
+from .jm_favorite_repository import link_imported_favorites
 
 _VALID_MANGA_STATUSES = {"downloaded", "missing_file", "invalid", "deleted"}
 _VALID_FILE_STATUSES = {
@@ -368,6 +369,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
                 if page_count is not None:
                     existing.page_count = page_count
                 existing.relative_path = relative_path
+                link_imported_favorites(session, manga_id)
                 session.commit()
                 session.refresh(existing)
                 return existing
@@ -386,6 +388,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
                 if page_count is not None:
                     existing_for_manga.page_count = page_count
                 existing_for_manga.relative_path = relative_path
+                link_imported_favorites(session, manga_id)
                 session.commit()
                 session.refresh(existing_for_manga)
                 return existing_for_manga
@@ -402,6 +405,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
                 relative_path=relative_path,
             )
             session.add(manga_file)
+            link_imported_favorites(session, manga_id)
             session.commit()
             session.refresh(manga_file)
             return manga_file

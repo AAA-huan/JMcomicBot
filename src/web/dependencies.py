@@ -13,13 +13,14 @@ from src.service import (
     SettingsService,
     VerifyService,
 )
+from src.service.admin_qq_service import AdminQQService
+from src.service.favorite_service import FavoriteService
+from src.service.jm_favorite_service import JmFavoriteService
 from src.service.query_service import (
     AuditQueryService,
     MangaQueryService,
     TaskQueryService,
 )
-from src.service.admin_qq_service import AdminQQService
-from src.service.favorite_service import FavoriteService
 from src.service.system_service import SystemService
 from src.service.web_auth_service import WebAuthService
 from src.web.events.bus import WebEventBus
@@ -46,3 +47,4 @@ class WebDependencies:  # pylint: disable=too-many-instance-attributes
     verify_service: VerifyService
     favorite_service: FavoriteService
     admin_qq_service: AdminQQService
+    jm_favorite_service: JmFavoriteService

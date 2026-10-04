@@ -42,6 +42,12 @@ const router = createRouter({
       meta: { layout: 'reader', title: '在线阅读' },
     },
     {
+      path: '/jm-favorites',
+      name: 'jm-favorites',
+      component: () => import('@/pages/JmFavoritesPage.vue'),
+      meta: { title: 'JM 收藏导入' },
+    },
+    {
       path: '/tasks',
       name: 'tasks',
       component: () => import('@/pages/TasksPage.vue'),

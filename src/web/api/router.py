@@ -30,6 +30,7 @@ from .audit_routes import create_audit_router
 from .common import SESSION_COOKIE_NAME, build_authenticate
 from .document_routes import create_document_router
 from .file_routes import create_file_router
+from .jm_favorite_routes import create_jm_favorite_router
 from .maintenance_routes import create_maintenance_router
 from .manga_routes import create_manga_router
 from .permission_routes import create_permission_router
@@ -133,7 +134,7 @@ def create_api_router(  # pylint: disable=too-many-locals
         token: Annotated[str, Cookie(alias=SESSION_COOKIE_NAME)],
     ) -> dict[str, bool]:
         """销毁当前会话并删除 Cookie。"""
-        del authenticated
+        dependencies.jm_favorite_service.logout(authenticated.session_id)
         auth_service.logout(token)
         response.delete_cookie(SESSION_COOKIE_NAME, path="/")
         response.delete_cookie(CSRF_COOKIE_NAME, path="/")
@@ -161,6 +162,7 @@ def create_api_router(  # pylint: disable=too-many-locals
             auth_service.change_password(body.old_password, body.new_password)
         except ValueError as error:
             raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from error
+        dependencies.jm_favorite_service.logout_all()
         response.delete_cookie(SESSION_COOKIE_NAME, path="/")
         response.delete_cookie(CSRF_COOKIE_NAME, path="/")
         return {"authenticated": False}
@@ -174,6 +176,7 @@ def create_api_router(  # pylint: disable=too-many-locals
     router.include_router(create_manga_router(dependencies, authenticate))
     router.include_router(create_file_router(dependencies, authenticate))
     router.include_router(create_task_router(dependencies, authenticate))
+    router.include_router(create_jm_favorite_router(dependencies, authenticate))
     router.include_router(create_audit_router(dependencies, authenticate))
     router.include_router(create_permission_router(dependencies, authenticate))
     router.include_router(create_setting_router(dependencies, authenticate))

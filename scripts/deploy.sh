@@ -8,7 +8,7 @@
 #   bash deploy.sh
 #
 # 行为：
-#   1. 检查 Python>=3.12，检测 / 安装 git、uv
+#   1. 检查 Python>=3.12，缺失时由 uv 安装；检测 / 安装 git、uv
 #   2. 克隆或更新项目到当前目录下的 JMcomicBot/ 子目录
 #   3. 创建虚拟环境并 uv sync 同步依赖
 #   4. 幂等复制 .env / option.yml（已存在则保留用户配置）
@@ -28,6 +28,7 @@ REPO_URL="${JMBOT_REPO_URL:-https://github.com/AAA-huan/JMcomicBot.git}"
 PROJECT_DIR_NAME="JMcomicBot"
 REQUIRED_PY_MAJOR=3
 REQUIRED_PY_MINOR=12
+DEPLOY_PYTHON=""
 
 # ============================ 颜色与日志 ============================
 if [[ -t 1 ]]; then
@@ -175,34 +176,51 @@ ensure_git() {
     log_ok "git 安装完成：$(git --version)"
 }
 
-# 找到满足版本要求的 python 命令，输出命令名；找不到返回 1
-find_python() {
+# 找到满足版本要求的系统 Python，输出绝对路径；找不到返回 1。
+find_system_python() {
     local cmd ver major minor rest
     for cmd in python3 python; do
         command -v "$cmd" >/dev/null 2>&1 || continue
-        ver=$("$cmd" -c 'import sys;print("%d.%d.%d"%sys.version_info[:3])' 2>/dev/null || echo "")
+        ver=$("$cmd" -c 'import sys;print("%d.%d.%d"%sys.version_info[:3])' 2>/dev/null) || continue
         [[ -n "$ver" ]] || continue
         major=${ver%%.*}
         rest=${ver#*.}
         minor=${rest%%.*}
         if [[ "$major" -gt "$REQUIRED_PY_MAJOR" ]] || \
            { [[ "$major" -eq "$REQUIRED_PY_MAJOR" ]] && [[ "$minor" -ge "$REQUIRED_PY_MINOR" ]]; }; then
-            echo "$cmd"
+            "$cmd" -c 'import sys;print(sys.executable)'
             return 0
         fi
     done
     return 1
 }
 
-ensure_python() {
-    local py
-    if py=$(find_python); then
-        log_ok "Python 已满足要求：$($py --version 2>&1)"
+find_python() {
+    if [[ -n "$DEPLOY_PYTHON" ]]; then
+        printf '%s\n' "$DEPLOY_PYTHON"
         return 0
     fi
-    log_error "未找到 Python >= ${REQUIRED_PY_MAJOR}.${REQUIRED_PY_MINOR}。"
-    log_info "请前往 https://www.python.org/downloads/ 下载并安装 Python ${REQUIRED_PY_MAJOR}.${REQUIRED_PY_MINOR}+。"
-    die "请安装满足要求的 Python 后重新运行本脚本。"
+    find_system_python
+}
+
+ensure_python() {
+    local py
+    if py=$(find_system_python); then
+        DEPLOY_PYTHON="$py"
+        log_ok "Python 已满足要求：$("$py" --version 2>&1)"
+        ensure_uv
+        return 0
+    fi
+    log_info "未找到系统 Python ${REQUIRED_PY_MAJOR}.${REQUIRED_PY_MINOR}+，检查 uv 中的 Python。"
+    ensure_uv
+    if ! py=$(uv python find --managed-python --no-project --no-python-downloads ">=${REQUIRED_PY_MAJOR}.${REQUIRED_PY_MINOR}" 2>/dev/null); then
+        log_info "没有可用的 Python，将通过 uv 下载 Python ${REQUIRED_PY_MAJOR}.${REQUIRED_PY_MINOR}，无需手动安装。"
+        uv python install "${REQUIRED_PY_MAJOR}.${REQUIRED_PY_MINOR}" || die "uv 安装 Python 失败，部署中止。"
+        py=$(uv python find --managed-python --no-project --no-python-downloads ">=${REQUIRED_PY_MAJOR}.${REQUIRED_PY_MINOR}") || die "uv 安装后未找到可用 Python。"
+    fi
+    DEPLOY_PYTHON="$py"
+    "$py" --version || die "uv 中的 Python 无法运行。"
+    log_ok "使用 uv 托管 Python：$py"
 }
 
 # ============================ uv 安装（三源顺序 fallback） ============================
@@ -361,13 +379,10 @@ setup_python_env() {
     cd "$PROJECT_DIR_NAME"
     log_step "创建虚拟环境与同步依赖"
 
-    # 创建虚拟环境（已存在则复用）
-    uv venv
-    log_ok "虚拟环境就绪（.venv）"
-
     # 同步依赖（基于 pyproject.toml + uv.lock，跳过 dev 组以加快部署）
+    # 明确使用环境检查选定的解释器；uv sync 同时创建或更新 .venv。
     log_info "同步依赖（uv sync --no-dev），首次可能耗时较长..."
-    uv sync --no-dev
+    uv sync --no-dev --python "$DEPLOY_PYTHON" --no-python-downloads
     log_ok "依赖同步完成"
 }
 
@@ -415,11 +430,7 @@ interactive_config() {
         echo "若 NapCat 在远端或路径不同，可直接输入完整地址（如 ws://1.2.3.4:8080/qq）" >&2
         local ws=""
         while true; do
-            ws=$(ask "请输入 NapCat WebSocket 端口（1–65535），远端可填完整地址" "") || return 1
-            if [[ -z "$ws" ]]; then
-                log_warn "不能为空，请重新输入"
-                continue
-            fi
+            ws=$(ask "请输入 NapCat WebSocket 端口（推荐 3001–3010），远端可填完整地址" "3001") || return 1
             if normalized_ws=$(normalize_ws_url "$ws"); then
                 ws="$normalized_ws"
                 break
@@ -503,12 +514,12 @@ ask_launch() {
     case "$ans" in
         y|Y|yes)
             log_info "启动前请确认 NapCat 已就绪并完成 QQ 登录。"
-            log_step "启动 bot（uv run python main.py，Ctrl+C 退出）"
-            exec uv run python main.py
+            log_step "启动 bot（uv run --no-dev python main.py，Ctrl+C 退出）"
+            exec uv run --no-dev python main.py
             ;;
         *)
             log_ok "部署完成。后续启动命令："
-            echo "  cd $(pwd) && uv run python main.py"
+            echo "  cd $(pwd) && uv run --no-dev python main.py"
             ;;
     esac
 }
@@ -521,9 +532,8 @@ main() {
     # 工作目录：脚本运行时的当前目录
     log_info "工作目录：$(pwd)"
 
-    ensure_git
     ensure_python
-    ensure_uv
+    ensure_git
 
     clone_or_update
     setup_python_env

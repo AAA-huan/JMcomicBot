@@ -3,6 +3,7 @@
 from .audit_event_repository import AuditEventRepository
 from .backup_repository import BackupRepository
 from .favorite_repository import FavoriteRepository
+from .jm_favorite_repository import JmFavoriteRepository
 from .manga_repository import MangaRepository
 from .manga_tag_repository import MangaTagRepository
 from .operation_task_repository import (
@@ -29,6 +30,7 @@ __all__ = [
     "AuditEventRepository",
     "BackupRepository",
     "FavoriteRepository",
+    "JmFavoriteRepository",
     "MangaRepository",
     "MangaTagRepository",
     "OperationTaskRepository",
