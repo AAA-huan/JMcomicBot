@@ -15,7 +15,7 @@ exit /b %JMBOT_DEPLOY_EXIT%
 # .bat 使用系统自带 Windows PowerShell 执行这些函数，并显式按 UTF-8 读取。
 #
 # 行为：
-#   1. 检查 Python>=3.12，检测 / 安装 git、uv
+#   1. 检查 Python>=3.12，缺失时由 uv 安装；检测 / 安装 git、uv
 #   2. 克隆或更新项目到当前目录下的 JMcomicBot\ 子目录
 #   3. 创建虚拟环境并 uv sync 同步依赖
 #   4. 幂等复制 .env / option.yml（已存在则保留用户配置）
@@ -38,6 +38,7 @@ if ($env:JMBOT_REPO_URL) { $RepoUrl = $env:JMBOT_REPO_URL } else { $RepoUrl = 'h
 $ProjectDirName   = 'JMcomicBot'
 $RequiredPyMajor  = 3
 $RequiredPyMinor  = 12
+$script:DeployPython = $null
 
 # ============================ 日志函数 ============================
 function Log-Info  ($msg) { Write-Host "[信息] $msg" -ForegroundColor Cyan }
@@ -158,34 +159,57 @@ function Ensure-Git {
     Log-Ok "git 安装完成：$(& git --version)"
 }
 
-function Find-Python {
+function Find-SystemPython {
     foreach ($cmd in @('python', 'python3', 'py')) {
-        $g = Get-Command $cmd -ErrorAction SilentlyContinue
-        if (-not $g) { continue }
-        $verOut = & $cmd -c "import sys;print('%d.%d.%d'%sys.version_info[:3])" 2>$null
-        if (-not $verOut) { continue }
-        $parts = $verOut.Trim() -split '\.'
-        if ($parts.Count -lt 2) { continue }
-        $major = [int]$parts[0]
-        $minor = [int]$parts[1]
-        if ($major -gt $RequiredPyMajor -or
-            ($major -eq $RequiredPyMajor -and $minor -ge $RequiredPyMinor)) {
-            return $cmd
-        }
+        if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) { continue }
+        # Windows 的应用商店别名或失效启动器不视为可用 Python。
+        try {
+            $verOut = & $cmd -c "import sys;print('%d.%d.%d'%sys.version_info[:3])" 2>$null
+            if ($LASTEXITCODE -ne 0 -or -not $verOut) { continue }
+            if ($verOut.Trim() -notmatch '^(\d+)\.(\d+)\.') { continue }
+            $major = [int]$Matches[1]
+            $minor = [int]$Matches[2]
+            if ($major -gt $RequiredPyMajor -or
+                ($major -eq $RequiredPyMajor -and $minor -ge $RequiredPyMinor)) {
+                # py 是启动器，向 uv 传入它实际选择的解释器路径。
+                $interpreter = & $cmd -c "import sys;print(sys.executable)" 2>$null
+                if ($LASTEXITCODE -eq 0 -and $interpreter) { return $interpreter.Trim() }
+            }
+        } catch { continue }
     }
     return $null
 }
 
+function Find-ManagedPython {
+    try {
+        $interpreter = & uv python find --managed-python --no-project --no-python-downloads ">=$RequiredPyMajor.$RequiredPyMinor" 2>$null
+        if ($LASTEXITCODE -eq 0 -and $interpreter) { return $interpreter.Trim() }
+    } catch { return $null }
+    return $null
+}
+
 function Ensure-Python {
-    $py = Find-Python
+    $py = Find-SystemPython
     if ($py) {
+        $script:DeployPython = $py
         Log-Ok "Python 已满足要求：$(& $py --version 2>&1)"
+        Ensure-Uv
         return
     }
-    Log-Error "未找到 Python >= $RequiredPyMajor.$RequiredPyMinor。"
-    Log-Info "请前往 https://www.python.org/downloads/ 下载并安装 Python $RequiredPyMajor.$RequiredPyMinor+。"
-    Log-Info "安装时务必勾选 'Add Python to PATH'。"
-    Die "请安装满足要求的 Python 后重新运行本脚本。"
+    Log-Info "未找到系统 Python $RequiredPyMajor.$RequiredPyMinor+，检查 uv 中的 Python。"
+    Ensure-Uv
+    $py = Find-ManagedPython
+    if (-not $py) {
+        Log-Info "没有可用的 Python，将通过 uv 下载 Python $RequiredPyMajor.$RequiredPyMinor，无需手动安装。"
+        & uv python install "$RequiredPyMajor.$RequiredPyMinor"
+        if ($LASTEXITCODE -ne 0) { Die "uv 安装 Python 失败，部署中止。" }
+        $py = Find-ManagedPython
+        if (-not $py) { Die "uv 安装后未找到可用 Python。" }
+    }
+    $script:DeployPython = $py
+    & $py --version
+    if ($LASTEXITCODE -ne 0) { Die "uv 中的 Python 无法运行。" }
+    Log-Ok "使用 uv 托管 Python：$py"
 }
 
 # ============================ uv 安装（三源顺序 fallback） ============================
@@ -320,12 +344,9 @@ function Clone-Or-Update {
 function Setup-PythonEnv {
     Set-Location $ProjectDirName
     Log-Step "创建虚拟环境与同步依赖"
-    uv venv
-    if ($LASTEXITCODE -ne 0) { Die "uv venv 失败" }
-    Log-Ok "虚拟环境就绪（.venv）"
-
+    # uv sync 同时创建或更新 .venv，使用环境检查选定的解释器。
     Log-Info "同步依赖（uv sync --no-dev），首次可能耗时较长..."
-    uv sync --no-dev
+    uv sync --no-dev --python $script:DeployPython --no-python-downloads
     if ($LASTEXITCODE -ne 0) { Die "uv sync 失败" }
     Log-Ok "依赖同步完成"
 }
@@ -374,11 +395,7 @@ function Interactive-Config {
         Write-Host "NapCat 与 bot 同机时只需输入端口号（如 3001），将自动拼接为 ws://localhost:<端口>/qq"
         Write-Host "若 NapCat 在远端或路径不同，可直接输入完整地址（如 ws://1.2.3.4:8080/qq）"
         while ($true) {
-            $ws = Ask "请输入 NapCat WebSocket 端口（1–65535），远端可填完整地址" ""
-            if ([string]::IsNullOrWhiteSpace($ws)) {
-                Log-Warn "不能为空，请重新输入"
-                continue
-            }
+            $ws = Ask "请输入 NapCat WebSocket 端口（推荐 3001–3010），远端可填完整地址" "3001"
             $normalizedWs = Normalize-WsUrl $ws
             if ($normalizedWs) {
                 $ws = $normalizedWs
@@ -453,12 +470,12 @@ function Ask-Launch {
     switch -Regex ($ans.ToLower()) {
         '^(y|yes)$' {
             Log-Info "启动前请确认 NapCat 已就绪并完成 QQ 登录。"
-            Log-Step "启动 bot（uv run python main.py，Ctrl+C 退出）"
-            & uv run python main.py
+            Log-Step "启动 bot（uv run --no-dev python main.py，Ctrl+C 退出）"
+            & uv run --no-dev python main.py
         }
         default {
             Log-Ok "部署完成。后续启动命令："
-            Write-Host "  cd $(Get-Location); uv run python main.py"
+            Write-Host "  cd $(Get-Location); uv run --no-dev python main.py"
         }
     }
 }
@@ -469,9 +486,8 @@ function Main {
     Log-Step "JMComicBot 一键部署"
     Log-Info "工作目录：$(Get-Location)"
 
-    Ensure-Git
     Ensure-Python
-    Ensure-Uv
+    Ensure-Git
 
     Clone-Or-Update
     Setup-PythonEnv

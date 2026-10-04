@@ -56,13 +56,13 @@ def test_create_backup_registers_ready_record(
     assert record.filename == result.path.name
     assert record.relative_path == result.path.name
     assert record.status == "ready"
-    assert record.schema_version == "0024_manga_remote_metadata"
+    assert record.schema_version == "0025_jm_favorite_import"
     assert record.file_size_bytes == result.path.stat().st_size
     assert record.sha256 == sha256_of(result.path)
     assert record.deleted_at is None
     # 文件名格式：main-YYYYmmdd-HHMMSS-<revision>.db
     assert record.filename.startswith("main-")
-    assert record.filename.endswith("-0024_manga_remote_metadata.db")
+    assert record.filename.endswith("-0025_jm_favorite_import.db")
     assert "/" not in record.relative_path
 
     task = OperationTaskRepository(db_manager).list()[0]

@@ -13,8 +13,9 @@ from src.database.database import DatabaseManager
 from src.database.models import utc_now
 from src.database.repositories import (
     AuditEventRepository,
-    FavoriteRepository,
     BackupRepository,
+    FavoriteRepository,
+    JmFavoriteRepository,
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
@@ -49,6 +50,9 @@ from src.service import (
     SettingsService,
     VerifyService,
 )
+from src.service.admin_qq_service import AdminQQService
+from src.service.favorite_service import FavoriteService
+from src.service.jm_favorite_service import JmFavoriteService
 from src.service.query_service import (
     AuditQueryService,
     MangaQueryService,
@@ -59,10 +63,8 @@ from src.service.web_auth_service import WebAuthService
 from src.utils.helpers import cleanup_failed_downloads
 from src.utils.name_cache import NameCache
 from src.web import WebServer, create_web_app
-from src.web.events.bus import WebEventBus
-from src.service.admin_qq_service import AdminQQService
-from src.service.favorite_service import FavoriteService
 from src.web.dependencies import WebDependencies
+from src.web.events.bus import WebEventBus
 from src.websocket.client import WebSocketClient
 
 
@@ -229,6 +231,9 @@ class MangaBot:
         self.favorite_service = FavoriteService(
             self.favorite_repo, self.audit_event_repo
         )
+        self.jm_favorite_service = JmFavoriteService(
+            JmFavoriteRepository(self.database_manager)
+        )
         self.admin_qq_service = AdminQQService(
             self.web_admin_repo, self.permission_manager, self.audit_event_repo
         )
@@ -359,6 +364,7 @@ class MangaBot:
                         verify_service=self.verify_service,
                         favorite_service=self.favorite_service,
                         admin_qq_service=self.admin_qq_service,
+                        jm_favorite_service=self.jm_favorite_service,
                     ),
                     web_host=web_host,
                     web_port=int(self.config_manager.config_dict["WEBUI_PORT"]),

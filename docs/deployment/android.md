@@ -40,12 +40,14 @@ curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/de
 
 - 清理继承的 Termux 工具路径、动态链接设置和 Python 环境变量。
 - 检测并安装 proot 内的 Git、uv。
-- 检查 uv 内是否有托管 Python 3.12，缺失时由 uv 安装。
+- 检查 uv 内是否有托管 Python 3.12，缺失时提示并由 uv 下载，不使用 Termux 或发行版里的系统 Python。
 - 克隆或更新 `~/JMcomicBot`，创建虚拟环境、同步运行依赖、准备配置并引导输入 NapCat 地址。
 
 托管 Python 存放在 proot 用户的 `~/.local/share/uv/python`。不要在原生 Termux 中运行这个脚本，也不要用普通 `deploy.sh` 代替；使用 `/bin/bash` 明确选择 proot 内的解释器。普通用户运行前需已具备 `git curl ca-certificates`。
 
 一键脚本不会安装 NapCat。配置与文件共享要求见 [共用配置指南](common.md)。已有 `.env` / `option.yml` 会保留，有效 NapCat 地址保留，模板或非法地址会重新询问。
+
+NapCat 端口推荐使用 3001–3010，回车默认使用 3001。如果 NapCat 已使用其他端口，填写实际端口即可。
 
 ## 3. 可选的手动部署
 

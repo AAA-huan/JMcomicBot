@@ -5,13 +5,13 @@
 - 可运行项目依赖的 Linux 系统，Ubuntu / Debian 可按下文安装工具。
 - 可访问 GitHub、Python 包索引和 Python 下载源的网络。
 - 可写的项目目录，以及容纳环境、数据库和漫画文件的存储空间。
-- Git、uv 和 Python 3.12 或更高版本；Python 可在手动流程中由 uv 安装。
+- Git、uv 和 Python 3.12 或更高版本；一键脚本会检查并安装缺少的工具和 Python。
 
 运行机器人不要求 root。只有需要安装系统软件时才使用系统管理员权限。`vim`、`screen`、Docker、系统 `pip`、`python3-venv` 和完整系统升级不作为必需步骤；若某个依赖确实报编译缺包，再按错误安装对应工具。
 
 ## 一键部署
 
-现有 `deploy.sh` **检查预装且可通过 `python3` 或 `python` 调用的 Python 3.12+**，不会替你安装该 Python。已有符合要求的 Python 时，在希望存放项目的父目录执行：
+在希望存放项目的父目录执行：
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.sh | bash
@@ -24,7 +24,9 @@ sudo apt update
 sudo apt install -y curl ca-certificates
 ```
 
-脚本会检测并安装 Git/uv、克隆或更新 `./JMcomicBot`、同步运行依赖、准备配置，并引导填写 NapCat 地址等选项。安装 Git 等系统工具时可能需要权限；如果 Python 检查未通过，请使用下方手动流程。
+脚本先检查环境中是否有 Python 3.12+，有则直接使用；没有时检查 uv 已安装的 Python，仍没有则提示并通过 uv 下载 Python 3.12，无需提前安装系统 Python 或 pip。
+
+随后脚本会检测并安装 Git、克隆或更新 `./JMcomicBot`、同步运行依赖、准备配置，并引导填写 NapCat 地址等选项。安装 Git 等系统工具时可能需要权限。NapCat 端口推荐使用 3001–3010，回车默认使用 3001；已有有效地址会保留。
 
 脚本不会安装 NapCat，配置方法见 [共用配置指南](common.md)。已有 `.env` / `option.yml` 会保留，有效 NapCat 地址保留，模板或非法地址会重新询问；更新失败或输入结束会中止。
 
