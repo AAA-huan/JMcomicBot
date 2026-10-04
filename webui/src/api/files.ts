@@ -27,3 +27,10 @@ export function updateReadingProgress(
     body: { page_number: pageNumber, page_count: pageCount },
   })
 }
+
+/** 单独同步实际页数，打开首页时也能更新，且不覆盖阅读位置。 */
+export function updateFilePageCount(fileId: number, pageCount: number): Promise<void> {
+  return apiRequest(`/files/${fileId}/page-count`, {
+    method: 'PUT', body: { page_count: pageCount },
+  })
+}

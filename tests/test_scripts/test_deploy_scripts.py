@@ -44,15 +44,14 @@ def run_script(request, tmp_path: Path) -> Callable:
                 str(PROJECT_ROOT),
             ]
         else:
-            script_path = _ps_string(_windows_path(PROJECT_ROOT / "scripts/deploy.ps1"))
+            script_path = _ps_string(_windows_path(PROJECT_ROOT / "scripts/deploy.bat"))
             directory = _ps_string(_windows_path(tmp_path))
             source = (
-                # 模拟 irm 将原始 UTF-8 字节解码为字符串的路径；ReadAllText
-                # 会自动移除 BOM，从而掩盖脚本首行的 CommandNotFoundException。
+                # 与 .bat 入口一样，按 UTF-8 读取并提取内嵌 PowerShell 部分。
                 "$ErrorActionPreference = 'Stop'\n"
-                + ". ([scriptblock]::Create([Text.Encoding]::UTF8.GetString([IO.File]::ReadAllBytes("
+                + ". ([scriptblock]::Create(([IO.File]::ReadAllText("
                 + script_path
-                + "))))\n"
+                + ", [Text.Encoding]::UTF8) -split '(?m)^# JMBOT_POWERSHELL_START\\r?$', 2)[1]))\n"
                 + "Set-Location "
                 + directory
                 + "\n[Console]::SetIn([IO.StringReader]::new("
@@ -214,3 +213,24 @@ def test_update_failure_stops(run_script: Callable, tmp_path: Path):
     assert result.returncode != 0
     assert "部署已中止" in result.stdout + result.stderr
     assert "SHOULD_NOT_CONTINUE" not in result.stdout
+
+
+def test_windows_batch_entry_check() -> None:
+    """通过真实 CMD 验证入口，只检查语法而不执行部署。"""
+    executable = shutil.which("powershell.exe")
+    if executable is None:
+        pytest.skip("当前环境没有 Windows PowerShell")
+    batch_path = _windows_path(PROJECT_ROOT / "scripts/deploy.bat")
+    command = (
+        "& cmd.exe /d /c "
+        + _ps_string('call "' + batch_path + '" --check')
+        + "; exit $LASTEXITCODE"
+    )
+    encoded = base64.b64encode(command.encode("utf-16-le")).decode("ascii")
+    result = subprocess.run(
+        [executable, "-NoProfile", "-EncodedCommand", encoded],
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+    assert "Windows 部署脚本语法检查通过" in result.stdout.decode("utf-8")

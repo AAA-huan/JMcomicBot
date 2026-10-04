@@ -14,7 +14,7 @@ def test_scan_and_repair_preview_do_not_write(db_manager, monkeypatch):
     mangas.upsert("200", "孤儿", "", 1, 0)
     calls = []
 
-    def enrich(entries):
+    def enrich(entries, check_chapters=False):
         calls.append([entry.manga_id for entry in entries])
         return len(entries)
 
@@ -116,3 +116,18 @@ def test_deleted_filter_survives_maintenance_and_redownload(db_manager):
         mangas.add_file("100", str(file))
         assert client.get("/api/v1/mangas?status=deleted").json()["total"] == 0
         assert client.get("/api/v1/mangas/100").json()["status"] == "downloaded"
+
+
+def test_scan_chapter_check_requires_enrichment(db_manager):
+    """不允许逐章检查绕过联网开关，也不创建无效扫描任务。"""
+    client, _context = create_client_for(db_manager)
+    with client:
+        setup_and_login(client)
+        response = client.post(
+            "/api/v1/maintenance/scan",
+            json={"check_chapters": True},
+            headers=csrf_headers(client),
+        )
+    assert response.status_code == 400
+    assert response.json()["code"] == "INVALID_SCAN_REQUEST"
+    assert OperationTaskRepository(db_manager).list() == []

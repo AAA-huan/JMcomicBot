@@ -5,6 +5,7 @@ python-dotenv>=1.2.3    # 环境变量管理，跨平台兼容
 
 # 图片处理依赖（生产必需）
 pillow>=12.3.0          # 图片处理库，生成JPEG缩略图时使用
+pypdf>=6.0.0            # 扫描时读取本地 PDF 实际页数，不渲染图片
 img2pdf>=0.6.3          # PDF转换库，jmcomic img2pdf 插件合并PDF时使用（必需）
 
 # 进度条依赖（生产必需，download_progress 插件使用）

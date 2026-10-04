@@ -6,6 +6,8 @@ import type { BackupRecord, PageResult, ScanResultView, VerifyResult } from '@/t
 export interface ScanOptions {
   dry_run: boolean
   enrich: boolean
+  read_pages: boolean
+  check_chapters: boolean
 }
 
 export interface RepairResult {

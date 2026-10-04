@@ -5,7 +5,7 @@
 用法:
     uv run python scripts/scan_mangas.py              # 扫描并写入数据库
     uv run python scripts/scan_mangas.py --dry-run    # 仅预览将入库的内容，不写入
-    uv run python scripts/scan_mangas.py --enrich     # 扫描后联网补全作者/标签等元数据
+    uv run python scripts/scan_mangas.py --enrich     # 扫描后联网补全漫画详情与站点章节/页数
 """
 
 from pathlib import Path
@@ -43,9 +43,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--enrich",
         action="store_true",
-        help="扫描后联网补全作者/标签等元数据",
+        help="扫描后联网补全漫画详情与站点章节/页数",
     )
-    return parser.parse_args()
+    parser.add_argument(
+        "--read-pages", action="store_true", help="读取本地 PDF 实际页数，不渲染图片"
+    )
+    parser.add_argument(
+        "--check-chapters",
+        action="store_true",
+        help="逐章查询在线图片数，需同时启用 --enrich",
+    )
+    args = parser.parse_args()
+    if args.check_chapters and not args.enrich:
+        parser.error("--check-chapters 需要同时启用 --enrich")
+    return args
 
 
 def main() -> None:
@@ -86,6 +97,8 @@ def main() -> None:
             context=OperationContext.system(),
             dry_run=args.dry_run,
             enrich=args.enrich,
+            read_pages=args.read_pages,
+            check_chapters=args.check_chapters,
         )
         _print_result(result)
     except FileNotFoundError as error:
@@ -110,13 +123,27 @@ def _print_result(result: ScanRunResult) -> None:
         f"  扫描到 PDF 文件: {result.scanned_files} 个",
         f"  聚合漫画: {result.manga_count} 本",
         f"  新增: {result.new_count} 本",
-        f"  更新: {result.updated_count} 本",
+        f"  更新: {result.updated_count} 本，无需更新: {result.unchanged_count} 本",
+        f"  重复文件漫画: {result.duplicate_count} 本，跳过: {result.skipped_count} 本",
+        f"  联网详情成功/失败: {result.enrich_succeeded}/{result.enrich_failed}",
+        f"  PDF 页数读取失败: {result.page_read_failed}，章节检查失败: {result.chapter_errors}",
     ]
     if result.dry_run:
         lines.append(f"  待清理残留: {result.pending_cleanup_count} 条")
     else:
         lines.append(f"  标记缺失: {result.marked_missing_count} 条")
     logger.info("\n".join(lines))
+    for detail in result.details:
+        logger.info(f"漫画 {detail['manga_id']}，最终文件: {detail['file']}")
+        if result.dry_run:
+            for change in detail["changes"]:
+                logger.info(
+                    f"  {change['label']}: {change['old']} → {change['new']}（{change['source']}）"
+                )
+        if detail["error"]:
+            logger.error(f"  处理失败: {detail['error']}")
+        for warning in detail["warnings"]:
+            logger.warning(f"  {warning}")
 
 
 if __name__ == "__main__":

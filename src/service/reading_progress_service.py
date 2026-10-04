@@ -93,10 +93,16 @@ class ReadingProgressService:
             page_count=page_count,
             percent=page_number / page_count,
         )
-        # 页数补齐：仅当文件页数为 0 时使用 PDF.js 上报值，已有页数保持可信
-        if manga_file.page_count == 0:
-            self.manga_repository.update_page_count_if_zero(manga_file_id, page_count)
+        # 阅读器解析的实际页数纠正旧值，并同步漫画总页数。
+        self.update_page_count(manga_file_id, page_count)
         return progress
+
+    def update_page_count(self, manga_file_id: int, page_count: int) -> None:
+        """仅同步 PDF 实际页数，不创建或覆盖阅读进度。"""
+        if not self.manga_repository.update_page_count(manga_file_id, page_count):
+            raise ReadingProgressFileNotFoundError(
+                f"PDF文件记录不存在: {manga_file_id}"
+            )
 
     def list_recent(self, limit: int = 20) -> List[ReadingProgress]:
         """查询最近阅读列表，为 WebUI「继续阅读」预留。"""

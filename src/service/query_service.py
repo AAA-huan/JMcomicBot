@@ -3,7 +3,7 @@
 from dataclasses import dataclass, replace
 from datetime import datetime
 from math import ceil
-from typing import Generic, Optional, TypeVar
+from typing import Any, Dict, Generic, Optional, TypeVar
 
 from src.database.models import Manga, MangaFile, OperationTask
 from src.database.repositories import (
@@ -111,6 +111,7 @@ class MangaResult:  # pylint: disable=too-many-instance-attributes
     tags: tuple[str, ...]
     files: tuple[MangaFileResult, ...]
     is_favorite: bool = False
+    remote_metadata: Optional[Dict[str, Any]] = None
 
 
 @dataclass(frozen=True)
@@ -156,6 +157,7 @@ class MangaQueryService:
             title=manga.title,
             author=manga.author,
             description=manga.description,
+            remote_metadata=manga.remote_metadata,
             chapter_count=manga.chapter_count,
             page_count=manga.page_count,
             status=manga.status,

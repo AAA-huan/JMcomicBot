@@ -21,6 +21,7 @@ export interface Manga {
   id: string
   title: string
   author: string
+  remote_metadata?: { chapter_count: number; page_count: number | null; fetched_at: string } | null
   description: string | null
   chapter_count: number
   page_count: number
@@ -152,6 +153,14 @@ export interface ScanResultView {
   manga_count: number
   new_count: number
   updated_count: number
+  unchanged_count: number
+  skipped_count: number
+  duplicate_count: number
+  enrich_succeeded: number
+  enrich_failed: number
+  chapter_errors: number
+  page_read_failed: number
+  details: { manga_id: string; file: string | null; error: string | null; warnings: string[]; changes: { field: string; label: string; old: unknown; new: unknown; source: string }[] }[]
   marked_missing_count: number
 }
 

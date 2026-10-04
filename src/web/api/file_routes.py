@@ -1,7 +1,7 @@
 """漫画 PDF 文件下载与阅读进度 API。"""
 
 from dataclasses import asdict
-from typing import Annotated, Callable, Literal
+from typing import Annotated, Callable, Dict, Literal
 
 from fastapi import APIRouter, Depends
 from fastapi.responses import FileResponse
@@ -22,6 +22,12 @@ _ERROR_STATUS_CODES = {
     "FILE_PATH_INVALID": 500,
     "FILE_TYPE_INVALID": 415,
 }
+
+
+class FilePageCountRequest(BaseModel):
+    """阅读器加载 PDF 后上报实际总页数。"""
+
+    page_count: int
 
 
 class ReadingProgressUpdateRequest(BaseModel):
@@ -62,6 +68,23 @@ def create_file_router(
             content_disposition_type=disposition,
             headers={"X-Content-Type-Options": "nosniff"},
         )
+
+    @router.put("/files/{file_id}/page-count")
+    def update_file_page_count(
+        file_id: int,
+        body: FilePageCountRequest,
+        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> Dict[str, int]:
+        """纠正实际页数，不改动阅读位置或阅读历史。"""
+        try:
+            dependencies.reading_progress_service.update_page_count(
+                file_id, body.page_count
+            )
+        except ReadingProgressFileNotFoundError as error:
+            raise ApiError(404, "FILE_NOT_FOUND", "未找到指定文件") from error
+        except ValueError as error:
+            raise ApiError(400, "INVALID_PAGE_COUNT", str(error)) from error
+        return {"file_id": file_id, "page_count": body.page_count}
 
     @router.get("/files/{file_id}/progress")
     def get_reading_progress(
