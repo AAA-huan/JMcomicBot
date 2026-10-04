@@ -4,7 +4,7 @@
 
 from datetime import datetime
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import Integer, Select, cast, delete, func, or_, select
 from sqlalchemy.orm import selectinload
@@ -246,6 +246,17 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             session.commit()
             session.refresh(manga)
             return manga
+
+    def update_scan_metadata(self, manga_id: str, metadata: Dict[str, Any]) -> None:
+        """保存成功获取的站点快照，简介为空时保留既有简介。"""
+        with self._get_session() as session:
+            manga = session.get(Manga, manga_id)
+            if manga is None:
+                raise ValueError(f"漫画记录不存在: {manga_id}")
+            manga.remote_metadata = metadata
+            if metadata["description"]:
+                manga.description = metadata["description"]
+            session.commit()
 
     def delete(self, manga_id: str) -> bool:
         """按漫画ID删除漫画记录及其关联文件记录

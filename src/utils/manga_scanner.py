@@ -6,7 +6,8 @@
 """
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from pathlib import Path
+from typing import Any, Dict, List, Optional, Set
 
 import os
 import re
@@ -14,6 +15,8 @@ import re
 from src.database.models import ScanRecord
 from src.database.repositories import MangaRepository, ScanRecordRepository
 from src.logging.logger_config import logger
+
+from .manga_enrichment import enrich_entries
 
 # PDF 文件名正则：
 # - 新格式「漫画ID-标题(章节数章).pdf」
@@ -29,7 +32,7 @@ DOWNLOAD_PATH_LABEL = "MANGA_DOWNLOAD_PATH"
 
 
 @dataclass
-class MangaScanEntry:
+class MangaScanEntry:  # pylint: disable=too-many-instance-attributes
     """扫描到的单个漫画条目"""
 
     manga_id: str
@@ -38,6 +41,10 @@ class MangaScanEntry:
     author: str = ""
     tags: str = ""
     files: List[str] = field(default_factory=list)
+    remote_metadata: Optional[Dict[str, Any]] = None
+    enrich_error: Optional[str] = None
+    chapter_errors: int = 0
+    warnings: List[str] = field(default_factory=list)
 
     def add_file(self, file_path: str) -> None:
         """添加该漫画的一个PDF文件记录
@@ -49,7 +56,7 @@ class MangaScanEntry:
 
 
 @dataclass
-class ScanResult:
+class ScanResult:  # pylint: disable=too-many-instance-attributes
     """扫描与同步结果统计"""
 
     scanned_files: int = 0
@@ -58,6 +65,14 @@ class ScanResult:
     updated_count: int = 0
     pending_cleanup_count: int = 0
     marked_missing_count: int = 0
+    unchanged_count: int = 0
+    skipped_count: int = 0
+    duplicate_count: int = 0
+    enrich_succeeded: int = 0
+    enrich_failed: int = 0
+    chapter_errors: int = 0
+    page_read_failed: int = 0
+    details: List[Dict[str, Any]] = field(default_factory=list)
 
 
 def parse_pdf_filename(filename: str) -> Optional[MangaScanEntry]:
@@ -117,7 +132,7 @@ def scan_download_dir(download_path: str) -> List[MangaScanEntry]:
     if not os.path.isdir(download_path):
         raise FileNotFoundError(f"下载目录不存在: {download_path}")
 
-    manga_map: dict[str, MangaScanEntry] = {}
+    manga_map: Dict[str, MangaScanEntry] = {}
     scanned_files_count = 0
 
     for file_name in sorted(os.listdir(download_path)):
@@ -162,18 +177,20 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
     entries: List[MangaScanEntry],
     dry_run: bool = False,
     tag_repo: Optional[Any] = None,
+    read_pages: bool = False,
 ) -> ScanResult:
     """
     将扫描到的漫画条目同步到数据库
 
-    对数据库已有记录仅更新可解析的标题与章节数，保留更完整的元数据；
+    保留本地已下载信息，联网补全保存独立快照；可选解析最终 PDF 实际页数。
     对数据库中存在但文件已不存在的残留记录标记为缺失，不直接删除。
 
     Args:
         repo: 漫画元数据仓储
         entries: 扫描到的漫画条目列表
         dry_run: 是否仅预览不写入数据库
-        tag_repo: 漫画标签仓储，存在时用于清理孤儿标签记录
+        tag_repo: 漫画标签仓储，用于添加在线标签
+        read_pages: 读取最终 PDF 的实际页数，不渲染图片
 
     Returns:
         ScanResult: 同步结果统计
@@ -182,55 +199,136 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
     result.manga_count = len(entries)
     result.scanned_files = _count_scan_files(entries)
 
-    disk_ids: set[str] = set()
-
+    disk_ids: Set[str] = set()
     for entry in entries:
         disk_ids.add(entry.manga_id)
-        # dry-run 同样查询数据库，以准确区分新增与更新，但不会执行任何写入。
         existing = repo.get(entry.manga_id)
-
-        if existing is not None:
-            # 计算本次要写入的值，保留数据库已有且当前无法可靠解析的元数据。
-            # 注意：文件名中的数字可能是章节数也可能是页数（历史版本 bug 污染），
-            # 因此 DB 已有非零 chapter_count 时以 DB 为准，不覆盖。
-            title = entry.title if entry.title else existing.title
-            chapter_count = (
-                existing.chapter_count
-                if existing.chapter_count
-                else entry.chapter_count
+        result.enrich_succeeded += int(entry.remote_metadata is not None)
+        result.enrich_failed += int(entry.enrich_error is not None)
+        result.chapter_errors += entry.chapter_errors
+        result.duplicate_count += int(len(entry.files) > 1)
+        detail: Dict[str, Any] = {
+            "manga_id": entry.manga_id,
+            "file": None,
+            "changes": [],
+            "warnings": list(entry.warnings),
+            "error": entry.enrich_error,
+        }
+        result.details.append(detail)
+        selected = _select_scan_file(repo, entry, detail["warnings"])
+        if selected is None:
+            result.skipped_count += 1
+            continue
+        detail["file"] = Path(selected).name
+        # 常规重扫不能用旧文件名覆盖已补全或手动修订的在线标题。
+        if entry.remote_metadata is None and existing and existing.remote_metadata:
+            title = existing.title
+        else:
+            title = entry.title if entry.title else (existing.title if existing else "")
+        author = entry.author if entry.author else (existing.author if existing else "")
+        # 历史文件名数字可能受旧页数 bug 污染，已有本地章节数不由文件名覆盖。
+        # 在线章节数独立存储，不能把站点新增章节认作本地已下载章节。
+        chapter_count = (
+            existing.chapter_count
+            if existing and existing.chapter_count
+            else entry.chapter_count
+        )
+        page_count = existing.page_count if existing else 0
+        actual_pages = None
+        if read_pages:
+            try:
+                actual_pages = _read_pdf_pages(selected)
+            except (OSError, ValueError) as error:
+                result.page_read_failed += 1
+                detail["error"] = f"PDF 页数读取失败: {error}"
+                detail["warnings"].append("本漫画未写入，请修复文件后重扫")
+                result.skipped_count += 1
+                continue
+            else:
+                page_count = actual_pages
+        fields = {
+            "title": title,
+            "author": author,
+            "chapter_count": chapter_count,
+            "page_count": page_count,
+            "status": "downloaded",
+        }
+        old_fields = (
+            {
+                "title": existing.title,
+                "author": existing.author,
+                "chapter_count": existing.chapter_count,
+                "page_count": existing.page_count,
+                "status": existing.status,
+            }
+            if existing
+            else {}
+        )
+        for key, value in fields.items():
+            if old_fields.get(key) != value:
+                source = (
+                    "本地 PDF"
+                    if key == "page_count" and actual_pages is not None
+                    else (
+                        "站点详情"
+                        if key in ("title", "author") and entry.remote_metadata
+                        else "本地文件/既有记录"
+                    )
+                )
+                detail["changes"].append(
+                    {
+                        "field": key,
+                        "old": old_fields.get(key),
+                        "new": value,
+                        "source": source,
+                    }
+                )
+        if entry.remote_metadata is not None:
+            previous = (
+                existing.remote_metadata
+                if existing and existing.remote_metadata
+                else {}
             )
-            status = "downloaded"
+            for key, value in entry.remote_metadata.items():
+                if key != "fetched_at" and previous.get(key) != value:
+                    detail["changes"].append(
+                        {
+                            "field": f"remote.{key}",
+                            "old": previous.get(key),
+                            "new": value,
+                            "source": "站点详情",
+                        }
+                    )
+            remote_pages = entry.remote_metadata["page_count"]
+            if remote_pages is not None and page_count and remote_pages != page_count:
+                detail["warnings"].append(
+                    f"站点页数 {remote_pages} 与本地页数 {page_count} 不同，未覆盖本地信息"
+                )
+            if entry.remote_metadata["chapter_count"] != chapter_count:
+                detail["warnings"].append(
+                    f"站点章节数 {entry.remote_metadata['chapter_count']} "
+                    f"与本地记录 {chapter_count} 不同，本地章节数未覆盖"
+                )
+        file_changed = _file_changed(repo, entry.manga_id, selected, actual_pages)
+        if existing is None:
+            result.new_count += 1
+        elif detail["changes"] or file_changed:
             result.updated_count += 1
         else:
-            title = entry.title
-            chapter_count = entry.chapter_count
-            status = "downloaded"
-            result.new_count += 1
-
+            result.unchanged_count += 1
         if dry_run:
             continue
-
-        repo.upsert(
-            manga_id=entry.manga_id,
-            title=title,
-            author=entry.author or (existing.author if existing is not None else ""),
-            chapter_count=chapter_count,
-            # 扫描无法从文件名获取真实页数，page_count 无法可靠得到，新记录保持 0
-            page_count=existing.page_count if existing is not None else 0,
-            status=status,
-        )
-
-        # 目标 schema 一漫画只保留一个最终 PDF；多文件旧数据取最后扫描到的候选。
-        for file_path in entry.files[-1:]:
-            repo.add_file(entry.manga_id, file_path)
-
-        # 若本次扫描联网补全了标签，同步写入标签表
-        if not dry_run and tag_repo is not None and entry.tags:
-            for file_path in entry.files[-1:]:
-                for tag in entry.tags.split(","):
-                    tag = tag.strip()
-                    if tag:
-                        tag_repo.add_for_existing_manga(tag, entry.manga_id)
+        if existing is None or detail["changes"] or file_changed:
+            repo.upsert(manga_id=entry.manga_id, **fields)
+        if entry.remote_metadata is not None:
+            repo.update_scan_metadata(entry.manga_id, entry.remote_metadata)
+        if file_changed:
+            repo.add_file(entry.manga_id, selected, page_count=actual_pages)
+        # 保留用户自建标签，仅添加在线标签，不静默删除既有标签。
+        if tag_repo is not None and entry.tags:
+            for tag in entry.tags.split(","):
+                if tag.strip():
+                    tag_repo.add_for_existing_manga(tag.strip(), entry.manga_id)
 
     # 清理数据库中文件已不存在的残留记录
     if not dry_run:
@@ -243,6 +341,9 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
     else:
         result.pending_cleanup_count = _count_pending_cleanup(repo, disk_ids)
 
+    for detail in result.details:
+        for change in detail["changes"]:
+            change["label"] = _scan_field_label(change["field"])
     return result
 
 
@@ -263,10 +364,14 @@ def record_scan_result(
         new_count=result.new_count,
         updated_count=result.updated_count,
         missing_count=result.marked_missing_count,
+        error_count=result.enrich_failed
+        + result.chapter_errors
+        + result.page_read_failed
+        + result.skipped_count,
     )
 
 
-def _count_pending_cleanup(repo: MangaRepository, disk_ids: set[str]) -> int:
+def _count_pending_cleanup(repo: MangaRepository, disk_ids: Set[str]) -> int:
     """统计数据库中存在但不在磁盘文件集合中的残留记录数量"""
     db_ids = {manga.id for manga in repo.get_all()}
     return len(db_ids - disk_ids)
@@ -276,42 +381,95 @@ def enrich_metadata_from_jmcomic(
     entries: List[MangaScanEntry],
     option: Optional[Any] = None,
     only_missing: bool = True,
+    check_chapters: bool = False,
 ) -> int:
-    """联网补全扫描条目的作者与标签元数据
+    """通过详情接口补齐站点快照；不下载图片，不修改本地页数或章节数。"""
+    return enrich_entries(entries, option, only_missing, check_chapters)
 
-    通过 jmcomic API 获取每个漫画的作者与标签，写入对应的 MangaScanEntry。
-    联网失败或目标不存在时跳过，不影响扫描结果。
 
-    Args:
-        entries: 扫描到的漫画条目列表（就地修改）
-        option: jmcomic 配置，缺省使用默认配置创建客户端
-        only_missing: 仅处理作者或标签存在空值的条目，成功后同时刷新两项，默认 True
+def _select_scan_file(
+    repo: MangaRepository, entry: MangaScanEntry, warnings: List[str]
+) -> Optional[str]:
+    """重复文件优先保留已登记候选；无法确定最终 PDF 时明确跳过。"""
+    if len(entry.files) == 1:
+        return entry.files[0]
+    files = repo.list_files(entry.manga_id)
+    if repo.download_root is not None and files:
+        registered = (repo.download_root / files[0].relative_path).resolve()
+        for candidate in entry.files:
+            if Path(candidate).resolve() == registered:
+                warnings.append(
+                    "发现重复 PDF，保留已登记文件；候选："
+                    + "、".join(Path(path).name for path in entry.files)
+                )
+                return candidate
+    warnings.append(
+        "发现多个 PDF，无法确定最终文件，本漫画跳过；请整理后重扫："
+        + "、".join(Path(path).name for path in entry.files)
+    )
+    return None
 
-    Returns:
-        int: 成功补全的条目数量
-    """
-    # 延迟导入 jmcomic，避免基础扫描流程（无需联网）加载重量级依赖
-    import jmcomic  # pylint: disable=import-outside-toplevel
 
-    if option is None:
-        option = jmcomic.JmOption.default()
-    client = option.new_jm_client()
+def _read_pdf_pages(path: str) -> int:
+    """使用标准 PDF 解析器读取页树，不渲染图片；失败不写入页数。"""
+    from pypdf import PdfReader  # pylint: disable=import-outside-toplevel
+    from pypdf.errors import PyPdfError  # pylint: disable=import-outside-toplevel
 
-    enriched_count = 0
-    for entry in entries:
-        if only_missing and entry.author and entry.tags:
-            continue
+    try:
+        with open(path, "rb") as stream:
+            reader = PdfReader(stream, strict=True)
+            if reader.is_encrypted:
+                raise ValueError("PDF 已加密，无法确定实际页数")
+            count = len(reader.pages)
+    except PyPdfError as error:
+        raise ValueError(str(error)) from error
+    if count <= 0:
+        raise ValueError("PDF 没有页面")
+    return count
 
-        try:
-            album = client.get_album_detail(entry.manga_id)
-        except Exception as e:  # pylint: disable=broad-exception-caught
-            logger.warning(f"联网获取漫画 {entry.manga_id} 元数据失败，跳过: {e}")
-            continue
 
-        if not entry.title:
-            entry.title = album.name
-        entry.author = ",".join(getattr(album, "authors", []))
-        entry.tags = ",".join(getattr(album, "tags", []))
-        enriched_count += 1
+def _file_changed(
+    repo: MangaRepository, manga_id: str, path: str, pages: Optional[int]
+) -> bool:
+    """预览文件登记的变化，避免将未变化的漫画计为更新。"""
+    files = repo.list_files(manga_id)
+    if not files or repo.download_root is None:
+        return True
+    registered = files[0]
+    return (
+        (repo.download_root / registered.relative_path).resolve()
+        != Path(path).resolve()
+        or registered.file_size_bytes != Path(path).stat().st_size
+        or registered.status != "ready"
+        or (pages is not None and registered.page_count != pages)
+    )
 
-    return enriched_count
+
+def _scan_field_label(name: str) -> str:
+    """预览字段使用中文名称，区分在线来源与本地记录。"""
+    labels = {
+        "title": "标题",
+        "author": "作者",
+        "chapter_count": "本地章节数",
+        "page_count": "本地实际页数",
+        "status": "本地状态",
+        "source": "来源",
+        "authors": "全部作者",
+        "tags": "标签",
+        "description": "简介",
+        "pub_date": "发布日期",
+        "update_date": "更新日期",
+        "works": "相关作品",
+        "actors": "登场人物",
+        "chapters": "章节列表",
+        "chapter_page_count": "逐章图片总数",
+    }
+    if name.startswith("remote."):
+        field_name = name.removeprefix("remote.")
+        remote_labels = {"page_count": "总页数", "chapter_count": "章节数"}
+        return "站点" + (
+            remote_labels[field_name]
+            if field_name in remote_labels
+            else labels[field_name]
+        )
+    return labels[name]
