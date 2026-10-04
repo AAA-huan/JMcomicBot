@@ -9,11 +9,16 @@
 
 ## ⚡ 一键快速部署
 
-先安装 Python 3.12 或更高版本，再使用 PowerShell 运行一键部署脚本：它会检查 Python 版本、检测并安装 git/uv、克隆项目、同步依赖、生成配置并引导填写关键项。
+先安装 Python 3.12 或更高版本，下载 [deploy.bat](https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.bat) 后双击运行，也可在 CMD 中执行：
 
-```powershell
-irm https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.ps1 | iex
+```bat
+curl.exe -fL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.bat -o deploy.bat
+deploy.bat
 ```
+
+脚本会检查 Python 版本、检测并安装 git/uv、克隆项目、同步依赖、生成配置并引导填写关键项。入口使用系统自带的 Windows PowerShell 执行内嵌逻辑，无需单独下载或运行 `.ps1` 文件；运行结束后会暂停，方便查看结果。
+
+可执行 `deploy.bat --check` 仅检查内嵌脚本语法，不安装或启动任何软件。
 
 脚本完成后会打印 NapCat 部署要点。若希望了解手动步骤再操作，可继续阅读下文。
 

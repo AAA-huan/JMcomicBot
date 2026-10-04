@@ -9,10 +9,12 @@
 
 ## ⚡ 一键快速部署
 
-先按下文准备 proot Ubuntu 环境，并安装 Python 3.12 或更高版本，再运行一键部署脚本：它会检查 Python 版本、检测并安装 git/uv、克隆项目、同步依赖、生成配置并引导填写关键项。
+先按下文准备并进入 proot Ubuntu / Debian 环境，再运行专用脚本。无需预先安装系统 Python：脚本检查 uv 内是否有托管 Python 3.12，缺失时由 uv 安装，并由 uv 创建虚拟环境、同步依赖。它还会安装 git/uv、克隆项目、生成配置并引导填写关键项。
+
+脚本会清理继承的 Termux 工具路径和 Python 环境变量，托管 Python 存放在当前用户的 `~/.local/share/uv/python`。请在 Ubuntu / Debian 内执行，不要直接在 Termux 中运行。普通用户须先在该环境安装 `git curl ca-certificates`。
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy-proot.sh | /bin/bash
 ```
 
 脚本完成后会打印 NapCat 部署要点。若希望了解手动步骤再操作，可继续阅读下文。

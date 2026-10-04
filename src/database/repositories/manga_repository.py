@@ -6,7 +6,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
 
-from sqlalchemy import Integer, Select, cast, delete, func, or_, select, update
+from sqlalchemy import Integer, Select, cast, delete, func, or_, select
 from sqlalchemy.orm import selectinload
 
 import os  # pylint: disable=wrong-import-order  # 项目规范要求直接 import 位于 from 导入之后
@@ -407,22 +407,26 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
         with self._get_session() as session:
             return session.get(MangaFile, file_id)
 
-    def update_page_count_if_zero(self, file_id: int, page_count: int) -> bool:
-        """仅在文件页数为 0 时补齐页数，返回是否更新了记录。
-
-        PDF.js 阅读器上报的页数只用于修正缺失值，不覆盖下载或校验写入的
-        可信页数；使用带条件的单条 UPDATE 原子完成，避免并发覆盖竞态。
-        """
+    def update_page_count(self, file_id: int, page_count: int) -> bool:
+        """按阅读器解析的实际页数同步文件和漫画，在一个事务内完成。"""
         if page_count <= 0:
             raise ValueError("PDF页数必须大于 0")
         with self._get_session() as session:
-            result = session.execute(
-                update(MangaFile)
-                .where(MangaFile.id == file_id, MangaFile.page_count == 0)
-                .values(page_count=page_count, updated_at=utc_now())
-            )
-            session.commit()
-            return bool(result.rowcount)
+            manga_file = session.get(MangaFile, file_id)
+            if manga_file is None:
+                return False
+            manga = session.get(Manga, manga_file.manga_id)
+            if manga is None:
+                raise RuntimeError("PDF关联的漫画记录不存在")
+            # 当前 schema 限定一漫画一个最终 PDF，漫画总页数等于文件实际页数。
+            if manga_file.page_count != page_count or manga.page_count != page_count:
+                now = utc_now()
+                manga_file.page_count = page_count
+                manga_file.updated_at = now
+                manga.page_count = page_count
+                manga.updated_at = now
+                session.commit()
+            return True
 
     def list_files(self, manga_id: str) -> List[MangaFile]:
         """查询指定漫画的 PDF 文件记录列表
