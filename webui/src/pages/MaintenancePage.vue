@@ -29,7 +29,7 @@ const error = ref('')
 const actionError = ref('')
 const actionNotice = ref('')
 
-const scanOptions = reactive({ dry_run: false, enrich: false })
+const scanOptions = reactive({ dry_run: false, enrich: false, read_pages: false, check_chapters: false })
 const repairPreview = ref(false)
 const repairResult = ref<RepairResult | null>(null)
 const verifyScope = ref('selected')
@@ -90,7 +90,7 @@ async function runScan(): Promise<void> {
   actionNotice.value = ''
   scanLoading.value = true
   try {
-    scanResult.value = await scanLibrary({ ...scanOptions })
+    scanResult.value = await scanLibrary({ ...scanOptions, check_chapters: scanOptions.enrich && scanOptions.check_chapters })
   } catch (err) {
     actionError.value = errorMessage(err)
   } finally {
@@ -200,7 +200,9 @@ onMounted(() => {
             对比磁盘上的漫画文件与数据库记录，补录新文件并标记缺失记录。适合在手动增删文件后运行。
           </p>
           <v-checkbox v-model="scanOptions.dry_run" label="仅预览，不写入数据库" hide-details :disabled="scanLoading" />
-          <v-checkbox v-model="scanOptions.enrich" label="联网补全作者和标签" hide-details :disabled="scanLoading" />
+          <v-checkbox v-model="scanOptions.enrich" label="联网补全漫画详情与站点章节/页数" hide-details :disabled="scanLoading" />
+          <v-checkbox v-model="scanOptions.read_pages" label="读取本地 PDF 实际页数" hide-details :disabled="scanLoading" />
+          <v-checkbox v-model="scanOptions.check_chapters" label="逐章查询在线图片数量（增加网络请求）" hide-details :disabled="scanLoading || !scanOptions.enrich" />
           <p v-if="scanOptions.enrich" class="text-caption text-medium-emphasis mb-3">联网补全会访问漫画站点，预览模式下也会读取网络元数据。</p>
           <div>
             <v-btn
@@ -221,6 +223,14 @@ onMounted(() => {
               <div class="text-body-2">扫描文件：{{ scanResult.scanned_files }}</div>
               <div class="text-body-2">识别漫画：{{ scanResult.manga_count }}</div>
               <div class="text-body-2">新增：{{ scanResult.new_count }}，更新：{{ scanResult.updated_count }}</div>
+              <div class="text-body-2">无需更新：{{ scanResult.unchanged_count }}，跳过：{{ scanResult.skipped_count }}，重复文件漫画：{{ scanResult.duplicate_count }}</div>
+              <div class="text-body-2">在线详情成功/失败：{{ scanResult.enrich_succeeded }}/{{ scanResult.enrich_failed }}，PDF 读取失败：{{ scanResult.page_read_failed }}，章节查询失败：{{ scanResult.chapter_errors }}</div>
+              <details v-for="item in scanResult.details" :key="item.manga_id" class="mt-2">
+                <summary>漫画 {{ item.manga_id }} · {{ item.file ?? '未选择文件' }} · {{ item.changes.length }} 项变化</summary>
+                <p v-if="item.error">处理失败：{{ item.error }}</p>
+                <p v-for="warning in item.warnings" :key="warning">{{ warning }}</p>
+                <p v-for="change in item.changes" :key="change.field">{{ change.label }}：{{ JSON.stringify(change.old) }} → {{ JSON.stringify(change.new) }}（{{ change.source }}）</p>
+              </details>
               <div v-if="scanResult.dry_run" class="text-body-2">预览完成，待标记缺失：{{ scanResult.pending_cleanup_count }}（未写入数据库）</div>
               <div v-else class="text-body-2">标记缺失：{{ scanResult.marked_missing_count }}</div>
             </v-sheet>

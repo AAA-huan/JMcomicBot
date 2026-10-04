@@ -172,8 +172,8 @@ def test_progress_fills_zero_page_count(db_manager) -> None:
     assert stored.page_count == 12
 
 
-def test_progress_does_not_overwrite_existing_page_count(db_manager) -> None:
-    """文件已有可信页数时上报不同页数不得覆盖。"""
+def test_progress_corrects_existing_page_count(db_manager) -> None:
+    """阅读器解析的实际页数应纠正文件和漫画的旧页数。"""
     client, root = _make_client(db_manager)
     file_id = _add_manga_with_pdf(db_manager, root, page_count=10)
 
@@ -188,7 +188,8 @@ def test_progress_does_not_overwrite_existing_page_count(db_manager) -> None:
     manga_repo = MangaRepository(db_manager, download_root=str(root))
     stored = manga_repo.get_file(file_id)
     assert stored is not None
-    assert stored.page_count == 10
+    assert stored.page_count == 12
+    assert manga_repo.get("100").page_count == 12
 
 
 def test_progress_update_is_idempotent(db_manager) -> None:
@@ -239,3 +240,58 @@ def test_progress_percent_boundaries(db_manager) -> None:
 
     assert first_page.json()["percent"] == 0.125
     assert last_page.json()["percent"] == 1.0
+
+
+def test_page_count_sync_without_creating_progress(db_manager) -> None:
+    """只打开首页即可纠正页数，并且不创建或覆盖阅读历史。"""
+    client, root = _make_client(db_manager)
+    file_id = _add_manga_with_pdf(db_manager, root, page_count=10)
+    with client:
+        setup_and_login(client)
+        headers = csrf_headers(client)
+        response = client.put(
+            f"/api/v1/files/{file_id}/page-count",
+            json={"page_count": 12},
+            headers=headers,
+        )
+        progress = client.get(f"/api/v1/files/{file_id}/progress").json()
+        assert response.status_code == 200
+        assert progress["page_count"] == 12
+        assert progress["updated_at"] is None
+        client.put(
+            f"/api/v1/files/{file_id}/progress",
+            json={"page_number": 5, "page_count": 12},
+            headers=headers,
+        )
+        before = client.get(f"/api/v1/files/{file_id}/progress").json()
+        client.put(
+            f"/api/v1/files/{file_id}/page-count",
+            json={"page_count": 13},
+            headers=headers,
+        )
+        assert client.get(f"/api/v1/files/{file_id}/progress").json() == before
+        assert (
+            client.put(
+                f"/api/v1/files/{file_id}/page-count",
+                json={"page_count": 0},
+                headers=headers,
+            ).status_code
+            == 400
+        )
+        assert (
+            client.put(
+                "/api/v1/files/999999/page-count",
+                json={"page_count": 13},
+                headers=headers,
+            ).status_code
+            == 404
+        )
+        assert (
+            client.put(
+                f"/api/v1/files/{file_id}/page-count", json={"page_count": 13}
+            ).status_code
+            == 403
+        )
+    repository = MangaRepository(db_manager, download_root=str(root))
+    assert repository.get_file(file_id).page_count == 13
+    assert repository.get("100").page_count == 13

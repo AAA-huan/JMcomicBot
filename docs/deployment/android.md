@@ -1,264 +1,98 @@
-# Android 部署
+# Android 部署（Termux + proot）
 
-## 📋 环境要求
+## 环境要求
 
-- 📱 **Android 7.0+ 系统（推荐）**
-- 💾 至少 4GB 可用存储空间（Ubuntu系统需要更多空间）
-- 🐍 Python >= 3.12
-- 🌐 稳定的网络连接
+- 能运行当前 Termux 软件包的 Android 设备，官方完整软件包支持 Android 7 或更高版本。
+- 可访问软件源、GitHub、Python 包索引和 Python 下载源的网络。
+- 能容纳 Ubuntu / Debian、Python 环境和漫画文件的存储空间。
 
-## ⚡ 一键快速部署
+本项目的 Android 机器人部署流程在 **proot 内的 Ubuntu / Debian** 执行，Python 全部交给 uv 管理。无需在 Termux 或系统发行版里预先安装 Python、pip、`python3-dev`、`python3-venv`、`build-essential`、`vim`、`screen`。这些工具不列为机器人部署前提。
 
-先按下文准备 proot Ubuntu 环境，并安装 Python 3.12 或更高版本，再运行一键部署脚本：它会检查 Python 版本、检测并安装 git/uv、克隆项目、同步依赖、生成配置并引导填写关键项。
+## 1. 在 Termux 准备 proot
+
+从 [Termux 官方安装说明](https://github.com/termux/termux-app#installation) 获取 Termux；已有可用环境可直接继续。本文不要求安装其他 Termux 衍生版本，也不要求先执行完整系统升级。
+
+以下命令在 **Termux** 中执行：
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.sh | bash
-```
-
-脚本完成后会打印 NapCat 部署要点。若希望了解手动步骤再操作，可继续阅读下文。
-
-NapCat 与机器人同机时，在脚本中只需填写 WebSocket 服务端端口（如 `3001`，有效范围 `1–65535`），脚本会写入 `NAPCAT_WS_URL=ws://localhost:3001/qq`。远端部署或自定义路径可填写完整 `ws://` / `wss://` 地址。手动编辑 `.env` 时仍须使用完整地址。
-
-已有的纯端口配置会自动转换；有效地址会保留，模板或非法地址会重新询问。输入结束或代码更新失败时脚本会中止，处理原因后可重新运行。
-
-> 脚本支持重复运行：再次执行等同于「拉取最新代码 + 同步依赖」，不会覆盖已填写的 `.env` / `option.yml`。
-
-## 🚀 部署步骤
-
-### 第一步：安装 Termux 和 proot
-
-1. **安装 Termux**
-   - 从 [F-Droid](https://f-droid.org/packages/com.termux/) 或 Google Play 安装 Termux
-   - 或者下载 Termux APK 文件手动安装
-   - 或者前往[ZeroTermux-Github](https://github.com/hanxinhao000/ZeroTermux/releases/tag/release)下载ZeroTermux.apk安装(推荐)
-
-2. **换源**
-   1. 如果下载的是原版termux，换源请前往短视频平台搜索教程，这里不过多赘述。
-   2. 如果下载的是ZeroTermux，双击屏幕左侧边缘（部分ZT版本是按音量上/下键），下滑并点击"切换源"，随意选择，推荐选择清华源，等待脚本运行完成， 如无特殊说明，当出现 (Y/I/N/O/D/Z)[default=?] 或 [Y/N] 时，直接点击回车，选择默认选项即可。
-
-3. **配置 Termux 并安装 proot**
-   ```bash
-   # 更新包管理器
-   pkg update && pkg upgrade
-   
-   # 安装 proot-distro（更简单的Ubuntu安装方式）
-   pkg install proot-distro -y
-   ```
-
-### 第二步：安装 Ubuntu 系统
-
-1. **使用 proot-distro 安装 Ubuntu**
-   ```bash
-   # 安装 Ubuntu 系统
-   proot-distro install ubuntu
-   
-   # 登录 Ubuntu 系统
-   proot-distro login ubuntu
-   ```
-
-2. **用户账户配置（可选但推荐）**
-   直接使用root用户操作所有命令可能有安全风险，建议创建一个普通用户账户：
-   
-**配置说明：**
-   - 创建非root用户可以提高安全性，避免误操作
-   - 添加sudo权限允许用户执行管理员命令
-   - 密码输入时不显示是正常现象
-   - 输入两次密码之后全部回车即可
-   - 建议使用有意义的用户名，如 `jmbot`
-
-      ```bash
-      # 创建用户账户（将 username 替换为你的用户名）
-      adduser username
-      
-      # 添加sudo权限
-      usermod -aG sudo username
-      
-      # 切换到新用户
-      su username
-      
-      # 验证用户权限
-      sudo whoami
-      ```
-   
-
-3. **配置 Ubuntu 系统**
-   ```bash
-   # 更新包管理器
-   apt update && apt upgrade -y
-   
-   # 安装必要工具
-   apt install sudo vim git python3-dev python3-venv build-essential screen curl python3-pip
-   ```
-
-### 第三步：在 Ubuntu 中部署机器人
-
-1. **获取项目文件**
-   ```bash
-   # 切换到用户主目录
-   cd ~
-
-   # 创建项目目录
-   mkdir JMBot
-   cd ~/JMBot
-   
-   # 使用Git克隆项目
-   git clone https://github.com/AAA-huan/JMcomicBot.git .
-   # 注意：使用.参数表示将代码克隆到当前JMBot目录，不会创建额外的子目录
-   ```
-
-2. **安装 uv**
-   [uv](https://docs.astral.sh/uv/) 是 Python 包与环境管理器，可自动创建虚拟环境、按 `uv.lock` 安装依赖并运行程序，省去手动 `venv` 与 `pip` 步骤：
-   ```bash
-   curl -LsSf https://astral.sh/uv/install.sh | sh
-   ```
-
-3. **安装项目依赖**
-   ```bash
-   # 在项目目录内执行（自动创建 .venv 并按 uv.lock 安装依赖）
-   uv sync
-   ```
-
-4. **配置环境变量**
-   ```bash
-   # 复制漫画下载配置
-   cp option_example.yml option.yml
-
-   # 复制配置文件
-   cp .env.example .env
-   ```
-
-   **编辑配置文件**
-   ```bash
-   # 使用编辑器打开配置文件
-   vim .env
-   ```
-
-   修改以下配置：
-   ```ini
-   # 必须修改的只有NAPCAT_WS_URL的port
-   # 其他配置根据实际情况修改即可
-
-   # WebSocket服务端配置
-   # 修改port为实际的监听端口
-   NAPCAT_WS_URL=ws://localhost:port/qq
-
-   # API Token配置（可选）
-   # 用于NapCat WebSocket服务的身份验证
-   # 系统会自动将token添加到WebSocket连接URL中
-   NAPCAT_TOKEN=""
-
-   # 漫画下载路径
-   # 可以使用相对路径（如./downloads）或绝对路径（如D:/downloads）
-   MANGA_DOWNLOAD_PATH=./downloads # 默认使用当前目录下的downloads文件夹
-
-   # 黑白名单配置
-   # 群组白名单：允许使用机器人的群聊ID列表，多个ID用逗号分隔
-   # 留空表示不限制（所有群组都可以使用）
-   GROUP_WHITELIST=""
-
-   # 私信白名单：允许使用机器人的用户ID列表，多个ID用逗号分隔
-   # 留空表示不限制（所有用户都可以私信使用）
-   PRIVATE_WHITELIST=""
-
-   # 全局黑名单：任何情况下都禁止使用机器人的用户ID列表，多个ID用逗号分隔
-   # 黑名单优先级高于白名单
-   GLOBAL_BLACKLIST=""
-   # 删除权限名单：允许使用删除功能的用户ID，允许为空，最多只能有一个用户ID
-   DELETE_PERMISSION_USER=""
-
-   # 内存低占用模式
-   # true: 开启低占用模式，下载后立刻发送，发送后3分钟删除，启动时清空下载文件夹
-   # false: 默认模式，保留下载的漫画（默认值）
-   LOW_MEMORY_MODE=false
-
-   # 更多高级配置项（如文件发送速率、批次大小、断线重发超时等）
-   # 请参考项目根目录的 .env.example
-   ```
-5. **创建数据目录**
-   ```bash
-   # 创建下载目录（在当前项目目录下）
-   mkdir -p downloads
-   chmod 755 downloads
-   ```
-
-### 第四步：配置 NapCat
-
-1. **安装 NapCat**
-   ```bash
-   # 安装 NapCat
-   curl -o napcat.sh https://nclatest.znin.net/NapNeko/NapCat-Installer/main/script/install.sh
-   sudo bash napcat.sh --docker n --cli y
-
-   # 打开NapCat
-   sudo napcat
-   ```
-
-2. **配置 WebSocket**
-   - 用方向键和回车键选择
-   - 在 NapCat 中配置 WebSocket 服务端
-   - 确保端口与机器人配置一致
-   - 在最后记得空格勾选启用配置
-   - 配置完成后启动 NapCat
-
-### 第五步：启动机器人
-
-1. **在 Ubuntu 环境中启动**
-   ```bash
-   # 进入项目目录
-   cd ~/JMBot
-
-   # 启动机器人（uv 会自动使用 .venv，无需手动激活虚拟环境）
-   uv run python main.py
-
-   # 停止机器人
-   Ctrl+C
-   ```
-
-### 🔄 六、常态化启动机器人
-
-##### 1. 登录 Ubuntu 系统
-```bash
-# 在 Termux 中登录 Ubuntu
+pkg update
+pkg install proot-distro
+proot-distro install ubuntu:24.04
 proot-distro login ubuntu
-
-# 如果配置了非root用户，切换到该用户
-su username
 ```
 
-##### 2. 启动 NapCat 服务
+安装与登录语法以 [proot-distro 官方文档](https://github.com/termux/proot-distro#quick-start) 为准。已有 Ubuntu 容器时只需登录，不重复安装。较旧版本的安装器可能使用 `proot-distro install ubuntu`；可用 `proot-distro install --help` 核对当前版本。
+
+此后以下机器人部署命令都在 **Ubuntu / Debian 内** 执行。默认 proot 登录的 root 是该环境内的身份，不需要额外创建用户或安装 sudo；若自行使用普通用户，先由有权限的账户准备 Git、curl 和证书，再切换用户部署。
+
+## 2. 一键部署机器人
+
+先在 proot 内准备下载脚本所需的 curl 和 HTTPS 证书：
+
 ```bash
-# 在 Ubuntu 中启动 NapCat 服务
-sudo napcat 
+apt update
+apt install -y curl ca-certificates
+cd ~
+curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy-proot.sh | /bin/bash
 ```
 
-##### 3. 启动机器人
+专用脚本会：
+
+- 清理继承的 Termux 工具路径、动态链接设置和 Python 环境变量。
+- 检测并安装 proot 内的 Git、uv。
+- 检查 uv 内是否有托管 Python 3.12，缺失时由 uv 安装。
+- 克隆或更新 `~/JMcomicBot`，创建虚拟环境、同步运行依赖、准备配置并引导输入 NapCat 地址。
+
+托管 Python 存放在 proot 用户的 `~/.local/share/uv/python`。不要在原生 Termux 中运行这个脚本，也不要用普通 `deploy.sh` 代替；使用 `/bin/bash` 明确选择 proot 内的解释器。普通用户运行前需已具备 `git curl ca-certificates`。
+
+一键脚本不会安装 NapCat。配置与文件共享要求见 [共用配置指南](common.md)。已有 `.env` / `option.yml` 会保留，有效 NapCat 地址保留，模板或非法地址会重新询问。
+
+## 3. 可选的手动部署
+
+在 proot 内安装 Git、curl 和证书：
+
 ```bash
-# 进入项目目录
-cd ~/JMBot
-
-# 启动机器人（uv 会自动使用 .venv，无需手动激活虚拟环境）
-uv run python main.py
-
-# 停止机器人
-Ctrl+C
+apt update
+apt install -y git curl ca-certificates
+curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
-### 进程管理
+按安装器提示加载它给出的环境文件或重新登录 proot，确认 `uv --version` 可用，再执行：
+
 ```bash
-# 查看机器人进程
-ps aux | grep python
-
-# 停止机器人（uv run 最终仍由 python 解释器执行 main.py）
-pkill -f "main.py"
-
-# 退出Ubuntu环境
-exit
+uv python install 3.12
+cd ~
+git clone https://github.com/AAA-huan/JMcomicBot.git
+cd JMcomicBot
+uv sync --no-dev --managed-python --python 3.12
 ```
 
-**推荐设置**
-- 1. 推荐把termux的省电策略更改为：无限制
-- 2. 推荐在进入termux还未登录proot时为termux打开唤醒锁(看到手机上方通知栏显示termux持有唤醒锁即成功)
+如果 `command -v uv` 或 Python 相关路径指向 `/data/data/com.termux/`，先修正 proot 的环境设置，或使用专用一键脚本完成环境检查。手动流程也需要在项目根目录复制 `.env` 和 `option.yml`，见 [共用配置指南](common.md)。
+
+## 4. 配置 NapCat 与日常启动
+
+NapCat 可按 [官方 Android/Termux 部署说明](https://napneko.github.io/guide/boot/Shell) 选择独立的 Termux 安装方式，也可按其当前文档选择适合设备的方式；不要直接照搬桌面 Linux 的 sudo/Docker 安装流程。
+
+机器人和 NapCat 位于不同环境时，双方都必须能读取下载目录，并使用匹配的文件路径；仅能连接 WebSocket 不代表能够发送文件。地址、token 和文件访问说明见 [共用配置指南](common.md)。
+
+日常启动时，在 Termux 先登录 proot：
+
 ```bash
-   termux-wake-lock    # 打开唤醒锁
-   termux-wake-unlock  # 关闭唤醒锁
+proot-distro login ubuntu
 ```
+
+在 proot 内进入项目目录，确认 NapCat 已就绪后启动机器人：
+
+```bash
+cd ~/JMcomicBot
+uv run --no-dev --managed-python --python 3.12 python main.py
+```
+
+按 `Ctrl+C` 停止机器人，`exit` 退出 proot。更新时在项目根目录执行：
+
+```bash
+git pull --ff-only
+uv sync --no-dev --managed-python --python 3.12
+```
+
+按需在 Android 设置中允许 Termux 后台运行、关闭对它的省电限制；Termux 内的 `termux-wake-lock` / `termux-wake-unlock` 可用于管理唤醒锁。这些是长时间运行的可选设置，不需要为首次部署安装会话管理工具。

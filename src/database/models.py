@@ -1,7 +1,7 @@
 """SQLAlchemy ORM 模型定义，对应 SQLite 数据库中的各张表"""
 
 from datetime import datetime, timezone
-from typing import List, Optional
+from typing import Any, Dict, List, Optional
 
 from sqlalchemy import (
     Boolean,
@@ -11,6 +11,7 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     Integer,
+    JSON,
     String,
     Text,
     UniqueConstraint,
@@ -46,6 +47,9 @@ class Manga(Base):
     author: Mapped[str] = mapped_column(String(255), default="", comment="漫画作者")
     description: Mapped[Optional[str]] = mapped_column(
         Text, nullable=True, comment="简介"
+    )
+    remote_metadata: Mapped[Optional[Dict[str, Any]]] = mapped_column(
+        JSON, nullable=True, comment="站点元数据快照，与本地实际页数和章节数分离"
     )
     chapter_count: Mapped[int] = mapped_column(Integer, default=0, comment="章节数")
     page_count: Mapped[int] = mapped_column(Integer, default=0, comment="总页数")

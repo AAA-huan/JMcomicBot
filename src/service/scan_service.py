@@ -1,6 +1,6 @@
 """目录扫描应用服务，供维护脚本与 WebUI 共用扫描入库流程。"""
 
-from dataclasses import dataclass
+from dataclasses import asdict, dataclass
 from typing import Optional
 
 from src.database.repositories import (
@@ -12,6 +12,7 @@ from src.logging.logger_config import logger
 from src.service.contracts import TaskService
 from src.service.operation_context import OperationContext
 from src.utils.manga_scanner import (
+    ScanResult,
     enrich_metadata_from_jmcomic,
     record_scan_result,
     scan_download_dir,
@@ -19,18 +20,12 @@ from src.utils.manga_scanner import (
 )
 
 
-@dataclass(frozen=True)
-class ScanRunResult:  # pylint: disable=too-many-instance-attributes
-    """扫描运行的渠道无关结果。"""
+@dataclass
+class ScanRunResult(ScanResult):
+    """扫描统计与逐条字段差异，供 CLI 和 WebUI 共用。"""
 
-    task_id: Optional[str]
-    scanned_files: int
-    manga_count: int
-    new_count: int
-    updated_count: int
-    marked_missing_count: int
-    pending_cleanup_count: int
-    dry_run: bool
+    task_id: Optional[str] = None
+    dry_run: bool = False
 
 
 class ScanService:  # pylint: disable=too-few-public-methods
@@ -55,13 +50,17 @@ class ScanService:  # pylint: disable=too-few-public-methods
         context: Optional[OperationContext] = None,
         dry_run: bool = False,
         enrich: bool = False,
+        read_pages: bool = False,
+        check_chapters: bool = False,
     ) -> ScanRunResult:
         """扫描下载目录并同步入库；dry_run 只预览不创建任务也不写库。
 
         Args:
             context: 操作来源上下文，缺省按系统来源记录
             dry_run: 仅统计将入库的内容，不创建任务、不写数据库
-            enrich: 扫描后联网补全作者与标签
+            enrich: 联网补全标题、作者、标签、简介与在线快照
+            read_pages: 读取本地 PDF 实际页数
+            check_chapters: 逐章读取在线图片数量，必须同时启用 enrich
 
         Returns:
             ScanRunResult: 扫描与同步统计
@@ -69,6 +68,8 @@ class ScanService:  # pylint: disable=too-few-public-methods
         Raises:
             FileNotFoundError: 下载目录不存在时
         """
+        if check_chapters and not enrich:
+            raise ValueError("逐章检查需要同时启用联网补全")
         operation_context = context or OperationContext.system()
         task = (
             None
@@ -101,10 +102,16 @@ class ScanService:  # pylint: disable=too-few-public-methods
                 )
             if enrich:
                 logger.info("正在联网补全漫画元数据，请稍候……")
-                enriched_count = enrich_metadata_from_jmcomic(entries)
+                enriched_count = enrich_metadata_from_jmcomic(
+                    entries, check_chapters=check_chapters
+                )
                 logger.info(f"联网补全元数据完成：成功补全 {enriched_count} 个漫画")
             result = sync_scanned_to_db(
-                self.manga_repo, entries, dry_run=dry_run, tag_repo=self.tag_repo
+                self.manga_repo,
+                entries,
+                dry_run=dry_run,
+                tag_repo=self.tag_repo,
+                read_pages=read_pages,
             )
             if task_id is not None:
                 # 正式统计落表：path_label 只保存配置名称，不保存绝对路径
@@ -116,19 +123,13 @@ class ScanService:  # pylint: disable=too-few-public-methods
                         "new_count": result.new_count,
                         "updated_count": result.updated_count,
                         "missing_count": result.marked_missing_count,
+                        "failed_count": result.enrich_failed
+                        + result.chapter_errors
+                        + result.skipped_count,
                     },
                     context=operation_context,
                 )
-            return ScanRunResult(
-                task_id=task_id,
-                scanned_files=result.scanned_files,
-                manga_count=result.manga_count,
-                new_count=result.new_count,
-                updated_count=result.updated_count,
-                marked_missing_count=result.marked_missing_count,
-                pending_cleanup_count=result.pending_cleanup_count,
-                dry_run=dry_run,
-            )
+            return ScanRunResult(task_id=task_id, dry_run=dry_run, **asdict(result))
         except Exception as error:
             if task_id is not None:
                 self.operation_task_service.fail(

@@ -10,8 +10,8 @@
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Directive } from 'vue'
 import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 
-import { ApiError } from '@/api/client'
-import { fileDownloadUrl, getReadingProgress } from '@/api/files'
+import { ApiError, errorMessage } from '@/api/client'
+import { fileDownloadUrl, getReadingProgress, updateFilePageCount } from '@/api/files'
 import ReaderToolbar from './ReaderToolbar.vue'
 import {
   createProgressSync,
@@ -49,6 +49,7 @@ const customScale = ref(1)
 const fullscreen = ref(false)
 const progressState = ref<ProgressSyncState>('synced')
 const progressLoadFailed = ref(false)
+const pageCountSyncError = ref('')
 const baseSizes = ref<PageBaseSize[]>([])
 const containerWidth = ref(0)
 const containerHeight = ref(0)
@@ -354,6 +355,16 @@ async function applyProgress(): Promise<void> {
   goToPage(target)
 }
 
+/** 页数在 PDF 加载后立即同步，失败时显示具体错误并允许重试。 */
+async function syncPageCount(): Promise<void> {
+  pageCountSyncError.value = ''
+  try {
+    await updateFilePageCount(fileId, pageCount.value)
+  } catch (syncError) {
+    pageCountSyncError.value = errorMessage(syncError)
+  }
+}
+
 async function reloadProgress(): Promise<void> {
   await applyProgress()
 }
@@ -398,6 +409,7 @@ async function initialize(): Promise<void> {
     return
   }
   pageCount.value = documentProxy.numPages
+  await syncPageCount()
   try {
     baseSizes.value = await loadBaseSizes(documentProxy.numPages)
   } catch (layoutError) {
@@ -459,6 +471,10 @@ onMounted(() => {
     class="reader-root"
     :class="{ 'reader-root--dark': dark }"
   >
+    <v-alert v-if="pageCountSyncError" type="error" variant="tonal" class="ma-2">
+      漫画实际页数同步失败：{{ pageCountSyncError }}
+      <template #append><v-btn variant="text" size="small" @click="syncPageCount">重试</v-btn></template>
+    </v-alert>
     <ReaderToolbar
       :page-number="pageNumber"
       :page-count="pageCount"

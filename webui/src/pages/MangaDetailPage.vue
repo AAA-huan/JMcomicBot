@@ -239,6 +239,9 @@ onMounted(load)
             <v-col cols="12" sm="6">
               <div class="text-caption text-medium-emphasis">章节 / 页数</div>
               <div class="text-body-1">{{ manga.chapter_count }} 章 / {{ manga.page_count }} 页</div>
+              <div v-if="manga.remote_metadata" class="text-caption text-medium-emphasis">
+                站点当前：{{ manga.remote_metadata.chapter_count }} 章 / {{ manga.remote_metadata.page_count ?? '未知' }} 页（与本地文件分别记录）
+              </div>
             </v-col>
             <v-col cols="12" sm="6">
               <div class="text-caption text-medium-emphasis">下载时间</div>

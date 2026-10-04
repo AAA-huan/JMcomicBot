@@ -22,6 +22,8 @@ class ScanRequest(BaseModel):
 
     dry_run: bool = False
     enrich: bool = False
+    read_pages: bool = False
+    check_chapters: bool = False
 
 
 class RepairRequest(BaseModel):
@@ -88,22 +90,19 @@ def create_maintenance_router(
         context = build_operation_context(request, authenticated)
         try:
             result = dependencies.scan_service.run(
-                context, dry_run=body.dry_run, enrich=body.enrich
+                context,
+                dry_run=body.dry_run,
+                enrich=body.enrich,
+                read_pages=body.read_pages,
+                check_chapters=body.check_chapters,
             )
         except FileNotFoundError as error:
             raise ApiError(
                 500, "DOWNLOAD_DIRECTORY_MISSING", "下载目录不存在，请检查配置"
             ) from error
-        return {
-            "task_id": result.task_id,
-            "scanned_files": result.scanned_files,
-            "manga_count": result.manga_count,
-            "new_count": result.new_count,
-            "updated_count": result.updated_count,
-            "marked_missing_count": result.marked_missing_count,
-            "pending_cleanup_count": result.pending_cleanup_count,
-            "dry_run": result.dry_run,
-        }
+        except ValueError as error:
+            raise ApiError(400, "INVALID_SCAN_REQUEST", str(error)) from error
+        return asdict(result)
 
     @router.post("/maintenance/repair")
     def repair_library(
