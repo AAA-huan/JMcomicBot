@@ -145,14 +145,19 @@ function Ensure-Git {
     $winget = Get-Command winget -ErrorAction SilentlyContinue
     if ($winget) {
         winget install --id Git.Git -e --accept-source-agreements --accept-package-agreements
+        if ($LASTEXITCODE -ne 0) {
+            Die "git 安装失败（winget 退出码 $LASTEXITCODE）。可能未获得管理员权限或 UAC 被取消，请以管理员身份运行或手动安装 git。"
+        }
     } else {
         Log-Error "未找到 winget，无法自动安装 git。"
         Log-Info "请前往 https://git-scm.com/downloads 下载并安装 Git（安装时勾选 'Add to PATH'）。"
         Die "请安装 git 后重新运行本脚本。"
     }
-    # 刷新当前会话 PATH
-    $env:Path = [System.Environment]::GetEnvironmentVariable('Path', 'Machine') + ';' +
-                [System.Environment]::GetEnvironmentVariable('Path', 'User')
+    # 刷新当前会话 PATH：合并注册表（Machine + User）与现有会话 PATH，
+    # 避免整体替换丢失 Ensure-Uv 临时加入的 ~\.local\bin（fallback 安装时仅存在于会话 PATH）。
+    $machinePath = [System.Environment]::GetEnvironmentVariable('Path', 'Machine')
+    $userPath = [System.Environment]::GetEnvironmentVariable('Path', 'User')
+    $env:Path = "$machinePath;$userPath;$env:Path"
     if (-not (Get-Command git -ErrorAction SilentlyContinue)) {
         Die "git 安装失败，请手动安装后重试"
     }
@@ -250,8 +255,11 @@ function Install-UvFromRelease ([string]$Prefix) {
     Log-Info "尝试源：GitHub Release 二进制（${desc}）"
 
     # 平台资产映射：默认 x64，ARM64 设备用 aarch64
+    # 优先 PROCESSOR_ARCHITEW6432（32 位进程在 64 位系统下的真实架构），避免误判
+    $procArch = $env:PROCESSOR_ARCHITEW6432
+    if (-not $procArch) { $procArch = $env:PROCESSOR_ARCHITECTURE }
     $asset = 'uv-x86_64-pc-windows-msvc.zip'
-    if ($env:PROCESSOR_ARCHITECTURE -eq 'ARM64') {
+    if ($procArch -eq 'ARM64') {
         $asset = 'uv-aarch64-pc-windows-msvc.zip'
     }
     $url = "${Prefix}https://github.com/astral-sh/uv/releases/latest/download/${asset}"
@@ -333,7 +341,7 @@ function Clone-Or-Update {
         if (Test-Path $repoDir) {
             Die ".\$ProjectDirName 已存在但不是 git 仓库，请手动处理后重试"
         }
-        & git clone $RepoUrl $ProjectDirName
+        & git clone "$RepoUrl" $ProjectDirName
         if ($LASTEXITCODE -ne 0) { Die "git clone 失败" }
         Log-Ok "克隆完成"
     }

@@ -13,8 +13,13 @@
 
 将 [deploy.bat](https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.bat) 下载到希望存放项目的目录，双击运行。也可以在该目录的 CMD 中执行：
 
-```bat
+```cmd
+# 官方源
 curl.exe -fL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.bat -o deploy.bat
+deploy.bat
+
+# 加速源
+curl.exe -fL  https://ghproxy.net/https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.bat -o deploy.bat
 deploy.bat
 ```
 
