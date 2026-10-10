@@ -336,15 +336,38 @@ function Clone-Or-Update {
         if ($LASTEXITCODE -ne 0) {
             Die "git pull 失败，部署已中止。请处理网络、本地改动或分叉后重新运行。"
         }
-    } else {
-        Log-Step "克隆项目到 .\$ProjectDirName"
-        if (Test-Path $repoDir) {
-            Die ".\$ProjectDirName 已存在但不是 git 仓库，请手动处理后重试"
-        }
-        & git clone "$RepoUrl" $ProjectDirName
-        if ($LASTEXITCODE -ne 0) { Die "git clone 失败" }
-        Log-Ok "克隆完成"
+        return
     }
+    Log-Step "克隆项目到 .\$ProjectDirName"
+    if (Test-Path $repoDir) {
+        Die ".\$ProjectDirName 已存在但不是 git 仓库，请手动处理后重试"
+    }
+
+    # 候选源：直连 → GitHub 加速代理（按顺序尝试，单源失败切下一个）
+    # 仅使用 GitHub 通用加速代理，不使用清华等只收录大项目的镜像源。
+    $sources = @(
+        $RepoUrl
+        "https://ghproxy.net/$RepoUrl"
+        "https://mirror.ghproxy.com/$RepoUrl"
+    )
+    $cloned = $false
+    foreach ($url in $sources) {
+        Log-Info "尝试克隆源：$url"
+        # 低速超时：30 秒内下载不足 1000 字节即判定失败，避免慢源卡死流程
+        $env:GIT_HTTP_LOW_SPEED_TIME = '30'
+        $env:GIT_HTTP_LOW_SPEED_LIMIT = '1000'
+        & git clone --depth 1 $url $ProjectDirName 2>$null
+        if ($LASTEXITCODE -eq 0) { $cloned = $true; break }
+        Log-Warn "克隆失败，尝试下一个源"
+        if (Test-Path $repoDir) { Remove-Item -Recurse -Force $repoDir -ErrorAction SilentlyContinue }
+    }
+    Remove-Item Env:\GIT_HTTP_LOW_SPEED_TIME -ErrorAction SilentlyContinue
+    Remove-Item Env:\GIT_HTTP_LOW_SPEED_LIMIT -ErrorAction SilentlyContinue
+    if (-not $cloned) { Die "所有克隆源均不可用，请检查网络或手动克隆：$RepoUrl" }
+
+    # 克隆成功后把 remote 改回官方源，保证后续 git pull 优先直连
+    & git -C $repoDir remote set-url origin $RepoUrl 2>$null
+    Log-Ok "克隆完成"
 }
 
 # ============================ Python 环境与依赖 ============================

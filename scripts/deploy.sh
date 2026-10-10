@@ -405,14 +405,37 @@ clone_or_update() {
         if ! git -C "$PROJECT_DIR_NAME" pull --ff-only; then
             die "git pull 失败，部署已中止。请处理网络、本地改动或分叉后重新运行。"
         fi
-    else
-        log_step "克隆项目到 ./$PROJECT_DIR_NAME"
-        if [[ -d "$PROJECT_DIR_NAME" ]]; then
-            die "./$PROJECT_DIR_NAME 已存在但不是 git 仓库，请手动处理后重试"
-        fi
-        git clone "$REPO_URL" "$PROJECT_DIR_NAME"
-        log_ok "克隆完成"
+        return 0
     fi
+    log_step "克隆项目到 ./$PROJECT_DIR_NAME"
+    if [[ -d "$PROJECT_DIR_NAME" ]]; then
+        die "./$PROJECT_DIR_NAME 已存在但不是 git 仓库，请手动处理后重试"
+    fi
+
+    # 候选源：直连 → GitHub 加速代理（按顺序尝试，单源失败切下一个）
+    # 仅使用 GitHub 通用加速代理，不使用清华等只收录大项目的镜像源。
+    local sources=(
+        "$REPO_URL"
+        "https://ghproxy.net/$REPO_URL"
+        "https://mirror.ghproxy.com/$REPO_URL"
+    )
+    local cloned=0 url
+    for url in "${sources[@]}"; do
+        log_info "尝试克隆源：$url"
+        # 低速超时：30 秒内下载不足 1000 字节即判定失败，避免慢源卡死流程
+        if GIT_HTTP_LOW_SPEED_TIME=30 GIT_HTTP_LOW_SPEED_LIMIT=1000 \
+           git clone --depth 1 "$url" "$PROJECT_DIR_NAME" 2>/dev/null; then
+            cloned=1
+            break
+        fi
+        log_warn "克隆失败，尝试下一个源"
+        rm -rf "$PROJECT_DIR_NAME" 2>/dev/null
+    done
+    [[ $cloned -eq 1 ]] || die "所有克隆源均不可用，请检查网络或手动克隆：$REPO_URL"
+
+    # 克隆成功后把 remote 改回官方源，保证后续 git pull 优先直连
+    git -C "$PROJECT_DIR_NAME" remote set-url origin "$REPO_URL" 2>/dev/null
+    log_ok "克隆完成"
 }
 
 # ============================ Python 环境与依赖 ============================
