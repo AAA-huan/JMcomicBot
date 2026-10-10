@@ -31,12 +31,12 @@ proot-distro login ubuntu
 
 ```bash
 # 官方源
-curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.sh | bash
+curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy-proot.sh | bash
 
 # 加速源
-curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.sh | bash
+curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy-proot.sh | bash
 ```
-脚本先检查环境中是否有 Python 3.12+，有则直接使用；没有时检查 uv 已安装的 Python，仍没有则提示并通过 uv 下载 Python 3.12，无需提前安装系统 Python 或 pip。
+termux版部署为防止检测到proot外的python，脚本将严格检测python路径并统一使用uv下载并管理python，python目录在~/.local/share/uv/python
 
 随后脚本会检测并安装 Git、克隆或更新 `./JMcomicBot`、同步运行依赖、准备配置，并引导填写 NapCat 地址等选项。安装 Git 等系统工具时可能需要权限。NapCat 端口推荐使用 3001–3010，回车默认使用 3001；已有有效地址会保留。
 
