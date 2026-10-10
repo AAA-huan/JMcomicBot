@@ -1,6 +1,6 @@
-#!/usr/bin/env bash
+#!/usr/bin/bash
 # ============================================================================
-# JMComicBot 一键部署脚本（Linux / macOS）
+# JMComicBot 一键部署脚本（Linux）
 #
 # 用法：
 #   curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.sh | bash
@@ -26,8 +26,6 @@ set -euo pipefail
 # 支持通过环境变量 JMBOT_REPO_URL 覆盖（便于使用镜像源或本地路径测试）
 REPO_URL="${JMBOT_REPO_URL:-https://github.com/AAA-huan/JMcomicBot.git}"
 PROJECT_DIR_NAME="JMcomicBot"
-REQUIRED_PY_MAJOR=3
-REQUIRED_PY_MINOR=12
 DEPLOY_PYTHON=""
 
 # ============================ 颜色与日志 ============================
@@ -153,20 +151,64 @@ ask_boolean() {
 
 # ============================ 环境准备 ============================
 
+# 检测当前用户能否获得 root 权限，供安装系统软件前判断是否可用 sudo：
+#   输出 "root" —— 已是 root，命令直接执行；
+#   输出 "sudo" —— 可借 sudo 提权（免密，或交互式终端提示输入密码）；
+#   无任何提权途径时输出空字符串并返回 1。
+detect_privilege() {
+    if [[ "$(id -u)" -eq 0 ]]; then
+        printf 'root'
+        return 0
+    fi
+    if ! command -v sudo >/dev/null 2>&1; then
+        return 1
+    fi
+    if sudo -n true >/dev/null 2>&1; then
+        printf 'sudo'
+        return 0
+    fi
+    # 非免密 sudo：区分"需要输入密码"（可用）与"不在 sudoers"（真正无权限）
+    local err
+    err=$(sudo -n true 2>&1 || true)
+    if [[ "$err" == *"sudoers"* ]]; then
+        return 1
+    fi
+    printf 'sudo'
+    return 0
+}
+
+# 以 root / sudo 方式执行命令：提权方式由 detect_privilege 的结果指定
+run_privileged() {
+    local mode="$1"; shift
+    if [[ "$mode" == "root" ]]; then
+        "$@"
+    else
+        sudo "$@"
+    fi
+}
+
 ensure_git() {
     if command -v git >/dev/null 2>&1; then
         log_ok "git 已安装：$(git --version)"
         return 0
     fi
     log_info "未检测到 git，尝试自动安装..."
+
+    # 先检测提权途径，无 root / sudo 权限时立即精确报错，避免安装中途失败
+    local priv
+    priv=$(detect_privilege) || die "当前用户既不是 root 也无法使用 sudo，无法自动安装 git，请以 root 运行或手动安装 git"
+    if [[ "$priv" == "sudo" ]]; then
+        log_info "将使用 sudo 安装（如提示输入密码，请输入当前用户密码）"
+    fi
+
     if command -v apt-get >/dev/null 2>&1; then
-        sudo apt-get update -y && sudo apt-get install -y git
+        run_privileged "$priv" apt-get update -y && run_privileged "$priv" apt-get install -y git
     elif command -v dnf >/dev/null 2>&1; then
-        sudo dnf install -y git
+        run_privileged "$priv" dnf install -y git
     elif command -v yum >/dev/null 2>&1; then
-        sudo yum install -y git
+        run_privileged "$priv" yum install -y git
     elif command -v pacman >/dev/null 2>&1; then
-        sudo pacman -S --noconfirm git
+        run_privileged "$priv" pacman -S --noconfirm git
     elif command -v brew >/dev/null 2>&1; then
         brew install git
     else
@@ -186,8 +228,8 @@ find_system_python() {
         major=${ver%%.*}
         rest=${ver#*.}
         minor=${rest%%.*}
-        if [[ "$major" -gt "$REQUIRED_PY_MAJOR" ]] || \
-           { [[ "$major" -eq "$REQUIRED_PY_MAJOR" ]] && [[ "$minor" -ge "$REQUIRED_PY_MINOR" ]]; }; then
+        if [[ "$major" -gt 3 ]] || \
+           { [[ "$major" -eq 3 ]] && [[ "$minor" -ge 12 ]]; }; then
             "$cmd" -c 'import sys;print(sys.executable)'
             return 0
         fi
@@ -211,12 +253,12 @@ ensure_python() {
         ensure_uv
         return 0
     fi
-    log_info "未找到系统 Python ${REQUIRED_PY_MAJOR}.${REQUIRED_PY_MINOR}+，检查 uv 中的 Python。"
+    log_info "未找到系统 Python 3.12+，检查 uv 中的 Python。"
     ensure_uv
-    if ! py=$(uv python find --managed-python --no-project --no-python-downloads ">=${REQUIRED_PY_MAJOR}.${REQUIRED_PY_MINOR}" 2>/dev/null); then
-        log_info "没有可用的 Python，将通过 uv 下载 Python ${REQUIRED_PY_MAJOR}.${REQUIRED_PY_MINOR}，无需手动安装。"
-        uv python install "${REQUIRED_PY_MAJOR}.${REQUIRED_PY_MINOR}" || die "uv 安装 Python 失败，部署中止。"
-        py=$(uv python find --managed-python --no-project --no-python-downloads ">=${REQUIRED_PY_MAJOR}.${REQUIRED_PY_MINOR}") || die "uv 安装后未找到可用 Python。"
+    if ! py=$(uv python find --managed-python --no-project --no-python-downloads ">=3.12" 2>/dev/null); then
+        log_info "没有可用的 Python，将通过 uv 下载 Python 3.12，无需手动安装。"
+        uv python install "3.12" || die "uv 安装 Python 失败，部署中止。"
+        py=$(uv python find --managed-python --no-project --no-python-downloads ">=3.12") || die "uv 安装后未找到可用 Python。"
     fi
     DEPLOY_PYTHON="$py"
     "$py" --version || die "uv 中的 Python 无法运行。"

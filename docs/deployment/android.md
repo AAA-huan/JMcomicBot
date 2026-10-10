@@ -10,14 +10,14 @@
 
 ## 1. 在 Termux 准备 proot
 
-从 [Termux 官方安装说明](https://github.com/termux/termux-app#installation) 获取 Termux；已有可用环境可直接继续。本文不要求安装其他 Termux 衍生版本，也不要求先执行完整系统升级。
+推荐使用ZeroTermux，从 [ZeroTermux GitHub仓库](https://github.com/hanxinhao000/ZeroTermux) 获取 Termux；已有可用环境可直接继续。
 
 以下命令在 **Termux** 中执行：
 
 ```bash
 pkg update
 pkg install proot-distro
-proot-distro install ubuntu:24.04
+proot-distro install ubuntu
 proot-distro login ubuntu
 ```
 
@@ -27,23 +27,18 @@ proot-distro login ubuntu
 
 ## 2. 一键部署机器人
 
-先在 proot 内准备下载脚本所需的 curl 和 HTTPS 证书：
+在希望存放项目的父目录执行：
 
 ```bash
-apt update
-apt install -y curl ca-certificates
-cd ~
-curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy-proot.sh | /bin/bash
+# 官方源
+curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.sh | bash
+
+# 加速源
+curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.sh | bash
 ```
+脚本先检查环境中是否有 Python 3.12+，有则直接使用；没有时检查 uv 已安装的 Python，仍没有则提示并通过 uv 下载 Python 3.12，无需提前安装系统 Python 或 pip。
 
-专用脚本会：
-
-- 清理继承的 Termux 工具路径、动态链接设置和 Python 环境变量。
-- 检测并安装 proot 内的 Git、uv。
-- 检查 uv 内是否有托管 Python 3.12，缺失时提示并由 uv 下载，不使用 Termux 或发行版里的系统 Python。
-- 克隆或更新 `~/JMcomicBot`，创建虚拟环境、同步运行依赖、准备配置并引导输入 NapCat 地址。
-
-托管 Python 存放在 proot 用户的 `~/.local/share/uv/python`。不要在原生 Termux 中运行这个脚本，也不要用普通 `deploy.sh` 代替；使用 `/bin/bash` 明确选择 proot 内的解释器。普通用户运行前需已具备 `git curl ca-certificates`。
+随后脚本会检测并安装 Git、克隆或更新 `./JMcomicBot`、同步运行依赖、准备配置，并引导填写 NapCat 地址等选项。安装 Git 等系统工具时可能需要权限。NapCat 端口推荐使用 3001–3010，回车默认使用 3001；已有有效地址会保留。
 
 一键脚本不会安装 NapCat。配置与文件共享要求见 [共用配置指南](common.md)。已有 `.env` / `option.yml` 会保留，有效 NapCat 地址保留，模板或非法地址会重新询问。
 
@@ -51,11 +46,11 @@ NapCat 端口推荐使用 3001–3010，回车默认使用 3001。如果 NapCat 
 
 ## 3. 可选的手动部署
 
-在 proot 内安装 Git、curl 和证书：
+在 proot 内安装 Git和uv：
 
 ```bash
 apt update
-apt install -y git curl ca-certificates
+apt install -y git
 curl -LsSf https://astral.sh/uv/install.sh | sh
 ```
 
@@ -87,7 +82,7 @@ proot-distro login ubuntu
 
 ```bash
 cd ~/JMcomicBot
-uv run --no-dev --managed-python --python 3.12 python main.py
+uv run python main.py
 ```
 
 按 `Ctrl+C` 停止机器人，`exit` 退出 proot。更新时在项目根目录执行：

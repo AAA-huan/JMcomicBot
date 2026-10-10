@@ -14,7 +14,11 @@
 在希望存放项目的父目录执行：
 
 ```bash
+# 官方源
 curl -fsSL https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.sh | bash
+
+# 加速源（ghproxy 镜像）
+curl -fsSL https://ghproxy.net/https://raw.githubusercontent.com/AAA-huan/JMcomicBot/main/scripts/deploy.sh | bash
 ```
 
 若缺少 curl，Ubuntu / Debian 可先执行：
@@ -59,7 +63,7 @@ uv 可以安装 Python 并创建项目虚拟环境，无需另装系统 Python�
 按 [共用配置指南](common.md) 复制 `.env`、`option.yml`，安装并配置 NapCat，然后启动：
 
 ```bash
-uv run --no-dev --managed-python --python 3.12 python main.py
+uv run python main.py
 ```
 
 按 `Ctrl+C` 停止。后续更新时，在项目根目录执行：
@@ -67,5 +71,5 @@ uv run --no-dev --managed-python --python 3.12 python main.py
 ```bash
 git pull --ff-only
 uv sync --no-dev --managed-python --python 3.12
-uv run --no-dev --managed-python --python 3.12 python main.py
+uv run python main.py
 ```
