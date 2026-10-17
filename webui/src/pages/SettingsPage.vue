@@ -2,7 +2,7 @@
 import { computed, onMounted, ref } from 'vue'
 
 import { errorMessage } from '@/api/client'
-import { listSettings, updateSetting } from '@/api/settings'
+import { getOptionFile, listSettings, updateOptionFile, updateSetting } from '@/api/settings'
 import EmptyState from '@/components/EmptyState.vue'
 import type { SettingValue, SettingView } from '@/types/api'
 import {
@@ -25,6 +25,14 @@ const editSensitive = ref(false)
 const editValue = ref<SettingValue>(null)
 const editError = ref('')
 const saving = ref(false)
+
+// option.yml 编辑器状态
+const optionContent = ref('')
+const optionLoading = ref(false)
+const optionSaving = ref(false)
+const optionError = ref('')
+const optionNotice = ref('')
+const optionDirty = ref(false)
 
 /** 按注册表顺序分组，保持后端返回的分组顺序。 */
 const groups = computed(() => {
@@ -49,9 +57,40 @@ async function load(): Promise<void> {
   }
 }
 
+async function loadOption(): Promise<void> {
+  optionLoading.value = true
+  optionError.value = ''
+  try {
+    const result = await getOptionFile()
+    optionContent.value = result.content
+    optionDirty.value = false
+  } catch (err) {
+    optionError.value = errorMessage(err)
+  } finally {
+    optionLoading.value = false
+  }
+}
+
+async function saveOption(): Promise<void> {
+  optionSaving.value = true
+  optionError.value = ''
+  optionNotice.value = ''
+  try {
+    const result = await updateOptionFile(optionContent.value)
+    optionContent.value = result.content
+    optionDirty.value = false
+    optionNotice.value = 'option.yml 已保存，下一个下载任务即生效（无需重启）'
+  } catch (err) {
+    optionError.value = errorMessage(err)
+  } finally {
+    optionSaving.value = false
+  }
+}
+
 function displayValue(item: SettingView): string {
-  if (item.sensitive) return item.is_set ? '已设置' : '未设置'
-  if (item.value === null || item.value === undefined || item.value === '') return '—'
+  if (item.value === null || item.value === undefined || item.value === '') {
+    return item.sensitive ? '未设置' : '—'
+  }
   if (item.value_type === 'bool') return item.value ? '开启' : '关闭'
   return String(item.value)
 }
@@ -62,7 +101,7 @@ function openEdit(item: SettingView): void {
   editValueType.value = item.value_type
   editEffect.value = item.effect
   editSensitive.value = item.sensitive
-  editValue.value = item.sensitive ? '' : item.value
+  editValue.value = item.value
   editError.value = ''
   editDialog.value = true
 }
@@ -105,7 +144,10 @@ async function saveSetting(): Promise<void> {
   }
 }
 
-onMounted(load)
+onMounted(() => {
+  void load()
+  void loadOption()
+})
 </script>
 
 <template>
@@ -208,11 +250,55 @@ onMounted(load)
       </v-list>
     </v-card>
 
-    <v-card class="pa-4">
-      <div class="text-subtitle-2 mb-1">其他配置</div>
-      <div class="text-body-2 text-medium-emphasis">
-        NapCat 令牌等敏感项只显示是否已设置，不在页面回显；下载路径、数据库路径与监听地址需要重启机器人后生效；下载器的 option.yml 仍由文件维护。
-      </div>
+    <v-card class="mb-4">
+      <v-card-title class="text-subtitle-1">下载器配置（option.yml）</v-card-title>
+      <v-divider />
+      <v-card-text>
+        <v-alert
+          v-if="optionError"
+          type="error"
+          variant="tonal"
+          density="comfortable"
+          class="mb-3"
+        >
+          {{ optionError }}
+        </v-alert>
+        <v-alert
+          v-if="optionNotice"
+          type="success"
+          variant="tonal"
+          density="comfortable"
+          closable
+          class="mb-3"
+          @click:close="optionNotice = ''"
+        >
+          {{ optionNotice }}
+        </v-alert>
+        <p class="text-body-2 text-medium-emphasis mb-2">
+          jmcomic 下载器配置；保存后下一个下载任务即生效，无需重启。img2pdf 与进度插件由程序自动注入并覆盖关键项。
+        </p>
+        <v-textarea
+          v-model="optionContent"
+          :loading="optionLoading"
+          rows="14"
+          auto-grow
+          spellcheck="false"
+          class="font-monospace"
+          :style="{ fontFamily: 'monospace' }"
+          placeholder="download:\n  image:\n    suffix: .jpg"
+          @update:model-value="optionDirty = true"
+        />
+        <div v-if="optionDirty" class="text-caption text-medium-emphasis">
+          有未保存的改动
+        </div>
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn variant="text" :disabled="optionSaving" @click="loadOption">重新加载</v-btn>
+        <v-btn color="primary" :loading="optionSaving" :disabled="!optionDirty" @click="saveOption">
+          保存
+        </v-btn>
+      </v-card-actions>
     </v-card>
 
     <v-dialog v-model="editDialog" max-width="480">
@@ -246,10 +332,9 @@ onMounted(load)
           <v-text-field
             v-else
             v-model="editValue"
-            :type="editSensitive ? 'password' : 'text'"
-            :hint="editSensitive ? '敏感值不回显，请输入新值；令牌留空可清除' : undefined"
+            type="text"
+            hint="令牌留空可清除（NAPCAT_TOKEN、WEBUI_DEV_ORIGINS 允许空值）"
             persistent-hint
-            autocomplete="new-password"
             label="新值"
           />
           <div class="text-caption text-medium-emphasis mt-3">

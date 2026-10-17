@@ -260,8 +260,8 @@ def test_permission_endpoints_with_cached_identities(db_manager) -> None:
     assert removed_again.json()["changed"] is False
 
 
-def test_setting_endpoints_mask_and_update(db_manager) -> None:
-    """设置接口应遮蔽敏感值，并拒绝只读、未知与非法值。"""
+def test_setting_endpoints_return_plaintext_and_update(db_manager) -> None:
+    """设置接口明文返回敏感值，并拒绝未知与非法值。"""
     client, context = _make_client(
         db_manager,
         config_dict={"NAPCAT_TOKEN": "super-secret", "FILE_SEND_INTERVAL": 1.8},
@@ -276,9 +276,10 @@ def test_setting_endpoints_mask_and_update(db_manager) -> None:
             json={"value": 2.5},
             headers=headers,
         )
-        readonly = client.patch(
+        # 敏感项明文返回，保留 is_set 标记
+        sensitive_update = client.patch(
             "/api/v1/settings/NAPCAT_TOKEN",
-            json={"value": "leak"},
+            json={"value": "new-secret"},
             headers=headers,
         )
         unknown = client.patch(
@@ -291,20 +292,19 @@ def test_setting_endpoints_mask_and_update(db_manager) -> None:
         )
 
     assert listing.status_code == 200
-    assert "super-secret" not in listing.text
     token_view = next(
         item for item in listing.json()["items"] if item["key"] == "NAPCAT_TOKEN"
     )
     assert token_view["sensitive"] is True
-    assert token_view["value"] is None
+    assert token_view["value"] == "super-secret"
     assert token_view["is_set"] is True
     assert updated.status_code == 200
     assert updated.json()["value"] == 2.5
     assert context.applied_settings["FILE_SEND_INTERVAL"] == 2.5
-    assert readonly.status_code == 200
-    assert readonly.json()["value"] is None
-    assert readonly.json()["restart_required"] is True
-    assert "leak" not in readonly.text
+    # 敏感项修改后明文返回新值，标记待重启
+    assert sensitive_update.status_code == 200
+    assert sensitive_update.json()["value"] == "new-secret"
+    assert sensitive_update.json()["restart_required"] is True
     assert unknown.status_code == 404
     assert unknown.json()["code"] == "SETTING_NOT_FOUND"
     assert invalid.status_code == 400

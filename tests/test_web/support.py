@@ -33,6 +33,7 @@ from src.service import (
     DownloadQueueService,
     MangaService,
     OperationTaskService,
+    OptionFileService,
     PermissionService,
     ReadingProgressService,
     RepairService,
@@ -216,6 +217,10 @@ def build_web_context(  # pylint: disable=too-many-locals
             UserGroupRepository(db_manager),
         ),
         settings_service=settings_service,
+        option_file_service=OptionFileService(
+            option_file_path=str(download_root / "option.yml"),
+            audit_repository=audit_repo,
+        ),
         database_maintenance_service=DatabaseMaintenanceService(
             db_manager,
             task_service,

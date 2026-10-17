@@ -13,3 +13,14 @@ export function updateSetting(key: string, value: SettingValue): Promise<Setting
     body: { value },
   })
 }
+
+export function getOptionFile(): Promise<{ content: string }> {
+  return apiRequest<{ content: string }>('/settings/option-file')
+}
+
+export function updateOptionFile(content: string): Promise<{ content: string; updated: boolean }> {
+  return apiRequest<{ content: string; updated: boolean }>('/settings/option-file', {
+    method: 'PUT',
+    body: { content },
+  })
+}

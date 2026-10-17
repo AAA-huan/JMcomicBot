@@ -43,6 +43,7 @@ from src.service import (
     MangaService,
     OperationContext,
     OperationTaskService,
+    OptionFileService,
     PermissionService,
     ReadingProgressService,
     RepairService,
@@ -137,6 +138,12 @@ class MangaBot:
         persisted_settings = self.settings_service.load_persisted()
         if persisted_settings:
             logger.info(f"已应用 {persisted_settings} 项数据库动态配置")
+
+        # option.yml 网页编辑服务，路径与 download_manager 的相对路径约定一致
+        self.option_file_service = OptionFileService(
+            option_file_path="option.yml",
+            audit_repository=self.audit_event_repo,
+        )
 
         self.cleanup_service = CleanupService(
             self.operation_task_repo,
@@ -355,6 +362,7 @@ class MangaBot:
                         download_service=self.download_service,
                         permission_service=self.permission_service,
                         settings_service=self.settings_service,
+                        option_file_service=self.option_file_service,
                         database_maintenance_service=self.database_maintenance_service,
                         repair_service=self.repair_service,
                         scan_service=self.scan_service,

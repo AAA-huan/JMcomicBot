@@ -15,6 +15,9 @@ rich>=15.0.0            # 富文本终端支持，jmcomic 下载进度插件依�
 alembic>=1.20.0           # 数据库版本化迁移
 sqlalchemy>=2.0.54      # ORM，SQLite持久化存储
 
+# 配置文件依赖（生产必需）
+pyyaml>=6.0             # option.yml 网页编辑校验与下载器配置解析
+
 # WebUI 后端与认证依赖（生产必需）
 fastapi>=0.118.0        # Web API 框架
 uvicorn>=0.37.0         # ASGI 服务端
