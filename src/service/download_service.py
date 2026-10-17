@@ -12,7 +12,7 @@ from src.service.results import (
 )
 
 # 单次下载请求的漫画数量上限，防止一次提交过多任务
-DOWNLOAD_REQUEST_LIMIT = 20
+DOWNLOAD_REQUEST_LIMIT = 100
 
 
 class DownloadQueueService:
