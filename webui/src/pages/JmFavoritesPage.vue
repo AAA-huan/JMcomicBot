@@ -227,8 +227,8 @@ onBeforeUnmount(() => { disposed = true; if (timer !== undefined) clearTimeout(t
           <v-col cols="12" md="3" class="d-flex align-center"><v-btn variant="tonal" :disabled="loading" @click="applyFilters">查询</v-btn></v-col>
         </v-row>
         <div class="d-flex align-center flex-wrap ga-2 mt-4">
-          <v-btn color="primary" :loading="downloading" :disabled="selectedIds.length === 0 || selectedIds.length > 20" data-testid="jm-download" @click="download">下载所选（{{ selectedIds.length }}）</v-btn>
-          <span class="text-caption text-medium-emphasis">每次最多 20 本，下载后自动关联管理员收藏。</span>
+          <v-btn color="primary" :loading="downloading" :disabled="selectedIds.length === 0 || selectedIds.length > 100" data-testid="jm-download" @click="download">下载所选（{{ selectedIds.length }}）</v-btn>
+          <span class="text-caption text-medium-emphasis">每次最多 100 本，下载后自动关联管理员收藏。</span>
           <v-spacer />
           <v-btn variant="text" to="/tasks">查看任务管理</v-btn>
         </div>

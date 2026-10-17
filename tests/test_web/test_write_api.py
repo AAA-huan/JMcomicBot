@@ -166,7 +166,7 @@ def test_download_request_dedup_and_validation(db_manager) -> None:
         )
         over_limit = client.post(
             "/api/v1/tasks/downloads",
-            json={"manga_ids": [str(100000 + i) for i in range(21)]},
+            json={"manga_ids": [str(100000 + i) for i in range(101)]},
             headers=headers,
         )
 

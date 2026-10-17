@@ -220,8 +220,8 @@ async function requestDownloadIds(ids: string[]): Promise<void> {
     actionError.value = '请输入至少一个漫画 ID'
     return
   }
-  if (ids.length > 20) {
-    actionError.value = '单次最多请求 20 个漫画'
+  if (ids.length > 100) {
+    actionError.value = '单次最多请求 100 个漫画'
     return
   }
   try {

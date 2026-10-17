@@ -6,6 +6,7 @@ from typing import Annotated, Callable, List, Optional
 from fastapi import APIRouter, Depends, Query, Request, status
 from pydantic import BaseModel, Field
 
+from src.service.download_service import DOWNLOAD_REQUEST_LIMIT
 from src.service.web_auth_service import AuthenticatedSession
 from src.web.api.common import build_operation_context
 from src.web.dependencies import WebDependencies
@@ -13,8 +14,8 @@ from src.web.errors import ApiError
 
 AuthenticateCallable = Callable[..., AuthenticatedSession]
 
-# 单次下载请求的漫画数量上限，与下载服务保持一致
-DOWNLOAD_REQUEST_LIMIT = 20
+# 单次下载请求的漫画数量上限，与下载服务保持单一来源（消除两处漂移）
+# DownloadRequest.max_length 直接引用 download_service.DOWNLOAD_REQUEST_LIMIT
 
 
 class DownloadRequest(BaseModel):

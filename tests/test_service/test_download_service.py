@@ -163,11 +163,11 @@ def test_request_rejects_invalid_id() -> None:
 
 
 def test_request_rejects_over_limit() -> None:
-    """单次超过 20 个漫画 ID 应明确报错。"""
+    """单次超过 100 个漫画 ID 应明确报错。"""
     service = _build_service(_DownloadQueue([]))
-    manga_ids = [str(100000 + index) for index in range(21)]
+    manga_ids = [str(100000 + index) for index in range(101)]
 
-    with pytest.raises(ValueError, match="最多请求 20 个"):
+    with pytest.raises(ValueError, match="最多请求 100 个"):
         service.request(manga_ids, OperationContext.qq("10001"))
 
 
