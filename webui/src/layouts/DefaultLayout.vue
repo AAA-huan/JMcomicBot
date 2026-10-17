@@ -19,7 +19,7 @@ const navItems: NavItem[] = [
   { title: '仪表盘', to: '/', icon: 'mdi-view-dashboard-outline' },
   { title: '漫画库', to: '/library', icon: 'mdi-bookshelf' },
   { title: 'JM 收藏导入', to: '/jm-favorites', icon: 'mdi-bookmark-plus-outline' },
-  { title: '下载任务', to: '/tasks', icon: 'mdi-download-outline' },
+  { title: '任务管理', to: '/tasks', icon: 'mdi-download-outline' },
   { title: '权限管理', to: '/permissions', icon: 'mdi-account-lock-outline' },
   { title: '配置', to: '/settings', icon: 'mdi-cog-outline' },
   { title: '文档', to: '/documents', icon: 'mdi-book-open-outline' },

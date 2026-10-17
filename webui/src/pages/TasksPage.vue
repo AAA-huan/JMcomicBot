@@ -5,12 +5,12 @@ import { useDisplay } from 'vuetify'
 
 import { errorMessage } from '@/api/client'
 import { useEventSubscription } from '@/api/eventStream'
-import { cancelQueuedTasks, cancelTask, listTasks, requestDownloads } from '@/api/tasks'
+import { cancelQueuedTasks, cancelTask, listTasks } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { useSystemStore } from '@/stores/system'
 import type { OperationTask } from '@/types/api'
-import { formatDateTime, parseMangaIds } from '@/utils/format'
+import { formatDateTime } from '@/utils/format'
 import {
   colorOf,
   labelOf,
@@ -67,10 +67,6 @@ const cancelLoading = ref(false)
 
 const cancelQueuedDialog = ref(false)
 const cancelQueuedLoading = ref(false)
-
-const downloadDialog = ref(false)
-const downloadInput = ref('')
-const downloadLoading = ref(false)
 
 const downloadQueue = computed(() => system.status?.download_queue ?? null)
 const sendQueue = computed(() => system.status?.send_queue ?? null)
@@ -165,36 +161,6 @@ async function confirmCancelQueued(): Promise<void> {
     cancelQueuedDialog.value = false
   } finally {
     cancelQueuedLoading.value = false
-  }
-}
-
-async function submitDownload(): Promise<void> {
-  const ids = parseMangaIds(downloadInput.value)
-  actionError.value = ''
-  actionNotice.value = ''
-  if (ids.length === 0) {
-    actionError.value = '请输入至少一个漫画 ID'
-    return
-  }
-  if (ids.length > 20) {
-    actionError.value = '单次最多请求 20 个漫画'
-    return
-  }
-  downloadLoading.value = true
-  try {
-    const result = await requestDownloads(ids)
-    const parts = [`已入队 ${result.queued_count} 个`]
-    if (result.duplicate_count > 0) {
-      parts.push(`${result.duplicate_count} 个已有活动任务`)
-    }
-    actionNotice.value = parts.join('，')
-    downloadDialog.value = false
-    downloadInput.value = ''
-    await load()
-  } catch (err) {
-    actionError.value = errorMessage(err)
-  } finally {
-    downloadLoading.value = false
   }
 }
 
@@ -348,14 +314,6 @@ watch(
         >
           取消全部排队
         </v-btn>
-        <v-btn
-          color="primary"
-          variant="tonal"
-          prepend-icon="mdi-plus"
-          @click="downloadDialog = true"
-        >
-          新建下载
-        </v-btn>
         <v-btn icon="mdi-refresh" variant="text" aria-label="刷新" @click="load" />
       </v-card-actions>
     </v-card>
@@ -367,7 +325,7 @@ watch(
         v-if="!loading && tasks.length === 0"
         icon="mdi-clipboard-text-outline"
         title="没有任务记录"
-        description="在漫画库请求下载后，任务会出现在这里。"
+        description="在漫画下载页请求下载后，任务会出现在这里。"
       />
 
       <template v-else>
@@ -516,30 +474,5 @@ watch(
       :loading="cancelQueuedLoading"
       @confirm="confirmCancelQueued"
     />
-
-    <v-dialog v-model="downloadDialog" max-width="480">
-      <v-card>
-        <v-card-title>新建下载请求</v-card-title>
-        <v-card-text>
-          <p class="text-body-2 text-medium-emphasis mb-2">
-            输入一个或多个漫画 ID，用逗号、句号或换行分隔，单次最多 20 个。
-          </p>
-          <v-textarea
-            v-model="downloadInput"
-            label="漫画 ID"
-            rows="3"
-            auto-grow
-            placeholder="例如：350234, 422866"
-          />
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn variant="text" @click="downloadDialog = false">取消</v-btn>
-          <v-btn color="primary" :loading="downloadLoading" @click="submitDownload">
-            请求下载
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
   </div>
 </template>

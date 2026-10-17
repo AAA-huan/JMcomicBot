@@ -44,19 +44,20 @@ test('漫画库搜索、清空与危险操作确认', async ({ page }) => {
   await expect(page.getByText('夜行测试录').first()).toBeVisible()
 })
 
-test('新建下载对话框命中已有任务（不触发真实下载）', async ({ page }) => {
+test('请求已排队漫画返回重复任务（不触发真实下载）', async ({ page }) => {
   await login(page)
-  await page.goto('/tasks')
-
-  await page.getByRole('button', { name: '新建下载' }).click()
-  await expect(page.getByText('新建下载请求')).toBeVisible()
   // 900004 在测试数据中已有一个排队中的下载任务，服务端应返回去重结果，
   // 避免测试触发 jmcomic 的真实联网下载而消耗本机资源
-  await page.getByPlaceholder('例如：350234, 422866').fill('900004')
-  await page.getByRole('button', { name: '请求下载' }).click()
+  const response = await page.request.post('/api/v1/tasks/downloads', {
+    data: { manga_ids: ['900004'] },
+  })
+  expect(response.ok()).toBeTruthy()
+  const body = await response.json()
+  expect(body.queued_count).toBe(0)
+  expect(body.duplicate_count).toBe(1)
 
-  await expect(page.getByText(/已入队 0 个/)).toBeVisible()
-  await expect(page.getByText(/已有活动任务/)).toBeVisible()
+  // 任务管理页应可见该排队任务
+  await page.goto('/tasks')
   await expect(page.getByText('900004').first()).toBeVisible()
 })
 

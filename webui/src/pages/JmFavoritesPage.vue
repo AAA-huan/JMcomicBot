@@ -152,7 +152,7 @@ async function download(): Promise<void> {
   notice.value = ''
   try {
     const result = await requestJmDownloads(selectedIds.value)
-    notice.value = `已加入下载队列 ${result.queued_count} 本，已有任务 ${result.duplicate_count} 本。可在下载任务页查看进度，完成后刷新本页。`
+    notice.value = `已加入下载队列 ${result.queued_count} 本，已有任务 ${result.duplicate_count} 本。可在任务管理页查看进度，完成后刷新本页。`
     selected.value = []
   } catch (err) {
     error.value = errorMessage(err)
@@ -230,7 +230,7 @@ onBeforeUnmount(() => { disposed = true; if (timer !== undefined) clearTimeout(t
           <v-btn color="primary" :loading="downloading" :disabled="selectedIds.length === 0 || selectedIds.length > 20" data-testid="jm-download" @click="download">下载所选（{{ selectedIds.length }}）</v-btn>
           <span class="text-caption text-medium-emphasis">每次最多 20 本，下载后自动关联管理员收藏。</span>
           <v-spacer />
-          <v-btn variant="text" to="/tasks">查看下载任务</v-btn>
+          <v-btn variant="text" to="/tasks">查看任务管理</v-btn>
         </div>
       </v-card-text>
       <v-progress-linear v-if="loading" indeterminate />

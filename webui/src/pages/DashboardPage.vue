@@ -147,7 +147,7 @@ onMounted(() => {
         重连 NapCat
       </v-btn>
       <v-btn variant="tonal" prepend-icon="mdi-bookshelf" to="/library">漫画库</v-btn>
-      <v-btn variant="tonal" prepend-icon="mdi-download-outline" to="/tasks">下载任务</v-btn>
+      <v-btn variant="tonal" prepend-icon="mdi-download-outline" to="/tasks">任务管理</v-btn>
       <v-spacer />
       <v-btn
         variant="tonal"

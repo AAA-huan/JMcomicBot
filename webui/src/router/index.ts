@@ -51,7 +51,7 @@ const router = createRouter({
       path: '/tasks',
       name: 'tasks',
       component: () => import('@/pages/TasksPage.vue'),
-      meta: { title: '下载任务' },
+      meta: { title: '任务管理' },
     },
     {
       path: '/permissions',

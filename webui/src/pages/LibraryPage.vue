@@ -11,7 +11,7 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { useCoverPreview } from '@/stores/coverPreview'
 import type { Manga } from '@/types/api'
-import { formatDateTime, parseMangaIds } from '@/utils/format'
+import { formatDateTime } from '@/utils/format'
 import {
   colorOf,
   labelOf,
@@ -93,10 +93,6 @@ const deleteLoading = ref(false)
 
 const batchDeleteDialog = ref(false)
 const batchDeleteLoading = ref(false)
-
-const downloadDialog = ref(false)
-const downloadInput = ref('')
-const downloadLoading = ref(false)
 
 const selectedCount = computed(() => selected.value.length)
 
@@ -228,7 +224,6 @@ async function requestDownloadIds(ids: string[]): Promise<void> {
     actionError.value = '单次最多请求 20 个漫画'
     return
   }
-  downloadLoading.value = true
   try {
     const result = await requestDownloads(ids)
     const parts = [`已入队 ${result.queued_count} 个`]
@@ -241,13 +236,9 @@ async function requestDownloadIds(ids: string[]): Promise<void> {
       )
     }
     actionNotice.value = parts.join('，')
-    downloadDialog.value = false
-    downloadInput.value = ''
     selected.value = []
   } catch (err) {
     actionError.value = errorMessage(err)
-  } finally {
-    downloadLoading.value = false
   }
 }
 
@@ -471,14 +462,6 @@ watch(
           @click="batchDeleteDialog = true"
         >
           批量删除
-        </v-btn>
-        <v-btn
-          color="primary"
-          variant="tonal"
-          prepend-icon="mdi-plus"
-          @click="downloadDialog = true"
-        >
-          新建下载
         </v-btn>
         <v-btn icon="mdi-refresh" variant="text" aria-label="刷新" @click="load" />
       </v-card-actions>
@@ -731,34 +714,5 @@ watch(
       :loading="batchDeleteLoading"
       @confirm="confirmBatchDelete"
     />
-
-    <v-dialog v-model="downloadDialog" max-width="480">
-      <v-card>
-        <v-card-title>新建下载请求</v-card-title>
-        <v-card-text>
-          <p class="text-body-2 text-medium-emphasis mb-2">
-            输入一个或多个漫画 ID，用逗号、句号或换行分隔，单次最多 20 个。
-          </p>
-          <v-textarea
-            v-model="downloadInput"
-            label="漫画 ID"
-            rows="3"
-            auto-grow
-            placeholder="例如：350234, 422866"
-          />
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn variant="text" @click="downloadDialog = false">取消</v-btn>
-          <v-btn
-            color="primary"
-            :loading="downloadLoading"
-            @click="requestDownloadIds(parseMangaIds(downloadInput))"
-          >
-            请求下载
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
   </div>
 </template>
