@@ -13,11 +13,15 @@ def restart_process(executable: str = "", argv: List[str] | None = None) -> None
 
     Args:
         executable: 解释器路径，缺省取 sys.executable
-        argv: 传给新进程的参数列表（含 argv[0]），缺省取当前 sys.argv
+        argv: 传给新进程的完整参数列表（含 argv[0]，惯例与 os.execv 一致），
+              缺省构造 [sys.executable, *sys.argv]
 
     Raises:
         OSError: execv 失败时直接暴露，由调用方记录并返回非零退出码
     """
     target_executable = executable or sys.executable
-    target_argv = list(argv) if argv is not None else list(sys.argv)
-    os.execv(target_executable, [target_executable, *target_argv])
+    if argv is None:
+        target_argv = [sys.executable, *sys.argv]
+    else:
+        target_argv = list(argv)
+    os.execv(target_executable, target_argv)
