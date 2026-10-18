@@ -592,3 +592,17 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
                     ).all()
                 )
             )
+
+    def total_file_size_bytes(self) -> int:
+        """统计全部就绪 PDF 的总字节数，无文件时返回 0。
+
+        只累加 manga_file.status='ready' 的记录，missing/invalid 不计入，
+        与仪表盘"漫画数量"卡片语义一致（仅展示有效库存）。
+        """
+        with self._get_session() as session:
+            total = session.scalar(
+                select(func.coalesce(func.sum(MangaFile.file_size_bytes), 0)).where(
+                    MangaFile.status == "ready"
+                )
+            )
+            return int(total or 0)

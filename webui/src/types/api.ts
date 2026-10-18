@@ -62,6 +62,7 @@ export interface SystemStatus {
   uptime_seconds: number
   napcat_connected: boolean
   manga_count: number
+  total_size_bytes: number
   download_queue: QueueStatus
   send_queue: QueueStatus
 }

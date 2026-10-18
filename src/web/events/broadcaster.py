@@ -69,6 +69,7 @@ class StatusBroadcaster:
                         "version": status.version,
                         "uptime_seconds": status.uptime_seconds,
                         "manga_count": status.manga_count,
+                        "total_size_bytes": status.total_size_bytes,
                     },
                 )
                 next_system_at = now + self.system_interval_seconds

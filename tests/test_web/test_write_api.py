@@ -332,6 +332,20 @@ def test_system_reconnect_and_shutdown(db_manager) -> None:
     assert "napcat.reconnect_requested" in audit_types
 
 
+def test_system_restart_returns_accepted_and_triggers_requester(db_manager) -> None:
+    """重启接口返回 202 并触发 restart_requester（审计由 MangaBot 层写入，此处仅验证路由）。"""
+    client, context = _make_client(db_manager)
+    with client:
+        setup_and_login(client)
+        headers = csrf_headers(client)
+
+        restart = client.post("/api/v1/system/restart", headers=headers)
+
+    assert restart.status_code == 202
+    assert restart.json() == {"restart": True}
+    assert len(context.restart_calls) == 1
+
+
 def test_maintenance_scan_repair_and_backup(db_manager) -> None:
     """扫描、修复与备份接口应完成对应操作且不暴露绝对路径。"""
     root = Path(db_manager.db_dir).parent

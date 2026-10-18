@@ -82,6 +82,8 @@ class MangaBot:
         self._close_lock: threading.Lock = threading.Lock()
         self._resources_closed: bool = False
         self._started_at = utc_now()
+        # 一键重启标记：close() 完成后由 main 判断是否拉起新进程
+        self.restart_requested: bool = False
 
         self._check_platform_compatibility()
 
@@ -267,6 +269,9 @@ class MangaBot:
             reconnect_requester=self.ws_client.request_reconnect,
             shutdown_requester=lambda context: self.request_shutdown(
                 "通过 WebUI 请求安全关闭", context=context
+            ),
+            restart_requester=lambda context: self.request_restart(
+                "通过 WebUI 请求一键重启", context=context
             ),
             audit_repository=self.audit_event_repo,
         )
@@ -552,6 +557,32 @@ class MangaBot:
             target_id="self",
             metadata={"reason": reason} if reason else None,
         )
+        self._shutdown_event.set()
+
+    def request_restart(
+        self, reason: str = "", context: Optional[OperationContext] = None
+    ) -> None:
+        """请求优雅重启：复用安全关闭收尾路径，close 后由 main 拉起新进程。
+
+        重复调用不会产生额外副作用；与 request_shutdown 互斥（先到的生效）。
+        """
+        if self._shutdown_event.is_set():
+            return
+        if reason:
+            logger.info(f"请求重启机器人: {reason}")
+        operation_context = context or OperationContext.system()
+        self.audit_event_repo.record(
+            event_type="bot.restart_requested",
+            source=operation_context.source,
+            result="accepted",
+            actor_user_id=operation_context.actor_user_id,
+            actor_group_id=operation_context.actor_group_id,
+            client_ip=operation_context.client_ip,
+            target_type="bot",
+            target_id="self",
+            metadata={"reason": reason} if reason else None,
+        )
+        self.restart_requested = True
         self._shutdown_event.set()
 
     def close(self) -> None:

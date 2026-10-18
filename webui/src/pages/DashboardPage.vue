@@ -3,13 +3,13 @@ import { computed, onMounted, ref } from 'vue'
 
 import { errorMessage } from '@/api/client'
 import { useEventSubscription } from '@/api/eventStream'
-import { reconnectNapcat, requestShutdown } from '@/api/system'
+import { reconnectNapcat, requestRestart, requestShutdown } from '@/api/system'
 import { listTasks } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { useSystemStore } from '@/stores/system'
 import type { OperationTask } from '@/types/api'
-import { formatDateTime, formatUptime } from '@/utils/format'
+import { formatBytes, formatDateTime, formatUptime } from '@/utils/format'
 import {
   colorOf,
   labelOf,
@@ -25,6 +25,9 @@ const notice = ref('')
 const reconnecting = ref(false)
 const shutdownDialog = ref(false)
 const shuttingDown = ref(false)
+const restartDialog = ref(false)
+const restarting = ref(false)
+const restartPolling = ref(false)
 
 const recentTasks = ref<OperationTask[]>([])
 const tasksLoading = ref(false)
@@ -77,6 +80,46 @@ async function confirmShutdown(): Promise<void> {
   } finally {
     shuttingDown.value = false
   }
+}
+
+async function confirmRestart(): Promise<void> {
+  actionError.value = ''
+  notice.value = ''
+  restarting.value = true
+  try {
+    await requestRestart()
+    restartDialog.value = false
+    notice.value = '已请求重启，服务恢复后页面将自动刷新'
+    restartPolling.value = true
+    void pollSystemStatus()
+  } catch (err) {
+    actionError.value = errorMessage(err)
+    restartDialog.value = false
+  } finally {
+    restarting.value = false
+  }
+}
+
+/** 重启后轮询系统状态，恢复后自动刷新页面；上限 120 秒。 */
+async function pollSystemStatus(): Promise<void> {
+  const deadline = Date.now() + 120_000
+  while (Date.now() < deadline && restartPolling.value) {
+    await new Promise((resolve) => window.setTimeout(resolve, 1000))
+    if (!restartPolling.value) return
+    try {
+      await system.refresh()
+      // 状态恢复即视为重启完成
+      if (system.status) {
+        restartPolling.value = false
+        window.location.reload()
+        return
+      }
+    } catch {
+      // 服务尚未恢复，继续轮询
+    }
+  }
+  restartPolling.value = false
+  notice.value = '重启超时，服务可能仍在恢复，请手动刷新页面'
 }
 
 // 任务事件到达后防抖刷新最近任务
@@ -151,8 +194,18 @@ onMounted(() => {
       <v-spacer />
       <v-btn
         variant="tonal"
+        color="warning"
+        prepend-icon="mdi-restart"
+        :disabled="restartPolling"
+        @click="restartDialog = true"
+      >
+        {{ restartPolling ? '重启中…' : '一键重启' }}
+      </v-btn>
+      <v-btn
+        variant="tonal"
         color="error"
         prepend-icon="mdi-power"
+        :disabled="restartPolling"
         @click="shutdownDialog = true"
       >
         安全关闭
@@ -178,6 +231,9 @@ onMounted(() => {
         <v-card class="pa-4 h-100">
           <div class="text-caption text-medium-emphasis">漫画数量</div>
           <div class="text-h6">{{ status?.manga_count ?? '—' }}</div>
+          <div class="text-caption text-medium-emphasis">
+            总计 {{ status ? formatBytes(status.total_size_bytes) : '—' }}
+          </div>
         </v-card>
       </v-col>
       <v-col cols="12" sm="6" md="4">
@@ -288,6 +344,16 @@ onMounted(() => {
       confirm-text="确认关闭"
       :loading="shuttingDown"
       @confirm="confirmShutdown"
+    />
+
+    <ConfirmDialog
+      v-model="restartDialog"
+      title="确认一键重启？"
+      text="机器人将优雅收尾后重新拉起进程，服务恢复后页面自动刷新。"
+      confirm-text="确认重启"
+      confirm-color="warning"
+      :loading="restarting"
+      @confirm="confirmRestart"
     />
   </div>
 </template>

@@ -18,6 +18,7 @@ interface SystemUpdatedData {
   version: string
   uptime_seconds: number
   manga_count: number
+  total_size_bytes: number
 }
 
 /** 系统状态：REST 快照 + WebSocket 增量更新。 */
@@ -53,6 +54,7 @@ export const useSystemStore = defineStore('system', () => {
       current.version = data.version
       current.uptime_seconds = data.uptime_seconds
       current.manga_count = data.manga_count
+      current.total_size_bytes = data.total_size_bytes
     }
   }
 

@@ -55,6 +55,49 @@ class TestManga:
         )
         assert manga_repo.count() == 2
 
+    def test_total_file_size_bytes(self, manga_repo: MangaRepository, tmp_path) -> None:
+        """总大小累加 ready 文件，missing 不计入，空库返回 0。"""
+        assert manga_repo.total_file_size_bytes() == 0
+        manga_repo.upsert(
+            manga_id="30", title="A", author="", chapter_count=1, page_count=1
+        )
+        manga_repo.upsert(
+            manga_id="31", title="B", author="", chapter_count=1, page_count=1
+        )
+        pdf_a = tmp_path / "30-a.pdf"
+        pdf_a.write_bytes(b"%PDF-1.4 aaaa")
+        pdf_b = tmp_path / "31-b.pdf"
+        pdf_b.write_bytes(b"%PDF-1.4 bbbbbbb")
+        manga_repo.add_file("30", str(pdf_a), page_count=1)
+        manga_repo.add_file("31", str(pdf_b), page_count=1)
+        assert (
+            manga_repo.total_file_size_bytes()
+            == pdf_a.stat().st_size + pdf_b.stat().st_size
+        )
+
+    def test_total_file_size_excludes_missing(
+        self, manga_repo: MangaRepository, tmp_path
+    ) -> None:
+        """missing 状态文件不计入总大小。"""
+        from src.database.models import MangaFile
+        from sqlalchemy import update
+
+        manga_repo.upsert(
+            manga_id="32", title="C", author="", chapter_count=1, page_count=1
+        )
+        pdf = tmp_path / "32-c.pdf"
+        pdf.write_bytes(b"%PDF-1.4 cccccccccc")
+        manga_repo.add_file("32", str(pdf), page_count=1)
+        # 手动标记为 missing 模拟文件丢失
+        with manga_repo._get_session() as session:
+            session.execute(
+                update(MangaFile)
+                .where(MangaFile.manga_id == "32")
+                .values(status="missing")
+            )
+            session.commit()
+        assert manga_repo.total_file_size_bytes() == 0
+
     def test_search_filters_by_tag(self, manga_repo: MangaRepository, tag_repo) -> None:
         """标签过滤只返回命中标签的漫画，不匹配的记录被排除。"""
         manga_repo.upsert(
