@@ -11,6 +11,7 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { useCoverPreview } from '@/stores/coverPreview'
 import type { Manga } from '@/types/api'
+import { copyText } from '@/utils/clipboard'
 import { formatDateTime } from '@/utils/format'
 import {
   colorOf,
@@ -242,6 +243,16 @@ async function requestDownloadIds(ids: string[]): Promise<void> {
   }
 }
 
+async function copySelectedIds(): Promise<void> {
+  if (selectedCount.value === 0) return
+  const ids = [...new Set(selected.value)].join(',')
+  const ok = await copyText(ids)
+  actionError.value = ''
+  actionNotice.value = ok
+    ? `已复制 ${selectedCount.value} 个漫画 ID`
+    : '复制失败，请手动选择并复制'
+}
+
 /** 服务端确认成功后更新状态，失败时保留原收藏状态。 */
 async function toggleFavorite(manga: Manga): Promise<void> {
   if (favoriteBusy[manga.id]) return
@@ -453,6 +464,14 @@ watch(
           @click="requestDownloadIds(selected)"
         >
           下载选中
+        </v-btn>
+        <v-btn
+          variant="tonal"
+          prepend-icon="mdi-content-copy"
+          :disabled="selectedCount === 0"
+          @click="copySelectedIds"
+        >
+          复制 ID
         </v-btn>
         <v-btn
           variant="tonal"

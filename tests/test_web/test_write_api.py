@@ -346,6 +346,52 @@ def test_system_restart_returns_accepted_and_triggers_requester(db_manager) -> N
     assert len(context.restart_calls) == 1
 
 
+def test_batch_cancel_and_retry_endpoints(db_manager) -> None:
+    """批量取消与重试接口逐项返回状态，复用原任务记录。"""
+    from src.service.operation_context import OperationContext
+
+    client, context = _make_client(db_manager)
+    task_service = context.download_queue.task_service
+    op_context = OperationContext.web("1", "127.0.0.1")
+    # 创建 queued 任务（供批量取消）
+    queued = task_service.create("download", op_context, manga_id="500")
+    # 创建 failed 任务（供批量重试）
+    failed = task_service.create("download", op_context, manga_id="501")
+    task_service.start(failed.id, "downloading")
+    task_service.fail(failed.id, "download_failed", "测试失败", context=op_context)
+
+    with client:
+        setup_and_login(client)
+        headers = csrf_headers(client)
+
+        cancel_resp = client.post(
+            "/api/v1/tasks/cancel",
+            json={"task_ids": [queued.id, "task-missing"]},
+            headers=headers,
+        )
+        retry_resp = client.post(
+            "/api/v1/tasks/retry",
+            json={"task_ids": [failed.id, queued.id]},
+            headers=headers,
+        )
+
+    assert cancel_resp.status_code == 200
+    cancel_body = cancel_resp.json()
+    assert cancel_body["cancelled_count"] == 1
+    assert {item["task_id"] for item in cancel_body["items"]} == {
+        queued.id,
+        "task-missing",
+    }
+
+    assert retry_resp.status_code == 202
+    retry_body = retry_resp.json()
+    # failed 任务可重试，queued 任务不可重试（not_retryable）
+    statuses = {item["task_id"]: item["status"] for item in retry_body["items"]}
+    assert statuses[failed.id] == "requeued"
+    assert statuses[queued.id] == "not_retryable"
+    assert retry_body["requeued_count"] == 1
+
+
 def test_maintenance_scan_repair_and_backup(db_manager) -> None:
     """扫描、修复与备份接口应完成对应操作且不暴露绝对路径。"""
     root = Path(db_manager.db_dir).parent

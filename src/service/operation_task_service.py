@@ -219,6 +219,16 @@ class OperationTaskService:
         self.event_repo.append(task_id, f"{task.task_type}.cancelled", "cancelled")
         return self._publish_task(self._to_result(task))
 
+    def requeue(self, task_id: str) -> TaskResult:
+        """将失败/中断的下载任务重新入队（复用原任务记录）。
+
+        仓储层校验状态转换与同漫画活动任务冲突；服务层追加 download.requeued
+        事件并发布 task.updated。审计由调用方（DownloadQueueService.retry_tasks）记录。
+        """
+        task = self.task_repo.requeue(task_id)
+        self.event_repo.append(task_id, f"{task.task_type}.requeued", "queued")
+        return self._publish_task(self._to_result(task))
+
     def get(self, task_id: str) -> Optional[TaskResult]:
         """按任务 ID 返回任务快照，不存在时返回 None。"""
         task = self.task_repo.get(task_id)

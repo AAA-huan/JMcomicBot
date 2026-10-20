@@ -4,6 +4,7 @@ from typing import Any, Dict, List, Optional, Protocol
 
 from src.service.operation_context import OperationContext
 from src.service.results import (
+    BatchTaskResult,
     DownloadCancellationResult,
     DownloadRequestItem,
     DownloadRequestResult,
@@ -48,6 +49,15 @@ class DownloadQueueGateway(Protocol):
         """请求下载单个漫画并返回入队结果。"""
         raise NotImplementedError
 
+    def enqueue_existing_task(
+        self,
+        manga_id: str,
+        task_id: str,
+        context: Optional[OperationContext] = None,
+    ) -> bool:
+        """把既有任务记录重新装入内存队列（批量重试与启动续传共用）。"""
+        raise NotImplementedError
+
 
 class DownloadService(Protocol):
     """下载任务应用服务接口。"""
@@ -75,6 +85,16 @@ class DownloadService(Protocol):
 
     def cancel_queued_tasks(self) -> int:
         """取消全部尚未开始的下载任务，返回取消数量。"""
+        raise NotImplementedError
+
+    def cancel_tasks(self, task_ids: List[str]) -> BatchTaskResult:
+        """批量取消排队中的下载任务，逐项返回状态。"""
+        raise NotImplementedError
+
+    def retry_tasks(
+        self, task_ids: List[str], context: OperationContext
+    ) -> BatchTaskResult:
+        """批量重试失败/中断的下载任务，复用原任务记录重新入队。"""
         raise NotImplementedError
 
 
@@ -126,6 +146,10 @@ class TaskService(Protocol):
 
     def cancel(self, task_id: str) -> TaskResult:
         """取消尚未开始的任务。"""
+        raise NotImplementedError
+
+    def requeue(self, task_id: str) -> TaskResult:
+        """将失败/中断的下载任务重新入队（复用原任务记录）。"""
         raise NotImplementedError
 
     def get(self, task_id: str) -> Optional[TaskResult]:

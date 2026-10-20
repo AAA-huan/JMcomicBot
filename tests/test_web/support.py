@@ -88,6 +88,13 @@ class FakeDownloadQueue:
     def find_active_download(self, manga_id: str) -> Optional[str]:
         return self.queued_task_ids.get(manga_id)
 
+    def enqueue_existing_task(self, manga_id, task_id, context=None) -> bool:
+        # 测试替身：记录入队，不真正下载；重复 manga_id 返回 False
+        if manga_id in self.queued_task_ids:
+            return False
+        self.queued_task_ids[manga_id] = task_id
+        return True
+
     def cancel_download(self, manga_id: str) -> bool:
         task_id = self.queued_task_ids.pop(manga_id, None)
         if task_id is None:

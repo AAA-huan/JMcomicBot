@@ -30,6 +30,8 @@ _TASK_STATUS_TRANSITIONS = {
     "queued": {"running", "cancelled"},
     "running": {"running", "succeeded", "failed", "interrupted"},
     "succeeded": set(),
+    # failed/interrupted 为终态，通用 update_state 不允许转换；
+    # 重新入队由 OperationTaskRepository.requeue 专用方法校验与执行
     "failed": set(),
     "cancelled": set(),
     "interrupted": set(),
@@ -234,6 +236,52 @@ class OperationTaskRepository(BaseRepository):
             )
             session.commit()
             return result.rowcount or 0
+
+    def requeue(self, task_id: str) -> OperationTask:
+        """将终态下载任务（failed/interrupted）转回 queued 并重置执行字段。
+
+        专用方法，不通过通用 update_state 放行任意状态转换；只接受
+        failed/interrupted → queued，清空 finished_at/error_code/error_message/progress，
+        stage 置为 queued。同漫画已有活动任务（queued/running）时拒绝，避免重复。
+
+        Raises:
+            ValueError: 任务不存在、状态不允许重入队、同漫画已有活动任务时
+        """
+        now = utc_now()
+        with self._get_session() as session:
+            task = session.get(OperationTask, task_id)
+            if task is None:
+                raise ValueError(f"任务不存在: {task_id}")
+            if task.task_type != "download":
+                raise ValueError(f"非下载任务不支持重新入队: {task_id}")
+            if task.status not in ("failed", "interrupted"):
+                raise ValueError(
+                    f"任务状态 {task.status} 不允许重新入队（仅失败/中断可重试）"
+                )
+            if task.manga_id is None:
+                raise ValueError(f"任务缺少漫画 ID，无法重新入队: {task_id}")
+            # 同漫画已有活动任务（queued/running）时拒绝，避免重复
+            active = session.scalar(
+                select(OperationTask.id).where(
+                    OperationTask.manga_id == task.manga_id,
+                    OperationTask.status.in_(("queued", "running")),
+                    OperationTask.id != task.id,
+                )
+            )
+            if active is not None:
+                raise ValueError(
+                    f"漫画 {task.manga_id} 已有活动任务 {active}，无法重新入队"
+                )
+            task.status = "queued"
+            task.stage = "queued"
+            task.progress = None
+            task.error_code = None
+            task.error_message = None
+            task.finished_at = None
+            task.updated_at = now
+            session.commit()
+            session.refresh(task)
+            return task
 
     @staticmethod
     def _expired_condition(now: datetime, retention_days: int):

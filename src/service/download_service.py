@@ -5,6 +5,8 @@ from typing import List, Optional
 from src.service.contracts import DownloadNotifier, DownloadQueueGateway, TaskService
 from src.service.operation_context import OperationContext
 from src.service.results import (
+    BatchTaskItem,
+    BatchTaskResult,
     DownloadCancellationResult,
     DownloadRequestItem,
     DownloadRequestResult,
@@ -105,6 +107,84 @@ class DownloadQueueService:
             # 内存队列已无该任务（例如重启后的遗留排队记录），直接标记取消并写事件
             self.task_service.cancel(task_id)
         return TaskCancellationResult(task_id, "cancelled")
+
+    def cancel_tasks(self, task_ids: List[str]) -> BatchTaskResult:
+        """批量取消排队中的下载任务，逐项返回状态。"""
+        # 去重保序
+        seen: set[str] = set()
+        unique_ids: List[str] = []
+        for task_id in task_ids:
+            if task_id not in seen:
+                seen.add(task_id)
+                unique_ids.append(task_id)
+        items: List[BatchTaskItem] = []
+        for task_id in unique_ids:
+            result = self.cancel_task(task_id)
+            items.append(BatchTaskItem(task_id=task_id, status=result.status))
+        return BatchTaskResult(items=tuple(items))
+
+    def retry_tasks(
+        self, task_ids: List[str], context: OperationContext
+    ) -> BatchTaskResult:
+        """批量重试失败/中断的下载任务，复用原任务记录重新入队。
+
+        成功项调用 requeue 转回 queued 并装入内存队列；同漫画已有活动任务
+        返回 duplicate；其他状态返回 not_retryable；不存在返回 not_found。
+        每项成功记录审计 download.retried。
+        """
+        seen: set[str] = set()
+        unique_ids: List[str] = []
+        for task_id in task_ids:
+            if task_id not in seen:
+                seen.add(task_id)
+                unique_ids.append(task_id)
+        items: List[BatchTaskItem] = []
+        for task_id in unique_ids:
+            task = self.task_service.get(task_id)
+            if task is None:
+                items.append(BatchTaskItem(task_id=task_id, status="not_found"))
+                continue
+            if task.task_type != "download" or task.manga_id is None:
+                items.append(
+                    BatchTaskItem(
+                        task_id=task_id,
+                        status="not_retryable",
+                        manga_id=task.manga_id,
+                    )
+                )
+                continue
+            if task.status not in ("failed", "interrupted"):
+                items.append(
+                    BatchTaskItem(
+                        task_id=task_id,
+                        status="not_retryable",
+                        manga_id=task.manga_id,
+                    )
+                )
+                continue
+            try:
+                self.task_service.requeue(task_id)
+            except ValueError:
+                # 同漫画已有活动任务等冲突
+                items.append(
+                    BatchTaskItem(
+                        task_id=task_id,
+                        status="duplicate",
+                        manga_id=task.manga_id,
+                    )
+                )
+                continue
+            self.download_queue.enqueue_existing_task(
+                task.manga_id, task_id, context=context
+            )
+            items.append(
+                BatchTaskItem(
+                    task_id=task_id,
+                    status="requeued",
+                    manga_id=task.manga_id,
+                )
+            )
+        return BatchTaskResult(items=tuple(items))
 
     def cancel_queued_tasks(self) -> int:
         """取消全部尚未开始的下载任务，并清理启动后遗留的排队记录。"""

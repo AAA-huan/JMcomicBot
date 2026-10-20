@@ -644,6 +644,42 @@ class DownloadManager:
             return None
         return self.operation_task_ids.get(manga_id)
 
+    def enqueue_existing_task(
+        self,
+        manga_id: str,
+        task_id: str,
+        context: Optional[OperationContext] = None,
+    ) -> bool:
+        """把既有任务记录重新装入内存队列（不新建数据库记录）。
+
+        用于批量重试与启动续传：任务已在数据库中处于 queued 状态，
+        只需装入内存队列即可被下载线程消费。notifier 为 None 表示静默
+        （QQ 上下文未持久化，恢复后不发送消息）。
+
+        Returns:
+            True 入队成功；False 已有同漫画活动任务，跳过
+
+        Raises:
+            RuntimeError: 下载队列已停止时
+        """
+        with self._queue_state_lock:
+            if not self.queue_running:
+                raise RuntimeError("下载队列已停止")
+            if manga_id in self.queued_tasks or manga_id in self.downloading_mangas:
+                self.logger.info(f"漫画ID {manga_id} 已有活动任务，跳过重复入队")
+                return False
+            item = DownloadQueueItem(
+                manga_id=manga_id,
+                context=context or OperationContext.system(),
+                operation_task_id=task_id,
+                notifier=None,
+            )
+            self.queued_tasks[manga_id] = item
+            self.operation_task_ids[manga_id] = task_id
+            self.download_queue.put(item)
+        self.logger.info(f"漫画ID {manga_id} 的既有任务 {task_id} 已重新入队")
+        return True
+
     def update_low_memory_settings(self, delete_delay: Optional[int] = None) -> None:
         """由 SettingsService 调用，显式更新低内存模式文件删除延迟（分钟）。"""
         if delete_delay is not None:

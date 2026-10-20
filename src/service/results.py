@@ -135,3 +135,33 @@ class TaskCancellationResult:
 
     task_id: str
     status: str
+
+
+@dataclass(frozen=True)
+class BatchTaskItem:
+    """批量任务操作的单项结果，status 取决于操作类型。
+
+    cancel: cancelled / not_queued / not_found
+    retry: requeued / duplicate / not_retryable / not_found
+    """
+
+    task_id: str
+    status: str
+    manga_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class BatchTaskResult:
+    """批量任务操作汇总结果。"""
+
+    items: Tuple[BatchTaskItem, ...]
+
+    @property
+    def succeeded_count(self) -> int:
+        """实际成功（cancelled 或 requeued）的数量。"""
+        return sum(1 for item in self.items if item.status in ("cancelled", "requeued"))
+
+    @property
+    def failed_count(self) -> int:
+        """失败或不可操作的数量。"""
+        return len(self.items) - self.succeeded_count
