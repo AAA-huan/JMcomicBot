@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import os
 import queue
@@ -22,7 +22,11 @@ from src.database.repositories import (
 from src.service import OperationContext, TaskService
 from src.service.contracts import DownloadNotifier
 from src.service.manga_service import ADMIN_FAVORITE_DELETE_MESSAGE
-from src.service.results import DownloadRequestItem
+from src.service.results import (
+    DownloadRecoveryResult,
+    DownloadRequestItem,
+    TaskResult,
+)
 from src.utils.helpers import sanitize_filename
 
 
@@ -679,6 +683,99 @@ class DownloadManager:
             self.download_queue.put(item)
         self.logger.info(f"漫画ID {manga_id} 的既有任务 {task_id} 已重新入队")
         return True
+
+    def recover_tasks(self, tasks: List[TaskResult]) -> DownloadRecoveryResult:
+        """启动恢复遗留下载任务：排队任务直接入队，运行中任务复用原记录续传。
+
+        调用前服务层应已把遗留 running 任务标记为 interrupted。本方法对
+        interrupted 任务先 requeue 回 queued，再装入内存队列；queued 任务直接
+        装入。数据异常（非下载任务、缺少漫画 ID、状态不合法、同漫画冲突）逐条
+        告警跳过，不静默丢弃。恢复任务的 notifier 为空，不补发 QQ 消息。
+
+        Args:
+            tasks: 启动时读取的遗留任务快照（queued 或 interrupted）
+
+        Returns:
+            DownloadRecoveryResult: 恢复、续传与跳过数量
+
+        Raises:
+            RuntimeError: 未配置操作任务服务，无法完成续传
+        """
+        if not self.queue_running:
+            self.logger.error("下载队列已停止，无法恢复启动遗留的下载任务")
+            return DownloadRecoveryResult(
+                recovered_count=0,
+                resumed_count=0,
+                skipped_count=len(tasks),
+                aborted=True,
+            )
+        task_service = self.operation_task_service
+        if task_service is None:
+            raise RuntimeError("未配置操作任务服务，无法恢复下载任务")
+
+        recovered_count = 0
+        resumed_count = 0
+        skipped_count = 0
+        for task in tasks:
+            if task.task_type != "download":
+                self.logger.warning(f"启动恢复跳过非下载任务: {task.id}")
+                skipped_count += 1
+                continue
+            if not task.manga_id:
+                self.logger.warning(f"启动恢复跳过缺少漫画 ID 的任务: {task.id}")
+                skipped_count += 1
+                continue
+            if self.is_download_active(task.manga_id):
+                self.logger.warning(
+                    f"启动恢复跳过任务 {task.id}：漫画 {task.manga_id} 已有活动任务"
+                )
+                skipped_count += 1
+                continue
+
+            previous_status = task.status
+            if previous_status == "interrupted":
+                try:
+                    task_service.requeue(task.id, reason="startup_recovery")
+                except ValueError as error:
+                    self.logger.warning(f"启动恢复跳过任务 {task.id}：{error}")
+                    skipped_count += 1
+                    continue
+            elif previous_status != "queued":
+                self.logger.warning(
+                    f"启动恢复跳过状态为 {previous_status} 的任务: {task.id}"
+                )
+                skipped_count += 1
+                continue
+
+            try:
+                enqueued = self.enqueue_existing_task(
+                    task.manga_id,
+                    task.id,
+                    context=OperationContext.system(),
+                )
+            except RuntimeError as error:
+                self.logger.error(f"下载队列已停止，启动恢复中止: {error}")
+                return DownloadRecoveryResult(
+                    recovered_count=recovered_count,
+                    resumed_count=resumed_count,
+                    skipped_count=skipped_count + 1,
+                    aborted=True,
+                )
+            if not enqueued:
+                # 理论上前面已检查内存活动任务，此处仅兜底并发请求造成的变化
+                self.logger.warning(
+                    f"启动恢复跳过任务 {task.id}：漫画 {task.manga_id} 入队时已有活动任务"
+                )
+                skipped_count += 1
+                continue
+            recovered_count += 1
+            if previous_status == "interrupted":
+                resumed_count += 1
+        return DownloadRecoveryResult(
+            recovered_count=recovered_count,
+            resumed_count=resumed_count,
+            skipped_count=skipped_count,
+        )
 
     def update_low_memory_settings(self, delete_delay: Optional[int] = None) -> None:
         """由 SettingsService 调用，显式更新低内存模式文件删除延迟（分钟）。"""

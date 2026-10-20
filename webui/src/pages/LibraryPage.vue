@@ -97,6 +97,18 @@ const batchDeleteLoading = ref(false)
 
 const selectedCount = computed(() => selected.value.length)
 
+/** 当前页是否已全部选中；分页加载时会清空选择，因此只比较当前页数据。 */
+const allSelectableSelected = computed(
+  () => mangas.value.length > 0 && selected.value.length === mangas.value.length,
+)
+
+/** 全选/取消全选当前页；与任务管理页保持一致，不跨页保留选择。 */
+function toggleSelectAll(): void {
+  selected.value = allSelectableSelected.value
+    ? []
+    : mangas.value.map((manga) => manga.id)
+}
+
 /** 从 URL 查询参数恢复筛选条件，保证刷新后视图不丢失。 */
 function readQuery(): void {
   const query = route.query
@@ -459,6 +471,13 @@ watch(
         <v-spacer />
         <v-btn
           variant="tonal"
+          :disabled="mangas.length === 0"
+          @click="toggleSelectAll"
+        >
+          {{ allSelectableSelected ? '取消全选' : '全选' }}
+        </v-btn>
+        <v-btn
+          variant="tonal"
           prepend-icon="mdi-download"
           :disabled="selectedCount === 0"
           @click="requestDownloadIds(selected)"
@@ -502,10 +521,10 @@ watch(
             <tr>
               <th style="width: 44px">
                 <v-checkbox-btn
-                  :model-value="selected.length === mangas.length && mangas.length > 0"
-                  :indeterminate="selected.length > 0 && selected.length < mangas.length"
+                  :model-value="allSelectableSelected"
+                  :indeterminate="selected.length > 0 && !allSelectableSelected"
                   aria-label="全选"
-                  @update:model-value="selected = $event ? mangas.map((m) => m.id) : []"
+                  @update:model-value="toggleSelectAll"
                 />
               </th>
               <th>标题</th>

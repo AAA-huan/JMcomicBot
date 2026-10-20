@@ -27,6 +27,7 @@ from src.service.repair_service import RepairService
 from src.service.results import (
     BackupResult,
     DownloadCancellationResult,
+    DownloadRecoveryResult,
     MangaDeleteOutcome,
     MangaDeleteResult,
     TaskCancellationResult,
@@ -48,6 +49,7 @@ __all__ = [
     "DatabaseMaintenanceService",
     "DownloadCancellationResult",
     "DownloadNotifier",
+    "DownloadRecoveryResult",
     "DownloadQueueService",
     "DownloadService",
     "MangaDeleteOutcome",

@@ -47,8 +47,9 @@ class _TaskService:
         if snapshot is not None:
             snapshot.status = "cancelled"
 
-    def requeue(self, task_id: str) -> SimpleNamespace:
+    def requeue(self, task_id: str, reason: str = "") -> SimpleNamespace:
         """模拟重新入队：状态校验与同漫画活动任务冲突。"""
+        del reason
         snapshot = self.task_snapshots.get(task_id)
         if snapshot is None:
             raise ValueError(f"任务不存在: {task_id}")

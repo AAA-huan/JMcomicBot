@@ -126,9 +126,14 @@ class MangaBot:
             self.audit_event_repo,
             event_publisher=self.event_bus,
         )
-        interrupted_count = self.operation_task_service.recover_interrupted()
-        if interrupted_count:
-            logger.warning(f"启动时已中断 {interrupted_count} 个遗留运行任务")
+        # 启动恢复：先记录遗留活动下载，再把运行中任务标记中断；
+        # 下载管理器就绪后复用原任务记录重新入队
+        legacy_download_tasks = self.operation_task_service.list_active_downloads()
+        interrupted_download_tasks = self.operation_task_service.recover_interrupted()
+        if interrupted_download_tasks:
+            logger.warning(
+                f"启动时已中断 {len(interrupted_download_tasks)} 个遗留运行下载任务"
+            )
 
         # 运行时配置服务先于组件创建，加载数据库动态覆盖值
         self.settings_service = SettingsService(
@@ -192,6 +197,39 @@ class MangaBot:
             send_conflict_checker=self.message_manager.is_manga_sending,
             favorite_repository=self.favorite_repo,
         )
+        # 启动续传：运行中任务已在上方标记中断，这里复用原记录转回排队；
+        # 排队任务直接装入内存队列，避免重启后旧记录永久占位
+        interrupted_by_id = {task.id: task for task in interrupted_download_tasks}
+        recovery_tasks = [
+            interrupted_by_id.get(task.id, task) for task in legacy_download_tasks
+        ]
+        if recovery_tasks:
+            recovery_result = self.download_manager.recover_tasks(recovery_tasks)
+            recovery_summary = (
+                f"启动恢复 {recovery_result.recovered_count} 个下载任务"
+                f"（其中中断续传 {recovery_result.resumed_count} 个）"
+            )
+            if recovery_result.skipped_count or recovery_result.aborted:
+                logger.warning(
+                    f"{recovery_summary}，跳过 {recovery_result.skipped_count} 个"
+                )
+            else:
+                logger.info(recovery_summary)
+            self.audit_event_repo.record(
+                event_type="bot.tasks_recovered",
+                source="system",
+                result=(
+                    "failed"
+                    if recovery_result.aborted
+                    else ("partial" if recovery_result.skipped_count else "succeeded")
+                ),
+                target_type="bot",
+                target_id="self",
+                metadata={
+                    "recovered_count": recovery_result.recovered_count,
+                    "resumed_count": recovery_result.resumed_count,
+                },
+            )
         self.download_service = DownloadQueueService(
             self.download_manager, self.operation_task_service
         )

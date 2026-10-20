@@ -91,6 +91,21 @@ class DownloadRequestResult:
 
 
 @dataclass(frozen=True)
+class DownloadRecoveryResult:
+    """启动恢复下载任务的汇总结果。
+
+    recovered_count 为成功重新入队的任务数，resumed_count 为其中由运行中
+    中断后继续的任务数，skipped_count 为数据异常、状态不合法或冲突跳过的
+    任务数；aborted 表示下载队列已停止，恢复流程提前终止。
+    """
+
+    recovered_count: int
+    resumed_count: int
+    skipped_count: int
+    aborted: bool = False
+
+
+@dataclass(frozen=True)
 class MangaDeleteOutcome:
     """单个漫画的删除结果。"""
 

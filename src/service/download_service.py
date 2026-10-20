@@ -144,7 +144,7 @@ class DownloadQueueService:
             if task is None:
                 items.append(BatchTaskItem(task_id=task_id, status="not_found"))
                 continue
-            if task.task_type != "download" or task.manga_id is None:
+            if task.task_type != "download" or not task.manga_id:
                 items.append(
                     BatchTaskItem(
                         task_id=task_id,
@@ -163,7 +163,7 @@ class DownloadQueueService:
                 )
                 continue
             try:
-                self.task_service.requeue(task_id)
+                self.task_service.requeue(task_id, reason="manual_retry")
             except ValueError:
                 # 同漫画已有活动任务等冲突
                 items.append(

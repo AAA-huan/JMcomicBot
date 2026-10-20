@@ -148,7 +148,7 @@ class TaskService(Protocol):
         """取消尚未开始的任务。"""
         raise NotImplementedError
 
-    def requeue(self, task_id: str) -> TaskResult:
+    def requeue(self, task_id: str, reason: str = "") -> TaskResult:
         """将失败/中断的下载任务重新入队（复用原任务记录）。"""
         raise NotImplementedError
 
@@ -164,6 +164,6 @@ class TaskService(Protocol):
         """列出全部尚未结束的下载任务（queued/running）。"""
         raise NotImplementedError
 
-    def recover_interrupted(self) -> int:
-        """中断遗留的运行中任务。"""
+    def recover_interrupted(self) -> List[TaskResult]:
+        """中断遗留的运行中任务，返回被中断的下载任务快照。"""
         raise NotImplementedError

@@ -219,14 +219,27 @@ class OperationTaskService:
         self.event_repo.append(task_id, f"{task.task_type}.cancelled", "cancelled")
         return self._publish_task(self._to_result(task))
 
-    def requeue(self, task_id: str) -> TaskResult:
+    def requeue(self, task_id: str, reason: str = "") -> TaskResult:
         """将失败/中断的下载任务重新入队（复用原任务记录）。
 
         仓储层校验状态转换与同漫画活动任务冲突；服务层追加 download.requeued
-        事件并发布 task.updated。审计由调用方（DownloadQueueService.retry_tasks）记录。
+        事件并发布 task.updated，事件元数据保留原状态与重试原因。审计由调用方
+        （DownloadQueueService.retry_tasks、启动恢复流程）记录。
         """
+        current = self.task_repo.get(task_id)
+        previous_status = current.status if current is not None else ""
         task = self.task_repo.requeue(task_id)
-        self.event_repo.append(task_id, f"{task.task_type}.requeued", "queued")
+        metadata: Dict[str, Any] = {}
+        if previous_status:
+            metadata["previous_status"] = previous_status
+        if reason:
+            metadata["reason"] = reason
+        self.event_repo.append(
+            task_id,
+            f"{task.task_type}.requeued",
+            "queued",
+            metadata=metadata or None,
+        )
         return self._publish_task(self._to_result(task))
 
     def get(self, task_id: str) -> Optional[TaskResult]:
@@ -245,6 +258,36 @@ class OperationTaskService:
             self._to_result(task) for task in self.task_repo.list_active_downloads()
         ]
 
-    def recover_interrupted(self) -> int:
-        """启动时中断全部遗留运行任务。"""
-        return self.task_repo.interrupt_running()
+    def recover_interrupted(self) -> List[TaskResult]:
+        """启动时中断全部遗留运行任务，返回被中断的下载任务列表。
+
+        每个被中断任务都会追加 <task_type>.interrupted 事件并发布 task.updated；
+        下载任务额外写入 download.interrupted 审计。非下载任务为同步执行，只保留
+        中断记录，不参与下载队列恢复。
+        """
+        interrupted_tasks = self.task_repo.interrupt_running()
+        download_results: List[TaskResult] = []
+        for task in interrupted_tasks:
+            result = self._to_result(task)
+            self.event_repo.append(
+                task.id,
+                f"{task.task_type}.interrupted",
+                "interrupted",
+                metadata={
+                    "previous_status": "running",
+                    "reason": "startup_recovery",
+                },
+            )
+            if task.task_type == "download":
+                self.audit_repo.record(
+                    event_type="download.interrupted",
+                    source=task.source,
+                    result="interrupted",
+                    actor_user_id=task.requested_by or None,
+                    target_type="manga" if task.manga_id else task.task_type,
+                    target_id=task.manga_id or task.id,
+                    metadata={"reason": "startup_recovery"},
+                )
+                download_results.append(result)
+            self._publish_task(result)
+        return download_results
