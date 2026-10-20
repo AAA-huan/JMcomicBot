@@ -29,6 +29,8 @@ from src.service.results import (
 )
 from src.utils.helpers import sanitize_filename
 
+from .progress import DownloadProgressTracker, WebProgressDownloader
+
 
 @dataclass(frozen=True)
 class QQDownloadNotifier:
@@ -130,7 +132,7 @@ def build_progress_plugin_config(log_file: str) -> Dict[str, Any]:
 class DownloadManager:
     """漫画下载管理器，负责漫画下载功能并对下载队列进行管理"""
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         logger_instance: Any,
         config: Dict[str, Any],
@@ -142,6 +144,7 @@ class DownloadManager:
         operation_task_service: Optional[TaskService] = None,
         send_conflict_checker: Optional[Callable[[str], bool]] = None,
         favorite_repository: Optional[FavoriteRepository] = None,
+        progress_tracker: Optional[DownloadProgressTracker] = None,
     ) -> None:
         """
         初始化下载管理器
@@ -155,6 +158,9 @@ class DownloadManager:
             task_log_repo: 任务日志仓储，记录下载任务到数据库
             tag_repo: 漫画标签仓储，下载时记录漫画标签
             operation_task_service: 持久化操作任务服务
+            send_conflict_checker: 判断漫画文件是否正在发送
+            favorite_repository: 管理员收藏仓储，用于低内存模式保护收藏文件
+            progress_tracker: WebUI 下载进度采集器；为空时不采集实时进度
         """
         self.logger = logger_instance
         self.config = config
@@ -174,6 +180,7 @@ class DownloadManager:
         self.tag_repo = tag_repo
         self.operation_task_service = operation_task_service
         self.send_conflict_checker = send_conflict_checker
+        self.progress_tracker = progress_tracker
         self.download_queue: queue.Queue = queue.Queue()
         self.queue_running: bool = True
         self._stop_event: threading.Event = threading.Event()
@@ -344,6 +351,38 @@ class DownloadManager:
             f"已安排在 {delay_minutes} 分钟后删除文件: {os.path.basename(file_path)}"
         )
 
+    def _start_progress_tracking(
+        self, manga_id: str, operation_task_id: Optional[str]
+    ) -> None:
+        """绑定进度采集器，并用 WebUI 下载器替换 jmcomic 全局下载器。"""
+        tracker = self.progress_tracker
+        if tracker is None:
+            return
+
+        progress_callback: Optional[Callable[[int], None]] = None
+        task_service = self.operation_task_service
+        if task_service is not None and operation_task_id:
+            task_id = operation_task_id
+
+            def update_task_progress(percent: int) -> None:
+                """把已完成章节百分比同步到任务管理页。"""
+                try:
+                    task_service.progress(task_id, "downloading", percent)
+                except Exception as error:  # pylint: disable=broad-exception-caught
+                    # 进度同步失败不应中断真实下载，但必须留下明确日志
+                    self.logger.error(f"更新下载任务进度失败: {error}")
+
+            progress_callback = update_task_progress
+
+        tracker.begin(manga_id, operation_task_id, progress_callback)
+        WebProgressDownloader.configure(tracker)
+        WebProgressDownloader.use()
+
+    def _finish_progress(self, succeeded: Optional[bool] = None) -> None:
+        """结束 WebUI 进度；未配置采集器时不做任何事。"""
+        if self.progress_tracker is not None:
+            self.progress_tracker.finish(succeeded=succeeded)
+
     def _process_download_task(self, item: DownloadQueueItem) -> None:
         """
         处理队列中的下载任务
@@ -408,10 +447,16 @@ class DownloadManager:
                 # create_option_by_file 已执行过 after_init 插件组，此处手动触发补充注入的插件
                 option.call_all_plugin("after_init", safe=True)
 
+            # 进度采集必须在插件安装 ProgressDownloader 之后执行 use()，
+            # 用子类替换全局下载器，才能同时保留终端进度与 WebUI 事件
+            self._start_progress_tracking(manga_id, operation_task_id)
+
             # 整本下载，完成后自动触发 img2pdf 插件合并 PDF（含删除原图）
             result = jmcomic.download_album(manga_id, option=option)
             if isinstance(result, set):
                 raise RuntimeError(f"漫画 {manga_id} 批量下载返回了集合，不符合预期")
+            # after_album 已推送 finished；此处兜底防止自定义下载器未触发
+            self._finish_progress()
 
             if self._stop_event.is_set():
                 self.logger.info(
@@ -510,6 +555,8 @@ class DownloadManager:
 
         except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error(f"下载漫画出错: {e}")
+            # 下载异常时显式标记失败，避免页面停留在“正在下载”
+            self._finish_progress(False)
             if self.operation_task_service is not None and operation_task_id:
                 self.operation_task_service.fail(
                     operation_task_id,
@@ -534,6 +581,8 @@ class DownloadManager:
             if item.notifier is not None:
                 item.notifier.message(error_msg)
         finally:
+            # 所有退出路径都收尾，正常完成时 finish 已幂等，不会重复发事件
+            self._finish_progress(False)
             if manga_id in self.downloading_mangas:
                 del self.downloading_mangas[manga_id]
             self.operation_task_ids.pop(manga_id, None)

@@ -1,7 +1,12 @@
 /** 下载任务查询、创建与取消接口。 */
 
 import { apiRequest } from './client'
-import type { DownloadRequestResult, OperationTask, PageResult } from '@/types/api'
+import type {
+  DownloadProgressSnapshot,
+  DownloadRequestResult,
+  OperationTask,
+  PageResult,
+} from '@/types/api'
 
 export interface TaskListQuery {
   page?: number
@@ -24,6 +29,12 @@ export function requestDownloads(mangaIds: string[]): Promise<DownloadRequestRes
     method: 'POST',
     body: { manga_ids: mangaIds },
   })
+}
+
+export function getDownloadProgress(): Promise<{
+  active: DownloadProgressSnapshot | null
+}> {
+  return apiRequest<{ active: DownloadProgressSnapshot | null }>('/downloads/progress')
 }
 
 export function cancelTask(taskId: string): Promise<{ cancelled: boolean }> {

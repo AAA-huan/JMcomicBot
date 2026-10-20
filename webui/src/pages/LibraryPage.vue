@@ -512,7 +512,7 @@ watch(
         v-if="!loading && mangas.length === 0"
         icon="mdi-bookshelf"
         title="没有找到漫画"
-        description="调整筛选条件，或在任务页请求下载新漫画。"
+        description="调整筛选条件，或前往漫画下载页请求下载新漫画。"
       />
 
       <template v-else-if="!mobile">

@@ -8,6 +8,7 @@ from starlette.testclient import TestClient
 
 from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
+from src.download.progress import DownloadProgressTracker
 from src.database.models import utc_now
 from src.database.repositories import (
     AuditEventRepository,
@@ -149,6 +150,7 @@ def build_web_context(  # pylint: disable=too-many-locals
     operation_task_repo = OperationTaskRepository(db_manager)
     audit_repo = AuditEventRepository(db_manager)
     event_bus = WebEventBus()
+    download_progress_tracker = DownloadProgressTracker(event_bus.publish)
     task_service = OperationTaskService(
         operation_task_repo,
         TaskEventRepository(db_manager),
@@ -264,6 +266,7 @@ def build_web_context(  # pylint: disable=too-many-locals
             WebAdminRepository(db_manager), permission_manager, audit_repo
         ),
         event_bus=event_bus,
+        download_progress_tracker=download_progress_tracker,
         audit_query_service=AuditQueryService(audit_repo),
         verify_service=VerifyService(
             manga_repo,

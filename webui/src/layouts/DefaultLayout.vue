@@ -4,7 +4,7 @@ import { useDisplay } from 'vuetify'
 import { useRoute, useRouter } from 'vue-router'
 
 import { EventClient } from '@/api/events'
-import { emitEvent } from '@/api/eventStream'
+import { emitConnection, emitEvent } from '@/api/eventStream'
 import { useAuthStore } from '@/stores/auth'
 import { useSystemStore } from '@/stores/system'
 import { useThemeStore } from '@/stores/theme'
@@ -18,6 +18,7 @@ interface NavItem {
 const navItems: NavItem[] = [
   { title: '仪表盘', to: '/', icon: 'mdi-view-dashboard-outline' },
   { title: '漫画库', to: '/library', icon: 'mdi-bookshelf' },
+  { title: '漫画下载', to: '/download', icon: 'mdi-cloud-download-outline' },
   { title: 'JM 收藏导入', to: '/jm-favorites', icon: 'mdi-bookmark-plus-outline' },
   { title: '任务管理', to: '/tasks', icon: 'mdi-download-outline' },
   { title: '权限管理', to: '/permissions', icon: 'mdi-account-lock-outline' },
@@ -54,6 +55,7 @@ function closeDrawerOnMobile(): void {
   if (mobile.value) drawer.value = false
 }
 let eventClient: EventClient | null = null
+let hasConnectedOnce = false
 
 const pageTitle = (): string =>
   typeof route.meta.title === 'string' ? route.meta.title : 'JMcomicBot'
@@ -84,9 +86,12 @@ onMounted(async () => {
       emitEvent(event)
     },
     onOpen: () => {
-      // 重连成功必须重新拉取完整 REST 快照
+      // 重连成功必须重新拉取完整 REST 快照，并通知页面补齐断线期间的数据
+      const reconnected = hasConnectedOnce
+      hasConnectedOnce = true
       system.eventsConnected = true
       void system.refresh()
+      if (reconnected) emitConnection()
     },
     onClose: () => {
       system.eventsConnected = false

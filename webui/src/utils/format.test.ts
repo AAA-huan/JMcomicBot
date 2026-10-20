@@ -3,6 +3,7 @@ import { describe, expect, it } from 'vitest'
 import {
   formatBytes,
   formatDateTime,
+  formatElapsed,
   formatUptime,
   parseMangaIds,
   parseTags,
@@ -56,6 +57,15 @@ describe('formatUptime', () => {
     expect(formatUptime(90)).toBe('1 分钟')
     expect(formatUptime(3 * 3600 + 25 * 60)).toBe('3 小时 25 分钟')
     expect(formatUptime(2 * 86400 + 3 * 3600)).toBe('2 天 3 小时')
+  })
+})
+
+describe('formatElapsed', () => {
+  it('按秒、分钟与小时展示下载耗时', () => {
+    expect(formatElapsed(-1)).toBe('0 秒')
+    expect(formatElapsed(59)).toBe('59 秒')
+    expect(formatElapsed(65)).toBe('1 分 5 秒')
+    expect(formatElapsed(3 * 3600 + 2 * 60 + 4)).toBe('3 小时 2 分 4 秒')
   })
 })
 

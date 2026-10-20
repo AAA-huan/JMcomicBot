@@ -31,6 +31,7 @@ from src.database.repositories import (
     WebSessionRepository,
 )
 from src.download.manager import DownloadManager
+from src.download.progress import DownloadProgressTracker
 from src.event.handler import EventHandler
 from src.logging.logger_config import logger
 from src.message.manager import MessageManager
@@ -120,6 +121,8 @@ class MangaBot:
         self.setting_history_repo = SettingHistoryRepository(self.database_manager)
         # WebSocket 事件总线：任务等业务线程发布，Web 连接订阅
         self.event_bus = WebEventBus()
+        # 下载进度采集器：下载线程写入，WebSocket 推送与 REST 快照共用
+        self.download_progress_tracker = DownloadProgressTracker(self.event_bus.publish)
         self.operation_task_service = OperationTaskService(
             self.operation_task_repo,
             self.task_event_repo,
@@ -196,6 +199,7 @@ class MangaBot:
             operation_task_service=self.operation_task_service,
             send_conflict_checker=self.message_manager.is_manga_sending,
             favorite_repository=self.favorite_repo,
+            progress_tracker=self.download_progress_tracker,
         )
         # 启动续传：运行中任务已在上方标记中断，这里复用原记录转回排队；
         # 排队任务直接装入内存队列，避免重启后旧记录永久占位
@@ -411,6 +415,7 @@ class MangaBot:
                         scan_service=self.scan_service,
                         reading_progress_service=self.reading_progress_service,
                         event_bus=self.event_bus,
+                        download_progress_tracker=self.download_progress_tracker,
                         audit_query_service=self.audit_query_service,
                         verify_service=self.verify_service,
                         favorite_service=self.favorite_service,

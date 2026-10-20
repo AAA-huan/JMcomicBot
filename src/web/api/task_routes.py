@@ -84,6 +84,14 @@ def create_task_router(
             "duplicate_count": result.duplicate_count,
         }
 
+    @router.get("/downloads/progress")
+    def get_download_progress(
+        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """返回当前或最近一次下载进度快照，供页面刷新后恢复。"""
+        snapshot = dependencies.download_progress_tracker.snapshot()
+        return {"active": snapshot.to_dict() if snapshot is not None else None}
+
     @router.post("/tasks/{task_id}/cancel")
     def cancel_task(
         task_id: str,

@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from src.download.progress import DownloadProgressTracker
 from src.service import (
     DatabaseMaintenanceService,
     DownloadService,
@@ -45,6 +46,7 @@ class WebDependencies:  # pylint: disable=too-many-instance-attributes
     scan_service: ScanService
     reading_progress_service: ReadingProgressService
     event_bus: WebEventBus
+    download_progress_tracker: DownloadProgressTracker
     audit_query_service: AuditQueryService
     verify_service: VerifyService
     favorite_service: FavoriteService

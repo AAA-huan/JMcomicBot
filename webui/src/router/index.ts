@@ -30,6 +30,12 @@ const router = createRouter({
       meta: { title: '漫画库' },
     },
     {
+      path: '/download',
+      name: 'download',
+      component: () => import('@/pages/DownloadPage.vue'),
+      meta: { title: '漫画下载' },
+    },
+    {
       path: '/library/:mangaId',
       name: 'manga-detail',
       component: () => import('@/pages/MangaDetailPage.vue'),
