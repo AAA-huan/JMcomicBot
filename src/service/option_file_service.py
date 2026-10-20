@@ -43,7 +43,7 @@ class OptionFileService:
         Raises:
             ValueError: 内容为空、超过大小上限或不是合法 YAML 字典时
         """
-        if text is None:
+        if text is None or not text.strip():
             raise ValueError("option.yml 内容不能为空")
         encoded = text.encode("utf-8")
         if len(encoded) > OPTION_FILE_MAX_BYTES:

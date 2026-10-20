@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 
 import { errorMessage } from '@/api/client'
 import { useEventSubscription } from '@/api/eventStream'
@@ -135,6 +135,11 @@ useEventSubscription((event) => {
 
 onMounted(() => {
   void loadRecentTasks()
+})
+
+// 组件卸载时停止重启轮询，避免 setTimeout 残留
+onBeforeUnmount(() => {
+  restartPolling.value = false
 })
 </script>
 

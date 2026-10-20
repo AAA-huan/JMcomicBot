@@ -53,6 +53,18 @@ def test_write_rejects_non_dict_yaml(tmp_path: Path) -> None:
         service.write("just a string\n")
 
 
+def test_write_rejects_empty_content(tmp_path: Path) -> None:
+    """空内容（None 或纯空白）应明确拒绝，避免误清空 option.yml。"""
+    service = _build_service(tmp_path)
+    with pytest.raises(ValueError, match="不能为空"):
+        service.write(None)
+    with pytest.raises(ValueError, match="不能为空"):
+        service.write("")
+    with pytest.raises(ValueError, match="不能为空"):
+        service.write("   \n  \t  \n")
+    assert not (tmp_path / "option.yml").exists()
+
+
 def test_write_rejects_invalid_yaml(tmp_path: Path) -> None:
     """非法 YAML 明确报错。"""
     service = _build_service(tmp_path)

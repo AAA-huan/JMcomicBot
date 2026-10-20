@@ -48,7 +48,10 @@ test('请求已排队漫画返回重复任务（不触发真实下载）', async
   await login(page)
   // 900004 在测试数据中已有一个排队中的下载任务，服务端应返回去重结果，
   // 避免测试触发 jmcomic 的真实联网下载而消耗本机资源
+  const cookies = await page.context().cookies()
+  const csrf = cookies.find((cookie) => cookie.name === 'jmbot_csrf')?.value
   const response = await page.request.post('/api/v1/tasks/downloads', {
+    headers: { 'X-CSRF-Token': csrf ?? '' },
     data: { manga_ids: ['900004'] },
   })
   expect(response.ok()).toBeTruthy()
