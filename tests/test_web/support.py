@@ -8,6 +8,7 @@ from starlette.testclient import TestClient
 
 from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
+from src.download.progress import DownloadProgressTracker
 from src.database.models import utc_now
 from src.database.repositories import (
     AuditEventRepository,
@@ -33,6 +34,7 @@ from src.service import (
     DownloadQueueService,
     MangaService,
     OperationTaskService,
+    OptionFileService,
     PermissionService,
     ReadingProgressService,
     RepairService,
@@ -87,6 +89,13 @@ class FakeDownloadQueue:
     def find_active_download(self, manga_id: str) -> Optional[str]:
         return self.queued_task_ids.get(manga_id)
 
+    def enqueue_existing_task(self, manga_id, task_id, context=None) -> bool:
+        # 测试替身：记录入队，不真正下载；重复 manga_id 返回 False
+        if manga_id in self.queued_task_ids:
+            return False
+        self.queued_task_ids[manga_id] = task_id
+        return True
+
     def cancel_download(self, manga_id: str) -> bool:
         task_id = self.queued_task_ids.pop(manga_id, None)
         if task_id is None:
@@ -112,6 +121,7 @@ class WebTestContext:
         event_bus: WebEventBus,
         shutdown_calls: List[object],
         reconnect_calls: List[bool],
+        restart_calls: List[object],
         applied_settings: Dict[str, object],
     ) -> None:
         self.dependencies = dependencies
@@ -119,6 +129,7 @@ class WebTestContext:
         self.event_bus = event_bus
         self.shutdown_calls = shutdown_calls
         self.reconnect_calls = reconnect_calls
+        self.restart_calls = restart_calls
         self.applied_settings = applied_settings
 
 
@@ -131,6 +142,7 @@ def build_web_context(  # pylint: disable=too-many-locals
     """构造完整 WebDependencies，并保留替身调用记录供断言。"""
     shutdown_calls: List[object] = []
     reconnect_calls: List[bool] = []
+    restart_calls: List[object] = []
     applied_settings: Dict[str, object] = {}
 
     manga_repo = MangaRepository(db_manager, download_root=str(download_root))
@@ -138,6 +150,7 @@ def build_web_context(  # pylint: disable=too-many-locals
     operation_task_repo = OperationTaskRepository(db_manager)
     audit_repo = AuditEventRepository(db_manager)
     event_bus = WebEventBus()
+    download_progress_tracker = DownloadProgressTracker(event_bus.publish)
     task_service = OperationTaskService(
         operation_task_repo,
         TaskEventRepository(db_manager),
@@ -175,6 +188,9 @@ def build_web_context(  # pylint: disable=too-many-locals
     def request_shutdown(operation_context) -> None:
         shutdown_calls.append(operation_context)
 
+    def request_restart(operation_context) -> None:
+        restart_calls.append(operation_context)
+
     dependencies = WebDependencies(
         auth_service=WebAuthService(
             WebAdminRepository(db_manager),
@@ -198,6 +214,7 @@ def build_web_context(  # pylint: disable=too-many-locals
             send_queue_provider=lambda: {"running": True, "queue_size": 0},
             reconnect_requester=request_reconnect,
             shutdown_requester=request_shutdown,
+            restart_requester=request_restart,
             audit_repository=audit_repo,
         ),
         manga_service=MangaService(
@@ -216,6 +233,10 @@ def build_web_context(  # pylint: disable=too-many-locals
             UserGroupRepository(db_manager),
         ),
         settings_service=settings_service,
+        option_file_service=OptionFileService(
+            option_file_path=str(download_root / "option.yml"),
+            audit_repository=audit_repo,
+        ),
         database_maintenance_service=DatabaseMaintenanceService(
             db_manager,
             task_service,
@@ -245,6 +266,7 @@ def build_web_context(  # pylint: disable=too-many-locals
             WebAdminRepository(db_manager), permission_manager, audit_repo
         ),
         event_bus=event_bus,
+        download_progress_tracker=download_progress_tracker,
         audit_query_service=AuditQueryService(audit_repo),
         verify_service=VerifyService(
             manga_repo,
@@ -259,6 +281,7 @@ def build_web_context(  # pylint: disable=too-many-locals
         event_bus=event_bus,
         shutdown_calls=shutdown_calls,
         reconnect_calls=reconnect_calls,
+        restart_calls=restart_calls,
         applied_settings=applied_settings,
     )
 

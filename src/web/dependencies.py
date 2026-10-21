@@ -2,6 +2,7 @@
 
 from dataclasses import dataclass
 
+from src.download.progress import DownloadProgressTracker
 from src.service import (
     DatabaseMaintenanceService,
     DownloadService,
@@ -16,6 +17,7 @@ from src.service import (
 from src.service.admin_qq_service import AdminQQService
 from src.service.favorite_service import FavoriteService
 from src.service.jm_favorite_service import JmFavoriteService
+from src.service.option_file_service import OptionFileService
 from src.service.query_service import (
     AuditQueryService,
     MangaQueryService,
@@ -38,11 +40,13 @@ class WebDependencies:  # pylint: disable=too-many-instance-attributes
     download_service: DownloadService
     permission_service: PermissionService
     settings_service: SettingsService
+    option_file_service: OptionFileService
     database_maintenance_service: DatabaseMaintenanceService
     repair_service: RepairService
     scan_service: ScanService
     reading_progress_service: ReadingProgressService
     event_bus: WebEventBus
+    download_progress_tracker: DownloadProgressTracker
     audit_query_service: AuditQueryService
     verify_service: VerifyService
     favorite_service: FavoriteService

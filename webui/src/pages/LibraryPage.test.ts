@@ -103,6 +103,32 @@ describe('LibraryPage', () => {
     ).toBe(true)
   })
 
+  it('全选与取消全选仅作用于当前页', async () => {
+    vi.mocked(listMangas).mockResolvedValue({
+      items: [mangaFixture('100', '测试漫画'), mangaFixture('200', '第二本')],
+      page: 1,
+      page_size: 20,
+      total: 2,
+      pages: 1,
+    })
+
+    const { wrapper } = await mountPage()
+    const selectAll = () =>
+      wrapper
+        .findAll('button')
+        .find((button) => ['全选', '取消全选'].includes(button.text()))!
+
+    expect(selectAll().text()).toBe('全选')
+    await selectAll().trigger('click')
+    expect(wrapper.text()).toContain('已选 2 条')
+    expect(selectAll().text()).toBe('取消全选')
+
+    await selectAll().trigger('click')
+    expect(wrapper.text()).not.toContain('已选 2 条')
+    expect(selectAll().text()).toBe('全选')
+    wrapper.unmount()
+  })
+
   it('加载失败展示中文错误与重试入口', async () => {
     vi.mocked(listMangas).mockRejectedValue(new Error('Failed to fetch'))
 

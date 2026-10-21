@@ -16,6 +16,7 @@ const statusFixture: SystemStatus = {
   uptime_seconds: 120,
   napcat_connected: true,
   manga_count: 3,
+  total_size_bytes: 1024 * 1024 * 50,
   download_queue: { running: true, queue_size: 1 },
   send_queue: { running: false, queue_size: 0 },
 }

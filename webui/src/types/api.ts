@@ -62,6 +62,7 @@ export interface SystemStatus {
   uptime_seconds: number
   napcat_connected: boolean
   manga_count: number
+  total_size_bytes: number
   download_queue: QueueStatus
   send_queue: QueueStatus
 }
@@ -135,6 +136,32 @@ export interface DownloadRequestResult {
   items: DownloadRequestItem[]
   queued_count: number
   duplicate_count: number
+}
+
+export interface DownloadChapterProgress {
+  photo_id: string
+  done: number
+  total: number
+  finished: boolean
+}
+
+export interface DownloadProgressSnapshot {
+  manga_id: string
+  task_id: string | null
+  album_id: string
+  album_total: number
+  album_done: number
+  chapters: DownloadChapterProgress[]
+  started_at: string
+  updated_at: string
+  finished: boolean
+  succeeded: boolean
+}
+
+export type DownloadProgressPhase = 'started' | 'progress' | 'finished'
+
+export interface DownloadProgressEventData extends DownloadProgressSnapshot {
+  phase: DownloadProgressPhase
 }
 
 export interface ReadingProgress {

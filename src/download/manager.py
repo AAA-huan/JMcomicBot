@@ -2,7 +2,7 @@
 
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 import os
 import queue
@@ -22,8 +22,14 @@ from src.database.repositories import (
 from src.service import OperationContext, TaskService
 from src.service.contracts import DownloadNotifier
 from src.service.manga_service import ADMIN_FAVORITE_DELETE_MESSAGE
-from src.service.results import DownloadRequestItem
+from src.service.results import (
+    DownloadRecoveryResult,
+    DownloadRequestItem,
+    TaskResult,
+)
 from src.utils.helpers import sanitize_filename
+
+from .progress import DownloadProgressTracker, WebProgressDownloader
 
 
 @dataclass(frozen=True)
@@ -126,7 +132,7 @@ def build_progress_plugin_config(log_file: str) -> Dict[str, Any]:
 class DownloadManager:
     """漫画下载管理器，负责漫画下载功能并对下载队列进行管理"""
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         logger_instance: Any,
         config: Dict[str, Any],
@@ -138,6 +144,7 @@ class DownloadManager:
         operation_task_service: Optional[TaskService] = None,
         send_conflict_checker: Optional[Callable[[str], bool]] = None,
         favorite_repository: Optional[FavoriteRepository] = None,
+        progress_tracker: Optional[DownloadProgressTracker] = None,
     ) -> None:
         """
         初始化下载管理器
@@ -151,6 +158,9 @@ class DownloadManager:
             task_log_repo: 任务日志仓储，记录下载任务到数据库
             tag_repo: 漫画标签仓储，下载时记录漫画标签
             operation_task_service: 持久化操作任务服务
+            send_conflict_checker: 判断漫画文件是否正在发送
+            favorite_repository: 管理员收藏仓储，用于低内存模式保护收藏文件
+            progress_tracker: WebUI 下载进度采集器；为空时不采集实时进度
         """
         self.logger = logger_instance
         self.config = config
@@ -170,6 +180,7 @@ class DownloadManager:
         self.tag_repo = tag_repo
         self.operation_task_service = operation_task_service
         self.send_conflict_checker = send_conflict_checker
+        self.progress_tracker = progress_tracker
         self.download_queue: queue.Queue = queue.Queue()
         self.queue_running: bool = True
         self._stop_event: threading.Event = threading.Event()
@@ -340,6 +351,38 @@ class DownloadManager:
             f"已安排在 {delay_minutes} 分钟后删除文件: {os.path.basename(file_path)}"
         )
 
+    def _start_progress_tracking(
+        self, manga_id: str, operation_task_id: Optional[str]
+    ) -> None:
+        """绑定进度采集器，并用 WebUI 下载器替换 jmcomic 全局下载器。"""
+        tracker = self.progress_tracker
+        if tracker is None:
+            return
+
+        progress_callback: Optional[Callable[[int], None]] = None
+        task_service = self.operation_task_service
+        if task_service is not None and operation_task_id:
+            task_id = operation_task_id
+
+            def update_task_progress(percent: int) -> None:
+                """把已完成章节百分比同步到任务管理页。"""
+                try:
+                    task_service.progress(task_id, "downloading", percent)
+                except Exception as error:  # pylint: disable=broad-exception-caught
+                    # 进度同步失败不应中断真实下载，但必须留下明确日志
+                    self.logger.error(f"更新下载任务进度失败: {error}")
+
+            progress_callback = update_task_progress
+
+        tracker.begin(manga_id, operation_task_id, progress_callback)
+        WebProgressDownloader.configure(tracker)
+        WebProgressDownloader.use()
+
+    def _finish_progress(self, succeeded: Optional[bool] = None) -> None:
+        """结束 WebUI 进度；未配置采集器时不做任何事。"""
+        if self.progress_tracker is not None:
+            self.progress_tracker.finish(succeeded=succeeded)
+
     def _process_download_task(self, item: DownloadQueueItem) -> None:
         """
         处理队列中的下载任务
@@ -404,10 +447,16 @@ class DownloadManager:
                 # create_option_by_file 已执行过 after_init 插件组，此处手动触发补充注入的插件
                 option.call_all_plugin("after_init", safe=True)
 
+            # 进度采集必须在插件安装 ProgressDownloader 之后执行 use()，
+            # 用子类替换全局下载器，才能同时保留终端进度与 WebUI 事件
+            self._start_progress_tracking(manga_id, operation_task_id)
+
             # 整本下载，完成后自动触发 img2pdf 插件合并 PDF（含删除原图）
             result = jmcomic.download_album(manga_id, option=option)
             if isinstance(result, set):
                 raise RuntimeError(f"漫画 {manga_id} 批量下载返回了集合，不符合预期")
+            # after_album 已推送 finished；此处兜底防止自定义下载器未触发
+            self._finish_progress()
 
             if self._stop_event.is_set():
                 self.logger.info(
@@ -506,6 +555,8 @@ class DownloadManager:
 
         except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error(f"下载漫画出错: {e}")
+            # 下载异常时显式标记失败，避免页面停留在“正在下载”
+            self._finish_progress(False)
             if self.operation_task_service is not None and operation_task_id:
                 self.operation_task_service.fail(
                     operation_task_id,
@@ -530,6 +581,8 @@ class DownloadManager:
             if item.notifier is not None:
                 item.notifier.message(error_msg)
         finally:
+            # 所有退出路径都收尾，正常完成时 finish 已幂等，不会重复发事件
+            self._finish_progress(False)
             if manga_id in self.downloading_mangas:
                 del self.downloading_mangas[manga_id]
             self.operation_task_ids.pop(manga_id, None)
@@ -643,6 +696,135 @@ class DownloadManager:
         if not self.is_download_active(manga_id):
             return None
         return self.operation_task_ids.get(manga_id)
+
+    def enqueue_existing_task(
+        self,
+        manga_id: str,
+        task_id: str,
+        context: Optional[OperationContext] = None,
+    ) -> bool:
+        """把既有任务记录重新装入内存队列（不新建数据库记录）。
+
+        用于批量重试与启动续传：任务已在数据库中处于 queued 状态，
+        只需装入内存队列即可被下载线程消费。notifier 为 None 表示静默
+        （QQ 上下文未持久化，恢复后不发送消息）。
+
+        Returns:
+            True 入队成功；False 已有同漫画活动任务，跳过
+
+        Raises:
+            RuntimeError: 下载队列已停止时
+        """
+        with self._queue_state_lock:
+            if not self.queue_running:
+                raise RuntimeError("下载队列已停止")
+            if manga_id in self.queued_tasks or manga_id in self.downloading_mangas:
+                self.logger.info(f"漫画ID {manga_id} 已有活动任务，跳过重复入队")
+                return False
+            item = DownloadQueueItem(
+                manga_id=manga_id,
+                context=context or OperationContext.system(),
+                operation_task_id=task_id,
+                notifier=None,
+            )
+            self.queued_tasks[manga_id] = item
+            self.operation_task_ids[manga_id] = task_id
+            self.download_queue.put(item)
+        self.logger.info(f"漫画ID {manga_id} 的既有任务 {task_id} 已重新入队")
+        return True
+
+    def recover_tasks(self, tasks: List[TaskResult]) -> DownloadRecoveryResult:
+        """启动恢复遗留下载任务：排队任务直接入队，运行中任务复用原记录续传。
+
+        调用前服务层应已把遗留 running 任务标记为 interrupted。本方法对
+        interrupted 任务先 requeue 回 queued，再装入内存队列；queued 任务直接
+        装入。数据异常（非下载任务、缺少漫画 ID、状态不合法、同漫画冲突）逐条
+        告警跳过，不静默丢弃。恢复任务的 notifier 为空，不补发 QQ 消息。
+
+        Args:
+            tasks: 启动时读取的遗留任务快照（queued 或 interrupted）
+
+        Returns:
+            DownloadRecoveryResult: 恢复、续传与跳过数量
+
+        Raises:
+            RuntimeError: 未配置操作任务服务，无法完成续传
+        """
+        if not self.queue_running:
+            self.logger.error("下载队列已停止，无法恢复启动遗留的下载任务")
+            return DownloadRecoveryResult(
+                recovered_count=0,
+                resumed_count=0,
+                skipped_count=len(tasks),
+                aborted=True,
+            )
+        task_service = self.operation_task_service
+        if task_service is None:
+            raise RuntimeError("未配置操作任务服务，无法恢复下载任务")
+
+        recovered_count = 0
+        resumed_count = 0
+        skipped_count = 0
+        for task in tasks:
+            if task.task_type != "download":
+                self.logger.warning(f"启动恢复跳过非下载任务: {task.id}")
+                skipped_count += 1
+                continue
+            if not task.manga_id:
+                self.logger.warning(f"启动恢复跳过缺少漫画 ID 的任务: {task.id}")
+                skipped_count += 1
+                continue
+            if self.is_download_active(task.manga_id):
+                self.logger.warning(
+                    f"启动恢复跳过任务 {task.id}：漫画 {task.manga_id} 已有活动任务"
+                )
+                skipped_count += 1
+                continue
+
+            previous_status = task.status
+            if previous_status == "interrupted":
+                try:
+                    task_service.requeue(task.id, reason="startup_recovery")
+                except ValueError as error:
+                    self.logger.warning(f"启动恢复跳过任务 {task.id}：{error}")
+                    skipped_count += 1
+                    continue
+            elif previous_status != "queued":
+                self.logger.warning(
+                    f"启动恢复跳过状态为 {previous_status} 的任务: {task.id}"
+                )
+                skipped_count += 1
+                continue
+
+            try:
+                enqueued = self.enqueue_existing_task(
+                    task.manga_id,
+                    task.id,
+                    context=OperationContext.system(),
+                )
+            except RuntimeError as error:
+                self.logger.error(f"下载队列已停止，启动恢复中止: {error}")
+                return DownloadRecoveryResult(
+                    recovered_count=recovered_count,
+                    resumed_count=resumed_count,
+                    skipped_count=skipped_count + 1,
+                    aborted=True,
+                )
+            if not enqueued:
+                # 理论上前面已检查内存活动任务，此处仅兜底并发请求造成的变化
+                self.logger.warning(
+                    f"启动恢复跳过任务 {task.id}：漫画 {task.manga_id} 入队时已有活动任务"
+                )
+                skipped_count += 1
+                continue
+            recovered_count += 1
+            if previous_status == "interrupted":
+                resumed_count += 1
+        return DownloadRecoveryResult(
+            recovered_count=recovered_count,
+            resumed_count=resumed_count,
+            skipped_count=skipped_count,
+        )
 
     def update_low_memory_settings(self, delete_delay: Optional[int] = None) -> None:
         """由 SettingsService 调用，显式更新低内存模式文件删除延迟（分钟）。"""

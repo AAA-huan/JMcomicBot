@@ -62,8 +62,8 @@ def _find_view(service: SettingsService, key: str):
     return next(view for view in service.list() if view.key == key)
 
 
-def test_list_masks_sensitive_values(db_manager) -> None:
-    """敏感配置只显示是否已设置，永不回显真实值。"""
+def test_list_returns_sensitive_plaintext(db_manager) -> None:
+    """敏感配置在局域网单管理员控制台明文返回，保留 is_set 标记。"""
     service, _applied = _build_service(
         db_manager, {"NAPCAT_TOKEN": "super-secret-token"}
     )
@@ -72,9 +72,19 @@ def test_list_masks_sensitive_values(db_manager) -> None:
     token_view = _find_view(service, "NAPCAT_TOKEN")
 
     assert token_view.sensitive is True
-    assert token_view.value is None
+    assert token_view.value == "super-secret-token"
     assert token_view.is_set is True
-    assert "super-secret-token" not in repr(views)
+
+
+def test_list_marks_empty_sensitive_as_unset(db_manager) -> None:
+    """敏感配置为空串时 is_set 为 False，表示未配置。"""
+    service, _applied = _build_service(db_manager, {"NAPCAT_TOKEN": ""})
+
+    token_view = _find_view(service, "NAPCAT_TOKEN")
+
+    assert token_view.sensitive is True
+    assert token_view.value == ""
+    assert token_view.is_set is False
 
 
 def test_update_persists_applies_and_audits(db_manager) -> None:
@@ -208,8 +218,8 @@ def test_restart_settings_save_env_without_applying(db_manager, key, value):
         value
     )
     if view.sensitive:
-        assert view.value is None
-        assert value not in repr(service.list())
+        # 敏感值明文返回，但历史表仍写脱敏占位
+        assert view.value == value
         assert (
             SettingHistoryRepository(db_manager).list()[0].new_value_masked == "******"
         )

@@ -11,7 +11,8 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { useCoverPreview } from '@/stores/coverPreview'
 import type { Manga } from '@/types/api'
-import { formatDateTime, parseMangaIds } from '@/utils/format'
+import { copyText } from '@/utils/clipboard'
+import { formatDateTime } from '@/utils/format'
 import {
   colorOf,
   labelOf,
@@ -94,11 +95,19 @@ const deleteLoading = ref(false)
 const batchDeleteDialog = ref(false)
 const batchDeleteLoading = ref(false)
 
-const downloadDialog = ref(false)
-const downloadInput = ref('')
-const downloadLoading = ref(false)
-
 const selectedCount = computed(() => selected.value.length)
+
+/** 当前页是否已全部选中；分页加载时会清空选择，因此只比较当前页数据。 */
+const allSelectableSelected = computed(
+  () => mangas.value.length > 0 && selected.value.length === mangas.value.length,
+)
+
+/** 全选/取消全选当前页；与任务管理页保持一致，不跨页保留选择。 */
+function toggleSelectAll(): void {
+  selected.value = allSelectableSelected.value
+    ? []
+    : mangas.value.map((manga) => manga.id)
+}
 
 /** 从 URL 查询参数恢复筛选条件，保证刷新后视图不丢失。 */
 function readQuery(): void {
@@ -224,11 +233,10 @@ async function requestDownloadIds(ids: string[]): Promise<void> {
     actionError.value = '请输入至少一个漫画 ID'
     return
   }
-  if (ids.length > 20) {
-    actionError.value = '单次最多请求 20 个漫画'
+  if (ids.length > 100) {
+    actionError.value = '单次最多请求 100 个漫画'
     return
   }
-  downloadLoading.value = true
   try {
     const result = await requestDownloads(ids)
     const parts = [`已入队 ${result.queued_count} 个`]
@@ -241,14 +249,20 @@ async function requestDownloadIds(ids: string[]): Promise<void> {
       )
     }
     actionNotice.value = parts.join('，')
-    downloadDialog.value = false
-    downloadInput.value = ''
     selected.value = []
   } catch (err) {
     actionError.value = errorMessage(err)
-  } finally {
-    downloadLoading.value = false
   }
+}
+
+async function copySelectedIds(): Promise<void> {
+  if (selectedCount.value === 0) return
+  const ids = [...new Set(selected.value)].join(',')
+  const ok = await copyText(ids)
+  actionError.value = ''
+  actionNotice.value = ok
+    ? `已复制 ${selectedCount.value} 个漫画 ID`
+    : '复制失败，请手动选择并复制'
 }
 
 /** 服务端确认成功后更新状态，失败时保留原收藏状态。 */
@@ -457,11 +471,26 @@ watch(
         <v-spacer />
         <v-btn
           variant="tonal"
+          :disabled="mangas.length === 0"
+          @click="toggleSelectAll"
+        >
+          {{ allSelectableSelected ? '取消全选' : '全选' }}
+        </v-btn>
+        <v-btn
+          variant="tonal"
           prepend-icon="mdi-download"
           :disabled="selectedCount === 0"
           @click="requestDownloadIds(selected)"
         >
           下载选中
+        </v-btn>
+        <v-btn
+          variant="tonal"
+          prepend-icon="mdi-content-copy"
+          :disabled="selectedCount === 0"
+          @click="copySelectedIds"
+        >
+          复制 ID
         </v-btn>
         <v-btn
           variant="tonal"
@@ -471,14 +500,6 @@ watch(
           @click="batchDeleteDialog = true"
         >
           批量删除
-        </v-btn>
-        <v-btn
-          color="primary"
-          variant="tonal"
-          prepend-icon="mdi-plus"
-          @click="downloadDialog = true"
-        >
-          新建下载
         </v-btn>
         <v-btn icon="mdi-refresh" variant="text" aria-label="刷新" @click="load" />
       </v-card-actions>
@@ -491,7 +512,7 @@ watch(
         v-if="!loading && mangas.length === 0"
         icon="mdi-bookshelf"
         title="没有找到漫画"
-        description="调整筛选条件，或在任务页请求下载新漫画。"
+        description="调整筛选条件，或前往漫画下载页请求下载新漫画。"
       />
 
       <template v-else-if="!mobile">
@@ -500,10 +521,10 @@ watch(
             <tr>
               <th style="width: 44px">
                 <v-checkbox-btn
-                  :model-value="selected.length === mangas.length && mangas.length > 0"
-                  :indeterminate="selected.length > 0 && selected.length < mangas.length"
+                  :model-value="allSelectableSelected"
+                  :indeterminate="selected.length > 0 && !allSelectableSelected"
                   aria-label="全选"
-                  @update:model-value="selected = $event ? mangas.map((m) => m.id) : []"
+                  @update:model-value="toggleSelectAll"
                 />
               </th>
               <th>标题</th>
@@ -731,34 +752,5 @@ watch(
       :loading="batchDeleteLoading"
       @confirm="confirmBatchDelete"
     />
-
-    <v-dialog v-model="downloadDialog" max-width="480">
-      <v-card>
-        <v-card-title>新建下载请求</v-card-title>
-        <v-card-text>
-          <p class="text-body-2 text-medium-emphasis mb-2">
-            输入一个或多个漫画 ID，用逗号、句号或换行分隔，单次最多 20 个。
-          </p>
-          <v-textarea
-            v-model="downloadInput"
-            label="漫画 ID"
-            rows="3"
-            auto-grow
-            placeholder="例如：350234, 422866"
-          />
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn variant="text" @click="downloadDialog = false">取消</v-btn>
-          <v-btn
-            color="primary"
-            :loading="downloadLoading"
-            @click="requestDownloadIds(parseMangaIds(downloadInput))"
-          >
-            请求下载
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
   </div>
 </template>

@@ -139,7 +139,9 @@ def test_running_tasks_are_interrupted_on_recovery(
         stored.status = "running"
         session.commit()
 
-    assert operation_task_repo.interrupt_running() == 1
+    interrupted_tasks = operation_task_repo.interrupt_running()
+    assert [item.id for item in interrupted_tasks] == [task.id]
+    assert interrupted_tasks[0].status == "interrupted"
     interrupted = operation_task_repo.get(task.id)
     assert interrupted.status == "interrupted"
     assert interrupted.finished_at is not None
@@ -263,6 +265,71 @@ def test_failed_download_returns_persisted_result(
         "download.started",
         "download.failed",
     ]
+
+
+def test_requeue_resets_terminal_fields_and_increments_attempt_on_restart(
+    operation_task_service, operation_task_repo
+) -> None:
+    """重新入队应复用原记录重置执行字段，再次启动时累加尝试次数。"""
+    context = OperationContext.web("admin", "127.0.0.1")
+    task = operation_task_service.create("download", context, manga_id="600")
+    operation_task_service.start(task.id, "downloading")
+    # 同一运行阶段的进度更新不得重复累加尝试次数
+    operation_task_service.progress(task.id, "downloading", 50)
+    assert operation_task_repo.get(task.id).attempt_count == 1
+    operation_task_service.fail(
+        task.id, "download_failed", "TimeoutError", context=context
+    )
+
+    requeued = operation_task_service.requeue(task.id, reason="manual_retry")
+
+    stored = operation_task_repo.get(task.id)
+    assert requeued.id == task.id
+    assert requeued.status == "queued"
+    assert stored is not None
+    assert stored.stage == "queued"
+    assert stored.progress is None
+    assert stored.error_code is None
+    assert stored.error_message is None
+    assert stored.finished_at is None
+    assert stored.attempt_count == 1
+
+    operation_task_service.start(task.id, "downloading")
+
+    restarted = operation_task_repo.get(task.id)
+    assert restarted is not None
+    assert restarted.attempt_count == 2
+
+
+def test_requeue_rejects_active_download_for_same_manga(
+    operation_task_service,
+) -> None:
+    """同漫画已有活动任务时不得复用旧记录重新入队。"""
+    context = OperationContext.qq("10001")
+    failed = operation_task_service.create("download", context, manga_id="601")
+    operation_task_service.start(failed.id, "downloading")
+    operation_task_service.fail(failed.id, "download_failed", "TimeoutError")
+    operation_task_service.create("download", context, manga_id="601")
+
+    with pytest.raises(ValueError, match="已有活动任务"):
+        operation_task_service.requeue(failed.id)
+
+
+def test_recovery_audit_metadata_is_whitelisted(audit_event_repo) -> None:
+    """启动恢复汇总审计应允许记录恢复与续传数量。"""
+    event = audit_event_repo.record(
+        event_type="bot.tasks_recovered",
+        source="system",
+        result="succeeded",
+        target_type="bot",
+        target_id="self",
+        metadata={"recovered_count": 2, "resumed_count": 1},
+    )
+
+    assert json.loads(event.metadata_json) == {
+        "recovered_count": 2,
+        "resumed_count": 1,
+    }
 
 
 def test_database_backup_uses_task_service(

@@ -304,7 +304,7 @@ def _create_history_tasks(
     generated: List[GeneratedManga],
     context: OperationContext,
 ) -> None:
-    """写入成功/失败/取消/排队四种状态的下载任务。"""
+    """写入成功/失败/取消/中断四种状态的下载任务。"""
     succeeded = task_service.create("download", context, manga_id=generated[0].manga_id)
     task_service.start(succeeded.id, "downloading")
     task_service.succeed(succeeded.id, metadata={"file_count": 1}, context=context)
@@ -318,8 +318,13 @@ def _create_history_tasks(
     cancelled = task_service.create("download", context, manga_id=generated[2].manga_id)
     task_service.cancel(cancelled.id)
 
-    # 保留一个排队中的下载任务，用于任务列表状态展示
-    task_service.create("download", context, manga_id=generated[3].manga_id)
+    # 保留一个中断的下载任务用于状态展示；不保留 queued/running 任务，
+    # 否则真实后端启动时会自动续传并触发联网下载
+    interrupted = task_service.create(
+        "download", context, manga_id=generated[3].manga_id
+    )
+    task_service.start(interrupted.id, "downloading")
+    task_service.recover_interrupted()
 
 
 def _write_reading_progress(
@@ -405,7 +410,7 @@ def _print_summary(
         f"损坏 {verify_result.corrupted_count}、"
         f"路径异常 {verify_result.invalid_path_count}、"
         f"错误 {verify_result.error_count}",
-        "  下载任务: 成功/失败/取消/排队 各 1 个",
+        "  下载任务: 成功/失败/取消/中断 各 1 个",
         f"  阅读进度: {reading_count} 条，备份记录: {backup_count} 条",
         "提示：扫描按真实逻辑执行，数据库中存在但磁盘缺失的既有漫画会被标记 missing。",
     ]

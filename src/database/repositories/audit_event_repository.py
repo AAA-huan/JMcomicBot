@@ -44,6 +44,8 @@ _AUDIT_METADATA_KEYS = {
     "new_count",
     "page_count",
     "reason",
+    "recovered_count",
+    "resumed_count",
     "retry_count",
     "scope",
     "updated_count",

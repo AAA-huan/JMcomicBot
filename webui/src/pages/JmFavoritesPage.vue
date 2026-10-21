@@ -8,6 +8,7 @@ import {
 } from '@/api/jmFavorites'
 import type { JmAccount, JmFavorite, JmImport } from '@/api/jmFavorites'
 import EmptyState from '@/components/EmptyState.vue'
+import { copyText } from '@/utils/clipboard'
 import { formatDateTime } from '@/utils/format'
 
 const account = ref<JmAccount>({ connected: false })
@@ -29,6 +30,14 @@ const error = ref('')
 const notice = ref('')
 const running = computed(() => jobs.value.some((job) => job.status === 'running'))
 const selectedIds = computed(() => [...new Set(selected.value)])
+// 当前页可勾选项：未下载项的漫画 ID 去重
+const selectableIds = computed(() => [
+  ...new Set(items.value.filter((item) => !item.downloaded).map((item) => item.manga_id)),
+])
+const allSelectableSelected = computed(
+  () => selectableIds.value.length > 0
+    && selectableIds.value.every((id) => selected.value.includes(id)),
+)
 const downloadOptions = [
   { title: '全部下载状态', value: '' },
   { title: '未下载', value: 'not_downloaded' },
@@ -152,13 +161,35 @@ async function download(): Promise<void> {
   notice.value = ''
   try {
     const result = await requestJmDownloads(selectedIds.value)
-    notice.value = `已加入下载队列 ${result.queued_count} 本，已有任务 ${result.duplicate_count} 本。可在下载任务页查看进度，完成后刷新本页。`
+    notice.value = `已加入下载队列 ${result.queued_count} 本，已有任务 ${result.duplicate_count} 本。可在任务管理页查看进度，完成后刷新本页。`
     selected.value = []
   } catch (err) {
     error.value = errorMessage(err)
   } finally {
     downloading.value = false
   }
+}
+
+function toggleSelectAll(): void {
+  if (allSelectableSelected.value) {
+    // 取消全选：移除当前页可选 ID
+    const removable = new Set(selectableIds.value)
+    selected.value = selected.value.filter((id) => !removable.has(id))
+  } else {
+    // 全选：合并当前页可选 ID（保留其他页已选）
+    const merged = new Set([...selected.value, ...selectableIds.value])
+    selected.value = [...merged]
+  }
+}
+
+async function copySelectedIds(): Promise<void> {
+  const ids = selectedIds.value.join(',')
+  if (!ids) return
+  const ok = await copyText(ids)
+  notice.value = ok
+    ? `已复制 ${selectedIds.value.length} 个漫画 ID`
+    : '复制失败，请手动选择并复制'
+  error.value = ''
 }
 
 function applyFilters(): void {
@@ -227,10 +258,14 @@ onBeforeUnmount(() => { disposed = true; if (timer !== undefined) clearTimeout(t
           <v-col cols="12" md="3" class="d-flex align-center"><v-btn variant="tonal" :disabled="loading" @click="applyFilters">查询</v-btn></v-col>
         </v-row>
         <div class="d-flex align-center flex-wrap ga-2 mt-4">
-          <v-btn color="primary" :loading="downloading" :disabled="selectedIds.length === 0 || selectedIds.length > 20" data-testid="jm-download" @click="download">下载所选（{{ selectedIds.length }}）</v-btn>
-          <span class="text-caption text-medium-emphasis">每次最多 20 本，下载后自动关联管理员收藏。</span>
+          <v-btn variant="tonal" :disabled="selectableIds.length === 0" @click="toggleSelectAll">
+            {{ allSelectableSelected ? '取消全选' : '全选' }}
+          </v-btn>
+          <v-btn color="primary" :loading="downloading" :disabled="selectedIds.length === 0 || selectedIds.length > 100" data-testid="jm-download" @click="download">下载所选（{{ selectedIds.length }}）</v-btn>
+          <v-btn variant="tonal" prepend-icon="mdi-content-copy" :disabled="selectedIds.length === 0" @click="copySelectedIds">复制 ID</v-btn>
+          <span class="text-caption text-medium-emphasis">每次最多 100 本，下载后自动关联管理员收藏。</span>
           <v-spacer />
-          <v-btn variant="text" to="/tasks">查看下载任务</v-btn>
+          <v-btn variant="text" to="/tasks">查看任务管理</v-btn>
         </div>
       </v-card-text>
       <v-progress-linear v-if="loading" indeterminate />

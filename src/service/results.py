@@ -91,6 +91,21 @@ class DownloadRequestResult:
 
 
 @dataclass(frozen=True)
+class DownloadRecoveryResult:
+    """启动恢复下载任务的汇总结果。
+
+    recovered_count 为成功重新入队的任务数，resumed_count 为其中由运行中
+    中断后继续的任务数，skipped_count 为数据异常、状态不合法或冲突跳过的
+    任务数；aborted 表示下载队列已停止，恢复流程提前终止。
+    """
+
+    recovered_count: int
+    resumed_count: int
+    skipped_count: int
+    aborted: bool = False
+
+
+@dataclass(frozen=True)
 class MangaDeleteOutcome:
     """单个漫画的删除结果。"""
 
@@ -135,3 +150,33 @@ class TaskCancellationResult:
 
     task_id: str
     status: str
+
+
+@dataclass(frozen=True)
+class BatchTaskItem:
+    """批量任务操作的单项结果，status 取决于操作类型。
+
+    cancel: cancelled / not_queued / not_found
+    retry: requeued / duplicate / not_retryable / not_found
+    """
+
+    task_id: str
+    status: str
+    manga_id: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class BatchTaskResult:
+    """批量任务操作汇总结果。"""
+
+    items: Tuple[BatchTaskItem, ...]
+
+    @property
+    def succeeded_count(self) -> int:
+        """实际成功（cancelled 或 requeued）的数量。"""
+        return sum(1 for item in self.items if item.status in ("cancelled", "requeued"))
+
+    @property
+    def failed_count(self) -> int:
+        """失败或不可操作的数量。"""
+        return len(self.items) - self.succeeded_count

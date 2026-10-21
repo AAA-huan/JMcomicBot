@@ -185,6 +185,7 @@ class ConfigManager:
             "WEBUI_HOST": webui_host,
             "WEBUI_PORT": webui_port,
             "WEBUI_SESSION_HOURS": webui_session_hours,
+            "WEBUI_DEV_ORIGINS": os.getenv("WEBUI_DEV_ORIGINS", ""),
         }
 
         # 初始化黑白名单配置

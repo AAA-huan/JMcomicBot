@@ -18,6 +18,7 @@ class SystemStatusResult:
     uptime_seconds: int
     napcat_connected: bool
     manga_count: int
+    total_size_bytes: int
     download_queue: dict[str, object]
     send_queue: dict[str, object]
 
@@ -35,6 +36,7 @@ class SystemService:  # pylint: disable=too-many-instance-attributes
         send_queue_provider: Callable[[], dict[str, object]],
         reconnect_requester: Callable[[], bool],
         shutdown_requester: Callable[[OperationContext], None],
+        restart_requester: Callable[[OperationContext], None],
         audit_repository: AuditEventRepository,
     ) -> None:
         self.version = version
@@ -45,6 +47,7 @@ class SystemService:  # pylint: disable=too-many-instance-attributes
         self.send_queue_provider = send_queue_provider
         self.reconnect_requester = reconnect_requester
         self.shutdown_requester = shutdown_requester
+        self.restart_requester = restart_requester
         self.audit_repository = audit_repository
 
     def get_status(self) -> SystemStatusResult:
@@ -55,6 +58,7 @@ class SystemService:  # pylint: disable=too-many-instance-attributes
             uptime_seconds=uptime,
             napcat_connected=self.connection_provider(),
             manga_count=self.manga_repository.count(),
+            total_size_bytes=self.manga_repository.total_file_size_bytes(),
             download_queue=self.download_queue_provider(),
             send_queue=self.send_queue_provider(),
         )
@@ -79,3 +83,8 @@ class SystemService:  # pylint: disable=too-many-instance-attributes
         """请求安全关闭；调用方（MangaBot）负责记录审计并触发关闭。"""
         operation_context = context or OperationContext.system()
         self.shutdown_requester(operation_context)
+
+    def request_restart(self, context: Optional[OperationContext] = None) -> None:
+        """请求优雅重启；与安全关闭共用收尾路径，随后由 main 拉起新进程。"""
+        operation_context = context or OperationContext.system()
+        self.restart_requester(operation_context)

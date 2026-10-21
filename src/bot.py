@@ -31,6 +31,7 @@ from src.database.repositories import (
     WebSessionRepository,
 )
 from src.download.manager import DownloadManager
+from src.download.progress import DownloadProgressTracker
 from src.event.handler import EventHandler
 from src.logging.logger_config import logger
 from src.message.manager import MessageManager
@@ -43,6 +44,7 @@ from src.service import (
     MangaService,
     OperationContext,
     OperationTaskService,
+    OptionFileService,
     PermissionService,
     ReadingProgressService,
     RepairService,
@@ -81,6 +83,8 @@ class MangaBot:
         self._close_lock: threading.Lock = threading.Lock()
         self._resources_closed: bool = False
         self._started_at = utc_now()
+        # 一键重启标记：close() 完成后由 main 判断是否拉起新进程
+        self.restart_requested: bool = False
 
         self._check_platform_compatibility()
 
@@ -117,15 +121,22 @@ class MangaBot:
         self.setting_history_repo = SettingHistoryRepository(self.database_manager)
         # WebSocket 事件总线：任务等业务线程发布，Web 连接订阅
         self.event_bus = WebEventBus()
+        # 下载进度采集器：下载线程写入，WebSocket 推送与 REST 快照共用
+        self.download_progress_tracker = DownloadProgressTracker(self.event_bus.publish)
         self.operation_task_service = OperationTaskService(
             self.operation_task_repo,
             self.task_event_repo,
             self.audit_event_repo,
             event_publisher=self.event_bus,
         )
-        interrupted_count = self.operation_task_service.recover_interrupted()
-        if interrupted_count:
-            logger.warning(f"启动时已中断 {interrupted_count} 个遗留运行任务")
+        # 启动恢复：先记录遗留活动下载，再把运行中任务标记中断；
+        # 下载管理器就绪后复用原任务记录重新入队
+        legacy_download_tasks = self.operation_task_service.list_active_downloads()
+        interrupted_download_tasks = self.operation_task_service.recover_interrupted()
+        if interrupted_download_tasks:
+            logger.warning(
+                f"启动时已中断 {len(interrupted_download_tasks)} 个遗留运行下载任务"
+            )
 
         # 运行时配置服务先于组件创建，加载数据库动态覆盖值
         self.settings_service = SettingsService(
@@ -137,6 +148,12 @@ class MangaBot:
         persisted_settings = self.settings_service.load_persisted()
         if persisted_settings:
             logger.info(f"已应用 {persisted_settings} 项数据库动态配置")
+
+        # option.yml 网页编辑服务，路径与 download_manager 的相对路径约定一致
+        self.option_file_service = OptionFileService(
+            option_file_path="option.yml",
+            audit_repository=self.audit_event_repo,
+        )
 
         self.cleanup_service = CleanupService(
             self.operation_task_repo,
@@ -182,7 +199,41 @@ class MangaBot:
             operation_task_service=self.operation_task_service,
             send_conflict_checker=self.message_manager.is_manga_sending,
             favorite_repository=self.favorite_repo,
+            progress_tracker=self.download_progress_tracker,
         )
+        # 启动续传：运行中任务已在上方标记中断，这里复用原记录转回排队；
+        # 排队任务直接装入内存队列，避免重启后旧记录永久占位
+        interrupted_by_id = {task.id: task for task in interrupted_download_tasks}
+        recovery_tasks = [
+            interrupted_by_id.get(task.id, task) for task in legacy_download_tasks
+        ]
+        if recovery_tasks:
+            recovery_result = self.download_manager.recover_tasks(recovery_tasks)
+            recovery_summary = (
+                f"启动恢复 {recovery_result.recovered_count} 个下载任务"
+                f"（其中中断续传 {recovery_result.resumed_count} 个）"
+            )
+            if recovery_result.skipped_count or recovery_result.aborted:
+                logger.warning(
+                    f"{recovery_summary}，跳过 {recovery_result.skipped_count} 个"
+                )
+            else:
+                logger.info(recovery_summary)
+            self.audit_event_repo.record(
+                event_type="bot.tasks_recovered",
+                source="system",
+                result=(
+                    "failed"
+                    if recovery_result.aborted
+                    else ("partial" if recovery_result.skipped_count else "succeeded")
+                ),
+                target_type="bot",
+                target_id="self",
+                metadata={
+                    "recovered_count": recovery_result.recovered_count,
+                    "resumed_count": recovery_result.resumed_count,
+                },
+            )
         self.download_service = DownloadQueueService(
             self.download_manager, self.operation_task_service
         )
@@ -260,6 +311,9 @@ class MangaBot:
             reconnect_requester=self.ws_client.request_reconnect,
             shutdown_requester=lambda context: self.request_shutdown(
                 "通过 WebUI 请求安全关闭", context=context
+            ),
+            restart_requester=lambda context: self.request_restart(
+                "通过 WebUI 请求一键重启", context=context
             ),
             audit_repository=self.audit_event_repo,
         )
@@ -355,11 +409,13 @@ class MangaBot:
                         download_service=self.download_service,
                         permission_service=self.permission_service,
                         settings_service=self.settings_service,
+                        option_file_service=self.option_file_service,
                         database_maintenance_service=self.database_maintenance_service,
                         repair_service=self.repair_service,
                         scan_service=self.scan_service,
                         reading_progress_service=self.reading_progress_service,
                         event_bus=self.event_bus,
+                        download_progress_tracker=self.download_progress_tracker,
                         audit_query_service=self.audit_query_service,
                         verify_service=self.verify_service,
                         favorite_service=self.favorite_service,
@@ -544,6 +600,32 @@ class MangaBot:
             target_id="self",
             metadata={"reason": reason} if reason else None,
         )
+        self._shutdown_event.set()
+
+    def request_restart(
+        self, reason: str = "", context: Optional[OperationContext] = None
+    ) -> None:
+        """请求优雅重启：复用安全关闭收尾路径，close 后由 main 拉起新进程。
+
+        重复调用不会产生额外副作用；与 request_shutdown 互斥（先到的生效）。
+        """
+        if self._shutdown_event.is_set():
+            return
+        if reason:
+            logger.info(f"请求重启机器人: {reason}")
+        operation_context = context or OperationContext.system()
+        self.audit_event_repo.record(
+            event_type="bot.restart_requested",
+            source=operation_context.source,
+            result="accepted",
+            actor_user_id=operation_context.actor_user_id,
+            actor_group_id=operation_context.actor_group_id,
+            client_ip=operation_context.client_ip,
+            target_type="bot",
+            target_id="self",
+            metadata={"reason": reason} if reason else None,
+        )
+        self.restart_requested = True
         self._shutdown_event.set()
 
     def close(self) -> None:

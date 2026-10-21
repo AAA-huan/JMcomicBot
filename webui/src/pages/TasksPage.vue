@@ -5,12 +5,13 @@ import { useDisplay } from 'vuetify'
 
 import { errorMessage } from '@/api/client'
 import { useEventSubscription } from '@/api/eventStream'
-import { cancelQueuedTasks, cancelTask, listTasks, requestDownloads } from '@/api/tasks'
+import { cancelQueuedTasks, cancelTask, cancelTasks, listTasks, retryTasks } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { useSystemStore } from '@/stores/system'
 import type { OperationTask } from '@/types/api'
-import { formatDateTime, parseMangaIds } from '@/utils/format'
+import { copyText } from '@/utils/clipboard'
+import { formatDateTime } from '@/utils/format'
 import {
   colorOf,
   labelOf,
@@ -68,9 +69,34 @@ const cancelLoading = ref(false)
 const cancelQueuedDialog = ref(false)
 const cancelQueuedLoading = ref(false)
 
-const downloadDialog = ref(false)
-const downloadInput = ref('')
-const downloadLoading = ref(false)
+// 任务选中机制：仅 manga_id 非空的下载任务可勾选（复制ID与批量操作的基础）
+const selected = ref<string[]>([])
+const batchLoading = ref(false)
+
+/** 当前页可勾选任务：带漫画 ID 的任务 */
+const selectableTasks = computed(() =>
+  tasks.value.filter((task) => task.manga_id !== null && task.manga_id !== ''),
+)
+const selectableIds = computed(() => selectableTasks.value.map((task) => task.id))
+const allSelectableSelected = computed(
+  () => selectableIds.value.length > 0
+    && selectableIds.value.every((id) => selected.value.includes(id)),
+)
+/** 选中中可批量取消的任务（download + queued） */
+const cancelableSelected = computed(() =>
+  tasks.value.filter(
+    (task) => selected.value.includes(task.id) && canCancel(task),
+  ),
+)
+/** 选中中可批量重试的任务（download + interrupted/failed） */
+const retryableSelected = computed(() =>
+  tasks.value.filter(
+    (task) =>
+      selected.value.includes(task.id)
+      && task.task_type === 'download'
+      && (task.status === 'interrupted' || task.status === 'failed'),
+  ),
+)
 
 const downloadQueue = computed(() => system.status?.download_queue ?? null)
 const sendQueue = computed(() => system.status?.send_queue ?? null)
@@ -168,33 +194,63 @@ async function confirmCancelQueued(): Promise<void> {
   }
 }
 
-async function submitDownload(): Promise<void> {
-  const ids = parseMangaIds(downloadInput.value)
+function toggleSelectAll(): void {
+  if (allSelectableSelected.value) {
+    const removable = new Set(selectableIds.value)
+    selected.value = selected.value.filter((id) => !removable.has(id))
+  } else {
+    const merged = new Set([...selected.value, ...selectableIds.value])
+    selected.value = [...merged]
+  }
+}
+
+async function copySelectedIds(): Promise<void> {
+  const selectedTasks = tasks.value.filter((task) => selected.value.includes(task.id) && task.manga_id)
+  const ids = [...new Set(selectedTasks.map((task) => task.manga_id!))].join(',')
+  if (!ids) return
+  const ok = await copyText(ids)
+  actionError.value = ''
+  actionNotice.value = ok
+    ? `已复制 ${new Set(selectedTasks.map((t) => t.manga_id)).size} 个漫画 ID`
+    : '复制失败，请手动选择并复制'
+}
+
+async function batchCancel(): Promise<void> {
+  const targets = cancelableSelected.value
+  if (targets.length === 0) return
+  batchLoading.value = true
   actionError.value = ''
   actionNotice.value = ''
-  if (ids.length === 0) {
-    actionError.value = '请输入至少一个漫画 ID'
-    return
-  }
-  if (ids.length > 20) {
-    actionError.value = '单次最多请求 20 个漫画'
-    return
-  }
-  downloadLoading.value = true
   try {
-    const result = await requestDownloads(ids)
-    const parts = [`已入队 ${result.queued_count} 个`]
-    if (result.duplicate_count > 0) {
-      parts.push(`${result.duplicate_count} 个已有活动任务`)
-    }
-    actionNotice.value = parts.join('，')
-    downloadDialog.value = false
-    downloadInput.value = ''
+    const result = await cancelTasks(targets.map((task) => task.id))
+    const succeeded = result.items.filter((item) => item.status === 'cancelled').length
+    const failed = result.failed_count
+    actionNotice.value = `已取消 ${succeeded} 个任务${failed > 0 ? `，${failed} 个失败` : ''}`
     await load()
   } catch (err) {
     actionError.value = errorMessage(err)
   } finally {
-    downloadLoading.value = false
+    batchLoading.value = false
+  }
+}
+
+async function batchRetry(): Promise<void> {
+  const targets = retryableSelected.value
+  if (targets.length === 0) return
+  batchLoading.value = true
+  actionError.value = ''
+  actionNotice.value = ''
+  try {
+    const result = await retryTasks(targets.map((task) => task.id))
+    const succeeded = result.items.filter((item) => item.status === 'requeued').length
+    const failed = result.failed_count
+    actionNotice.value = `已重新入队 ${succeeded} 个任务${failed > 0 ? `，${failed} 个失败` : ''}`
+    selected.value = []
+    await load()
+  } catch (err) {
+    actionError.value = errorMessage(err)
+  } finally {
+    batchLoading.value = false
   }
 }
 
@@ -213,6 +269,7 @@ watch(
   () => route.query,
   () => {
     readQuery()
+    selected.value = []
     void load()
   },
   { immediate: true },
@@ -338,8 +395,45 @@ watch(
       </v-card-text>
       <v-divider />
       <v-card-actions class="flex-wrap">
-        <span class="text-body-2 text-medium-emphasis ml-2">共 {{ total }} 条</span>
+        <span class="text-body-2 text-medium-emphasis ml-2">共 {{ total }} 条
+          <template v-if="selected.length > 0">，已选 {{ selected.length }} 条</template>
+        </span>
         <v-spacer />
+        <v-btn
+          variant="tonal"
+          :disabled="selectableIds.length === 0"
+          @click="toggleSelectAll"
+        >
+          {{ allSelectableSelected ? '取消全选' : '全选' }}
+        </v-btn>
+        <v-btn
+          variant="tonal"
+          prepend-icon="mdi-content-copy"
+          :disabled="selected.length === 0"
+          @click="copySelectedIds"
+        >
+          复制 ID
+        </v-btn>
+        <v-btn
+          variant="tonal"
+          color="warning"
+          prepend-icon="mdi-cancel"
+          :disabled="cancelableSelected.length === 0"
+          :loading="batchLoading"
+          @click="batchCancel"
+        >
+          批量取消{{ cancelableSelected.length > 0 ? `（${cancelableSelected.length}）` : '' }}
+        </v-btn>
+        <v-btn
+          variant="tonal"
+          color="info"
+          prepend-icon="mdi-restart"
+          :disabled="retryableSelected.length === 0"
+          :loading="batchLoading"
+          @click="batchRetry"
+        >
+          批量重试{{ retryableSelected.length > 0 ? `（${retryableSelected.length}）` : '' }}
+        </v-btn>
         <v-btn
           variant="tonal"
           color="warning"
@@ -347,14 +441,6 @@ watch(
           @click="cancelQueuedDialog = true"
         >
           取消全部排队
-        </v-btn>
-        <v-btn
-          color="primary"
-          variant="tonal"
-          prepend-icon="mdi-plus"
-          @click="downloadDialog = true"
-        >
-          新建下载
         </v-btn>
         <v-btn icon="mdi-refresh" variant="text" aria-label="刷新" @click="load" />
       </v-card-actions>
@@ -367,13 +453,21 @@ watch(
         v-if="!loading && tasks.length === 0"
         icon="mdi-clipboard-text-outline"
         title="没有任务记录"
-        description="在漫画库请求下载后，任务会出现在这里。"
+        description="在漫画下载页请求下载后，任务会出现在这里。"
       />
 
       <template v-else>
         <v-table v-if="!mobile">
           <thead>
             <tr>
+              <th style="width: 44px">
+                <v-checkbox-btn
+                  :model-value="allSelectableSelected"
+                  :indeterminate="selected.length > 0 && !allSelectableSelected"
+                  aria-label="全选"
+                  @update:model-value="toggleSelectAll"
+                />
+              </th>
               <th>类型</th>
               <th>状态</th>
               <th>摘要</th>
@@ -385,6 +479,14 @@ watch(
           </thead>
           <tbody>
             <tr v-for="task in tasks" :key="task.id">
+              <td>
+                <v-checkbox-btn
+                  v-if="task.manga_id"
+                  v-model="selected"
+                  :value="task.id"
+                  :aria-label="`选择任务 ${task.id}`"
+                />
+              </td>
               <td class="text-no-wrap">{{ labelOf(TASK_TYPE_LABELS, task.task_type) }}</td>
               <td style="min-width: 140px">
                 <v-chip
@@ -435,6 +537,14 @@ watch(
 
         <v-list v-else lines="three">
           <v-list-item v-for="task in tasks" :key="task.id">
+            <template #prepend>
+              <v-checkbox-btn
+                v-if="task.manga_id"
+                v-model="selected"
+                :value="task.id"
+                :aria-label="`选择任务 ${task.id}`"
+              />
+            </template>
             <v-list-item-title class="text-wrap">
               {{ labelOf(TASK_TYPE_LABELS, task.task_type) }} · {{ task.summary }}
             </v-list-item-title>
@@ -516,30 +626,5 @@ watch(
       :loading="cancelQueuedLoading"
       @confirm="confirmCancelQueued"
     />
-
-    <v-dialog v-model="downloadDialog" max-width="480">
-      <v-card>
-        <v-card-title>新建下载请求</v-card-title>
-        <v-card-text>
-          <p class="text-body-2 text-medium-emphasis mb-2">
-            输入一个或多个漫画 ID，用逗号、句号或换行分隔，单次最多 20 个。
-          </p>
-          <v-textarea
-            v-model="downloadInput"
-            label="漫画 ID"
-            rows="3"
-            auto-grow
-            placeholder="例如：350234, 422866"
-          />
-        </v-card-text>
-        <v-card-actions>
-          <v-spacer />
-          <v-btn variant="text" @click="downloadDialog = false">取消</v-btn>
-          <v-btn color="primary" :loading="downloadLoading" @click="submitDownload">
-            请求下载
-          </v-btn>
-        </v-card-actions>
-      </v-card>
-    </v-dialog>
   </div>
 </template>

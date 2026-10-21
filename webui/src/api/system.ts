@@ -14,3 +14,7 @@ export function reconnectNapcat(): Promise<{ accepted: boolean }> {
 export function requestShutdown(): Promise<{ shutdown: boolean }> {
   return apiRequest('/system/shutdown', { method: 'POST' })
 }
+
+export function requestRestart(): Promise<{ restart: boolean }> {
+  return apiRequest('/system/restart', { method: 'POST' })
+}

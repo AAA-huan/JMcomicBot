@@ -168,6 +168,17 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
         apply_target="重启机器人",
     ),
     SettingDefinition(
+        key="DB_ECHO",
+        title="SQL 日志输出",
+        value_type="bool",
+        default=False,
+        group="数据库",
+        editable=True,
+        sensitive=False,
+        effect=EFFECT_RESTART,
+        apply_target="重启机器人",
+    ),
+    SettingDefinition(
         key="BACKUP_PATH",
         title="数据库备份目录",
         value_type="str",
@@ -225,6 +236,17 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
         apply_target="重启机器人",
         minimum=1,
         maximum=720,
+    ),
+    SettingDefinition(
+        key="WEBUI_DEV_ORIGINS",
+        title="开发环境额外来源",
+        value_type="str",
+        default="",
+        group="WebUI",
+        editable=True,
+        sensitive=False,
+        effect=EFFECT_RESTART,
+        apply_target="重启机器人",
     ),
     SettingDefinition(
         key="NAPCAT_WS_URL",
@@ -368,38 +390,28 @@ class SettingsService:
         return self._view(definition)
 
     def _view(self, definition: SettingDefinition) -> SettingView:
-        """按敏感性生成安全视图：敏感值只返回是否已设置。"""
+        """生成配置视图：敏感值明文返回（局域网单管理员场景），保留 is_set 标记。"""
         value = self._effective_value(definition)
         restart_required = (
             definition.key in self.pending_restart_values
             and value
             != self.config_manager.config_dict.get(definition.key, definition.default)
         )
-        if definition.sensitive:
-            return SettingView(
-                key=definition.key,
-                title=definition.title,
-                value_type=definition.value_type,
-                group=definition.group,
-                editable=definition.editable,
-                sensitive=True,
-                effect=definition.effect,
-                apply_target=definition.apply_target,
-                value=None,
-                is_set=bool(value),
-                restart_required=restart_required,
-            )
+        # 局域网单管理员控制台：敏感值明文显示，便于核对与编辑；
+        # 历史表与审计仍写脱敏占位（见 _mask），不改变历史语义。
+        # is_set 表示"已配置非空值"：空串视为未设置（如 NAPCAT_TOKEN），
+        # 布尔 False 与整数 0 是有效配置值，视为已设置。
         return SettingView(
             key=definition.key,
             title=definition.title,
             value_type=definition.value_type,
             group=definition.group,
             editable=definition.editable,
-            sensitive=False,
+            sensitive=definition.sensitive,
             effect=definition.effect,
             apply_target=definition.apply_target,
             value=value,
-            is_set=True,
+            is_set=value != "" and value is not None,
             restart_required=restart_required,
         )
 
@@ -490,7 +502,11 @@ class SettingsService:
                 raise ValueError(f"配置项 {definition.key} 需要字符串")
             if any(character in raw_value for character in ("\n", "\r", "\x00")):
                 raise ValueError(f"配置项 {definition.key} 不能包含换行或空字符")
-            if definition.key != "NAPCAT_TOKEN" and not raw_value.strip():
+            # NAPCAT_TOKEN 与 WEBUI_DEV_ORIGINS 允许空串：令牌可清除、来源可留空
+            if (
+                definition.key not in ("NAPCAT_TOKEN", "WEBUI_DEV_ORIGINS")
+                and not raw_value.strip()
+            ):
                 raise ValueError(f"配置项 {definition.key} 不能为空")
             if definition.key == "NAPCAT_WS_URL":
                 try:
@@ -502,6 +518,26 @@ class SettingsService:
                 if not valid:
                     raise ValueError(
                         "NapCat WebSocket 地址需要有效的 ws:// 或 wss:// 地址"
+                    )
+            if definition.key == "WEBUI_DEV_ORIGINS" and raw_value.strip():
+                # 逗号分隔的 http(s):// 完整来源，生产留空
+                invalid = []
+                for origin in (item.strip() for item in raw_value.split(",")):
+                    if not origin:
+                        continue
+                    try:
+                        parsed = urlparse(origin)
+                        if (
+                            parsed.scheme not in ("http", "https")
+                            or not parsed.hostname
+                        ):
+                            invalid.append(origin)
+                    except ValueError:
+                        invalid.append(origin)
+                if invalid:
+                    raise ValueError(
+                        f"WEBUI_DEV_ORIGINS 含无效来源（需 http:// 或 https://）: "
+                        f"{', '.join(invalid)}"
                     )
             return raw_value
         raise ValueError(f"配置项 {definition.key} 的类型非法: {definition.value_type}")
