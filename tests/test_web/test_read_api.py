@@ -41,6 +41,7 @@ def test_authentication_flow_and_protected_status(db_manager) -> None:
         assert system_response.status_code == 200
         assert system_response.json()["version"] == "test-version"
         assert system_response.json()["napcat_connected"] is True
+        assert system_response.json()["total_size_bytes"] == 0
 
         logout_response = client.post(
             "/api/v1/auth/logout",

@@ -45,6 +45,17 @@ def main() -> None:
     if exit_code:
         sys.exit(exit_code)
 
+    if bot is not None and bot.restart_requested:
+        from src.utils.process import restart_process
+
+        logger.info("优雅收尾完成，准备拉起新进程...")
+        try:
+            restart_process(sys.executable, [sys.executable, *sys.argv])
+        except OSError as restart_error:
+            logger.error(f"重启进程失败: {restart_error}")
+            print(f"重启进程失败: {restart_error}，请手动重新启动")
+            sys.exit(1)
+
 
 if __name__ == "__main__":
     main()

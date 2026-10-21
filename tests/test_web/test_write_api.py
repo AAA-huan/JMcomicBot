@@ -166,7 +166,7 @@ def test_download_request_dedup_and_validation(db_manager) -> None:
         )
         over_limit = client.post(
             "/api/v1/tasks/downloads",
-            json={"manga_ids": [str(100000 + i) for i in range(21)]},
+            json={"manga_ids": [str(100000 + i) for i in range(101)]},
             headers=headers,
         )
 
@@ -260,8 +260,8 @@ def test_permission_endpoints_with_cached_identities(db_manager) -> None:
     assert removed_again.json()["changed"] is False
 
 
-def test_setting_endpoints_mask_and_update(db_manager) -> None:
-    """设置接口应遮蔽敏感值，并拒绝只读、未知与非法值。"""
+def test_setting_endpoints_return_plaintext_and_update(db_manager) -> None:
+    """设置接口明文返回敏感值，并拒绝未知与非法值。"""
     client, context = _make_client(
         db_manager,
         config_dict={"NAPCAT_TOKEN": "super-secret", "FILE_SEND_INTERVAL": 1.8},
@@ -276,9 +276,10 @@ def test_setting_endpoints_mask_and_update(db_manager) -> None:
             json={"value": 2.5},
             headers=headers,
         )
-        readonly = client.patch(
+        # 敏感项明文返回，保留 is_set 标记
+        sensitive_update = client.patch(
             "/api/v1/settings/NAPCAT_TOKEN",
-            json={"value": "leak"},
+            json={"value": "new-secret"},
             headers=headers,
         )
         unknown = client.patch(
@@ -291,20 +292,19 @@ def test_setting_endpoints_mask_and_update(db_manager) -> None:
         )
 
     assert listing.status_code == 200
-    assert "super-secret" not in listing.text
     token_view = next(
         item for item in listing.json()["items"] if item["key"] == "NAPCAT_TOKEN"
     )
     assert token_view["sensitive"] is True
-    assert token_view["value"] is None
+    assert token_view["value"] == "super-secret"
     assert token_view["is_set"] is True
     assert updated.status_code == 200
     assert updated.json()["value"] == 2.5
     assert context.applied_settings["FILE_SEND_INTERVAL"] == 2.5
-    assert readonly.status_code == 200
-    assert readonly.json()["value"] is None
-    assert readonly.json()["restart_required"] is True
-    assert "leak" not in readonly.text
+    # 敏感项修改后明文返回新值，标记待重启
+    assert sensitive_update.status_code == 200
+    assert sensitive_update.json()["value"] == "new-secret"
+    assert sensitive_update.json()["restart_required"] is True
     assert unknown.status_code == 404
     assert unknown.json()["code"] == "SETTING_NOT_FOUND"
     assert invalid.status_code == 400
@@ -330,6 +330,66 @@ def test_system_reconnect_and_shutdown(db_manager) -> None:
         event.event_type for event in AuditEventRepository(db_manager).list()
     }
     assert "napcat.reconnect_requested" in audit_types
+
+
+def test_system_restart_returns_accepted_and_triggers_requester(db_manager) -> None:
+    """重启接口返回 202 并触发 restart_requester（审计由 MangaBot 层写入，此处仅验证路由）。"""
+    client, context = _make_client(db_manager)
+    with client:
+        setup_and_login(client)
+        headers = csrf_headers(client)
+
+        restart = client.post("/api/v1/system/restart", headers=headers)
+
+    assert restart.status_code == 202
+    assert restart.json() == {"restart": True}
+    assert len(context.restart_calls) == 1
+
+
+def test_batch_cancel_and_retry_endpoints(db_manager) -> None:
+    """批量取消与重试接口逐项返回状态，复用原任务记录。"""
+    from src.service.operation_context import OperationContext
+
+    client, context = _make_client(db_manager)
+    task_service = context.download_queue.task_service
+    op_context = OperationContext.web("1", "127.0.0.1")
+    # 创建 queued 任务（供批量取消）
+    queued = task_service.create("download", op_context, manga_id="500")
+    # 创建 failed 任务（供批量重试）
+    failed = task_service.create("download", op_context, manga_id="501")
+    task_service.start(failed.id, "downloading")
+    task_service.fail(failed.id, "download_failed", "测试失败", context=op_context)
+
+    with client:
+        setup_and_login(client)
+        headers = csrf_headers(client)
+
+        cancel_resp = client.post(
+            "/api/v1/tasks/cancel",
+            json={"task_ids": [queued.id, "task-missing"]},
+            headers=headers,
+        )
+        retry_resp = client.post(
+            "/api/v1/tasks/retry",
+            json={"task_ids": [failed.id, queued.id]},
+            headers=headers,
+        )
+
+    assert cancel_resp.status_code == 200
+    cancel_body = cancel_resp.json()
+    assert cancel_body["cancelled_count"] == 1
+    assert {item["task_id"] for item in cancel_body["items"]} == {
+        queued.id,
+        "task-missing",
+    }
+
+    assert retry_resp.status_code == 202
+    retry_body = retry_resp.json()
+    # failed 任务可重试，queued 任务不可重试（not_retryable）
+    statuses = {item["task_id"]: item["status"] for item in retry_body["items"]}
+    assert statuses[failed.id] == "requeued"
+    assert statuses[queued.id] == "not_retryable"
+    assert retry_body["requeued_count"] == 1
 
 
 def test_maintenance_scan_repair_and_backup(db_manager) -> None:

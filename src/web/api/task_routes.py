@@ -6,6 +6,7 @@ from typing import Annotated, Callable, List, Optional
 from fastapi import APIRouter, Depends, Query, Request, status
 from pydantic import BaseModel, Field
 
+from src.service.download_service import DOWNLOAD_REQUEST_LIMIT
 from src.service.web_auth_service import AuthenticatedSession
 from src.web.api.common import build_operation_context
 from src.web.dependencies import WebDependencies
@@ -13,14 +14,20 @@ from src.web.errors import ApiError
 
 AuthenticateCallable = Callable[..., AuthenticatedSession]
 
-# 单次下载请求的漫画数量上限，与下载服务保持一致
-DOWNLOAD_REQUEST_LIMIT = 20
+# 单次下载请求的漫画数量上限，与下载服务保持单一来源（消除两处漂移）
+# DownloadRequest.max_length 直接引用 download_service.DOWNLOAD_REQUEST_LIMIT
 
 
 class DownloadRequest(BaseModel):
     """漫画下载请求。"""
 
     manga_ids: List[str] = Field(min_length=1, max_length=DOWNLOAD_REQUEST_LIMIT)
+
+
+class BatchTaskIdsRequest(BaseModel):
+    """批量任务操作请求；task_ids 去重保序，上限 100。"""
+
+    task_ids: List[str] = Field(min_length=1, max_length=100)
 
 
 def create_task_router(
@@ -77,6 +84,14 @@ def create_task_router(
             "duplicate_count": result.duplicate_count,
         }
 
+    @router.get("/downloads/progress")
+    def get_download_progress(
+        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """返回当前或最近一次下载进度快照，供页面刷新后恢复。"""
+        snapshot = dependencies.download_progress_tracker.snapshot()
+        return {"active": snapshot.to_dict() if snapshot is not None else None}
+
     @router.post("/tasks/{task_id}/cancel")
     def cancel_task(
         task_id: str,
@@ -105,5 +120,34 @@ def create_task_router(
     ) -> dict[str, int]:
         """取消全部尚未开始的下载任务。"""
         return {"cancelled_count": dependencies.download_service.cancel_queued_tasks()}
+
+    @router.post("/tasks/cancel")
+    def cancel_tasks(
+        body: BatchTaskIdsRequest,
+        _request: Request,
+        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """批量取消排队中的下载任务，逐项返回状态。"""
+        result = dependencies.download_service.cancel_tasks(list(body.task_ids))
+        return {
+            "items": [asdict(item) for item in result.items],
+            "cancelled_count": result.succeeded_count,
+            "failed_count": result.failed_count,
+        }
+
+    @router.post("/tasks/retry", status_code=status.HTTP_202_ACCEPTED)
+    def retry_tasks(
+        body: BatchTaskIdsRequest,
+        request: Request,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """批量重试失败/中断的下载任务，复用原任务记录重新入队。"""
+        context = build_operation_context(request, authenticated)
+        result = dependencies.download_service.retry_tasks(list(body.task_ids), context)
+        return {
+            "items": [asdict(item) for item in result.items],
+            "requeued_count": result.succeeded_count,
+            "failed_count": result.failed_count,
+        }
 
     return router

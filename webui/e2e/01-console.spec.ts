@@ -35,29 +35,49 @@ test('漫画库搜索、清空与危险操作确认', async ({ page }) => {
   await page.getByRole('button', { name: '搜索', exact: true }).click()
   await expect(page.getByText('夜行测试录').first()).toBeVisible()
 
+  // 操作栏全选当前页，再次点击取消全选
+  await page.getByRole('button', { name: '全选', exact: true }).click()
+  await expect(page.getByText(/已选 \d+ 条/)).toBeVisible()
+  await page.getByRole('button', { name: '取消全选', exact: true }).click()
+  await expect(page.getByText(/已选 \d+ 条/)).toBeHidden()
+
   // 选中第一本并打开批量删除确认，取消后数据仍在
   await page.getByRole('checkbox', { name: /选择/ }).first().click()
   await page.getByRole('button', { name: '批量删除' }).click()
   await expect(page.getByText('批量删除 1 个漫画？')).toBeVisible()
-  await page.getByRole('button', { name: '取消' }).click()
+  await page.getByRole('button', { name: '取消', exact: true }).click()
   await expect(page.getByText('批量删除 1 个漫画？')).toBeHidden()
   await expect(page.getByText('夜行测试录').first()).toBeVisible()
 })
 
-test('新建下载对话框命中已有任务（不触发真实下载）', async ({ page }) => {
+test('任务管理页展示历史状态并启用批量重试（不触发真实下载）', async ({ page }) => {
   await login(page)
   await page.goto('/tasks')
+  // 测试数据包含成功、失败、取消和中断四种终态任务，均不会被启动恢复重新入队
+  await expect(page.getByText('900002').first()).toBeVisible()
+  await expect(page.getByText('失败', { exact: true }).first()).toBeVisible()
+  await expect(page.getByText('已中断', { exact: true }).first()).toBeVisible()
 
-  await page.getByRole('button', { name: '新建下载' }).click()
-  await expect(page.getByText('新建下载请求')).toBeVisible()
-  // 900004 在测试数据中已有一个排队中的下载任务，服务端应返回去重结果，
-  // 避免测试触发 jmcomic 的真实联网下载而消耗本机资源
-  await page.getByPlaceholder('例如：350234, 422866').fill('900004')
-  await page.getByRole('button', { name: '请求下载' }).click()
+  const failedTask = page
+    .locator('tr, .v-list-item')
+    .filter({ hasText: '900002' })
+    .first()
+  await failedTask.getByRole('checkbox').click()
+  await expect(
+    page.getByRole('button', { name: /批量重试（1）/ }),
+  ).toBeEnabled()
+  await expect(
+    page.getByRole('button', { name: '批量取消', exact: true }),
+  ).toBeDisabled()
 
-  await expect(page.getByText(/已入队 0 个/)).toBeVisible()
-  await expect(page.getByText(/已有活动任务/)).toBeVisible()
-  await expect(page.getByText('900004').first()).toBeVisible()
+  // 全选仅覆盖当前页带漫画 ID 的任务：失败与中断任务可重试，取消不可用
+  await page.getByRole('button', { name: '全选', exact: true }).click()
+  await expect(
+    page.getByRole('button', { name: /批量重试（2）/ }),
+  ).toBeEnabled()
+  await expect(
+    page.getByRole('button', { name: '复制 ID', exact: true }),
+  ).toBeEnabled()
 })
 
 test('备份下载触发附件下载', async ({ page }) => {

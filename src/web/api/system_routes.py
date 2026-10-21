@@ -60,4 +60,15 @@ def create_system_router(
         background_tasks.add_task(dependencies.system_service.request_shutdown, context)
         return {"shutdown": True}
 
+    @router.post("/system/restart", status_code=status.HTTP_202_ACCEPTED)
+    def restart_bot(
+        request: Request,
+        background_tasks: BackgroundTasks,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, bool]:
+        """请求优雅重启；复用安全关闭收尾路径，close 后由 main 拉起新进程。"""
+        context = build_operation_context(request, authenticated)
+        background_tasks.add_task(dependencies.system_service.request_restart, context)
+        return {"restart": True}
+
     return router

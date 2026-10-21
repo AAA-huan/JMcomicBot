@@ -1,7 +1,7 @@
 /** 展示格式化工具：时间（后端为无时区 UTC）、大小、运行时长与下载 ID 解析。 */
 
 /** 后端时间为无时区的 UTC 语义，缺失时区标记时按 UTC 解析。 */
-function parseBackendTime(value: string): Date {
+export function parseBackendTime(value: string): Date {
   const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/.test(value)
   return new Date(hasTimezone ? value : `${value}Z`)
 }
@@ -37,6 +37,17 @@ export function formatUptime(seconds: number): string {
   if (days > 0) return `${days} 天 ${hours} 小时`
   if (hours > 0) return `${hours} 小时 ${minutes} 分钟`
   return `${minutes} 分钟`
+}
+
+/** 下载耗时展示：精确到秒，超过一小时显示小时。 */
+export function formatElapsed(seconds: number): string {
+  const total = Math.max(0, Math.floor(seconds))
+  const hours = Math.floor(total / 3600)
+  const minutes = Math.floor((total % 3600) / 60)
+  const remainingSeconds = total % 60
+  if (hours > 0) return `${hours} 小时 ${minutes} 分 ${remainingSeconds} 秒`
+  if (minutes > 0) return `${minutes} 分 ${remainingSeconds} 秒`
+  return `${remainingSeconds} 秒`
 }
 
 /** 解析逗号、句号、换行或空格分隔的漫画 ID 列表，保持顺序去重。 */

@@ -12,6 +12,7 @@ from src.service.download_service import DownloadQueueService
 from src.service.manga_service import MangaFileDownloadError, MangaService
 from src.service.operation_context import OperationContext
 from src.service.operation_task_service import OperationTaskService
+from src.service.option_file_service import OptionFileService
 from src.service.permission_service import (
     CachedGroup,
     CachedUser,
@@ -26,6 +27,7 @@ from src.service.repair_service import RepairService
 from src.service.results import (
     BackupResult,
     DownloadCancellationResult,
+    DownloadRecoveryResult,
     MangaDeleteOutcome,
     MangaDeleteResult,
     TaskCancellationResult,
@@ -47,6 +49,7 @@ __all__ = [
     "DatabaseMaintenanceService",
     "DownloadCancellationResult",
     "DownloadNotifier",
+    "DownloadRecoveryResult",
     "DownloadQueueService",
     "DownloadService",
     "MangaDeleteOutcome",
@@ -55,6 +58,7 @@ __all__ = [
     "MangaService",
     "OperationContext",
     "OperationTaskService",
+    "OptionFileService",
     "PermissionService",
     "ReadingProgressFileNotFoundError",
     "ReadingProgressService",

@@ -85,7 +85,7 @@ def test_login_import_list_download_and_web_logout(db_manager):
         )
         assert (
             client.post(
-                download_path, json={"manga_ids": ["100"] * 21}, headers=headers
+                download_path, json={"manga_ids": ["100"] * 101}, headers=headers
             ).status_code
             == 422
         )

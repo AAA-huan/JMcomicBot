@@ -9,7 +9,7 @@ from uuid import uuid4
 
 import json
 
-from sqlalchemy import delete, func, select, update
+from sqlalchemy import delete, func, select
 from sqlalchemy.orm import selectinload
 
 from src.database.models import OperationTask, TaskEvent, utc_now
@@ -30,6 +30,8 @@ _TASK_STATUS_TRANSITIONS = {
     "queued": {"running", "cancelled"},
     "running": {"running", "succeeded", "failed", "interrupted"},
     "succeeded": set(),
+    # failed/interrupted 为终态，通用 update_state 不允许转换；
+    # 重新入队由 OperationTaskRepository.requeue 专用方法校验与执行
     "failed": set(),
     "cancelled": set(),
     "interrupted": set(),
@@ -43,6 +45,8 @@ _TASK_EVENT_METADATA_KEYS = {
     "missing_count",
     "new_count",
     "page_count",
+    "previous_status",
+    "reason",
     "retry_count",
     "succeeded_count",
     "updated_count",
@@ -208,13 +212,15 @@ class OperationTaskRepository(BaseRepository):
                 raise ValueError(f"任务不存在: {task_id}")
             if status not in _TASK_STATUS_TRANSITIONS[task.status]:
                 raise ValueError(f"不允许任务状态从 {task.status} 转换为 {status}")
+            # 记录转换前的状态：进度更新同为 running，但不能重复累加尝试次数
+            previous_status = task.status
             task.status = status
             task.stage = stage
             task.progress = progress
             task.error_code = error_code
             task.error_message = error_message
             task.updated_at = now
-            if status == "running" and task.started_at is None:
+            if status == "running" and previous_status != "running":
                 task.started_at = now
                 task.attempt_count += 1
             if status in {"succeeded", "failed", "cancelled", "interrupted"}:
@@ -223,17 +229,73 @@ class OperationTaskRepository(BaseRepository):
             session.refresh(task)
             return task
 
-    def interrupt_running(self) -> int:
-        """将启动时遗留的运行中任务统一标记为中断。"""
+    def interrupt_running(self) -> List[OperationTask]:
+        """将启动时遗留的运行中任务标记为中断，并返回被中断的任务列表。
+
+        返回实体供服务层逐条追加任务事件与审计；stage 保留中断发生时所在的
+        阶段，便于追溯，finished_at 与 updated_at 更新为当前时间。
+        """
         now = utc_now()
         with self._get_session() as session:
-            result = session.execute(
-                update(OperationTask)
-                .where(OperationTask.status == "running")
-                .values(status="interrupted", updated_at=now, finished_at=now)
+            tasks = list(
+                session.scalars(
+                    select(OperationTask).where(OperationTask.status == "running")
+                ).all()
             )
+            if not tasks:
+                return []
+            for task in tasks:
+                task.status = "interrupted"
+                task.updated_at = now
+                task.finished_at = now
             session.commit()
-            return result.rowcount or 0
+            return tasks
+
+    def requeue(self, task_id: str) -> OperationTask:
+        """将终态下载任务（failed/interrupted）转回 queued 并重置执行字段。
+
+        专用方法，不通过通用 update_state 放行任意状态转换；只接受
+        failed/interrupted → queued，清空 finished_at/error_code/error_message/progress，
+        stage 置为 queued。同漫画已有活动任务（queued/running）时拒绝，避免重复。
+
+        Raises:
+            ValueError: 任务不存在、状态不允许重入队、同漫画已有活动任务时
+        """
+        now = utc_now()
+        with self._get_session() as session:
+            task = session.get(OperationTask, task_id)
+            if task is None:
+                raise ValueError(f"任务不存在: {task_id}")
+            if task.task_type != "download":
+                raise ValueError(f"非下载任务不支持重新入队: {task_id}")
+            if task.status not in ("failed", "interrupted"):
+                raise ValueError(
+                    f"任务状态 {task.status} 不允许重新入队（仅失败/中断可重试）"
+                )
+            if task.manga_id is None:
+                raise ValueError(f"任务缺少漫画 ID，无法重新入队: {task_id}")
+            # 同漫画已有活动任务（queued/running）时拒绝，避免重复
+            active = session.scalar(
+                select(OperationTask.id).where(
+                    OperationTask.manga_id == task.manga_id,
+                    OperationTask.status.in_(("queued", "running")),
+                    OperationTask.id != task.id,
+                )
+            )
+            if active is not None:
+                raise ValueError(
+                    f"漫画 {task.manga_id} 已有活动任务 {active}，无法重新入队"
+                )
+            task.status = "queued"
+            task.stage = "queued"
+            task.progress = None
+            task.error_code = None
+            task.error_message = None
+            task.finished_at = None
+            task.updated_at = now
+            session.commit()
+            session.refresh(task)
+            return task
 
     @staticmethod
     def _expired_condition(now: datetime, retention_days: int):

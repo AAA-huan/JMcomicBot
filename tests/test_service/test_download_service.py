@@ -47,6 +47,27 @@ class _TaskService:
         if snapshot is not None:
             snapshot.status = "cancelled"
 
+    def requeue(self, task_id: str, reason: str = "") -> SimpleNamespace:
+        """模拟重新入队：状态校验与同漫画活动任务冲突。"""
+        del reason
+        snapshot = self.task_snapshots.get(task_id)
+        if snapshot is None:
+            raise ValueError(f"任务不存在: {task_id}")
+        if snapshot.task_type != "download":
+            raise ValueError(f"非下载任务不支持重新入队: {task_id}")
+        if snapshot.status not in ("failed", "interrupted"):
+            raise ValueError(f"任务状态 {snapshot.status} 不允许重新入队")
+        # 同漫画活动任务冲突校验
+        for other in self.task_snapshots.values():
+            if (
+                other.id != task_id
+                and other.manga_id == snapshot.manga_id
+                and other.status in ("queued", "running")
+            ):
+                raise ValueError(f"漫画 {snapshot.manga_id} 已有活动任务 {other.id}")
+        snapshot.status = "queued"
+        return snapshot
+
 
 class _DownloadQueue:
     """记录取消与入队调用的测试队列。"""
@@ -70,6 +91,12 @@ class _DownloadQueue:
         if manga_id not in self.queued_manga_ids:
             return None
         return f"memory-{manga_id}"
+
+    def enqueue_existing_task(self, manga_id: str, task_id: str, context=None) -> bool:
+        if manga_id in self.queued_manga_ids:
+            return False
+        self.queued_manga_ids.add(manga_id)
+        return True
 
     def request_download(
         self,
@@ -163,11 +190,11 @@ def test_request_rejects_invalid_id() -> None:
 
 
 def test_request_rejects_over_limit() -> None:
-    """单次超过 20 个漫画 ID 应明确报错。"""
+    """单次超过 100 个漫画 ID 应明确报错。"""
     service = _build_service(_DownloadQueue([]))
-    manga_ids = [str(100000 + index) for index in range(21)]
+    manga_ids = [str(100000 + index) for index in range(101)]
 
-    with pytest.raises(ValueError, match="最多请求 20 个"):
+    with pytest.raises(ValueError, match="最多请求 100 个"):
         service.request(manga_ids, OperationContext.qq("10001"))
 
 
@@ -219,3 +246,86 @@ def test_cancel_queued_tasks_reconciles_stale_records() -> None:
 
     assert cancelled_count == 3
     assert task_service.cancelled_task_ids == ["task-stale"]
+
+
+def test_cancel_tasks_returns_per_item_status() -> None:
+    """批量取消逐项返回 cancelled/not_queued/not_found，去重保序。"""
+    task_service = _TaskService()
+    task_service.add_task("task-queued", "download", "queued", "100")
+    task_service.add_task("task-running", "download", "running", "200")
+    service = _build_service(_DownloadQueue(["100"]), task_service)
+
+    result = service.cancel_tasks(
+        ["task-queued", "task-running", "task-missing", "task-queued"]
+    )
+
+    statuses = [(item.task_id, item.status) for item in result.items]
+    # 去重后 3 项，保序
+    assert statuses == [
+        ("task-queued", "cancelled"),
+        ("task-running", "not_queued"),
+        ("task-missing", "not_found"),
+    ]
+    assert result.succeeded_count == 1
+    assert result.failed_count == 2
+
+
+def test_retry_tasks_requeues_failed_and_interrupted() -> None:
+    """批量重试：failed/interrupted 转回 queued 并装入内存队列。"""
+    task_service = _TaskService()
+    task_service.add_task("task-failed", "download", "failed", "100")
+    task_service.add_task("task-interrupted", "download", "interrupted", "200")
+    download_queue = _DownloadQueue([])
+    service = _build_service(download_queue, task_service)
+
+    result = service.retry_tasks(
+        ["task-failed", "task-interrupted"], OperationContext.web("1", "127.0.0.1")
+    )
+
+    statuses = [(item.task_id, item.status, item.manga_id) for item in result.items]
+    assert statuses == [
+        ("task-failed", "requeued", "100"),
+        ("task-interrupted", "requeued", "200"),
+    ]
+    assert result.succeeded_count == 2
+    # 内存队列应已装入两个任务
+    assert "100" in download_queue.queued_manga_ids
+    assert "200" in download_queue.queued_manga_ids
+
+
+def test_retry_tasks_rejects_wrong_status_and_not_found() -> None:
+    """批量重试：非 failed/interrupted 状态返回 not_retryable，不存在返回 not_found。"""
+    task_service = _TaskService()
+    task_service.add_task("task-queued", "download", "queued", "100")
+    task_service.add_task("task-succeeded", "download", "succeeded", "200")
+    task_service.add_task("task-scan", "scan", "failed", "300")
+    service = _build_service(_DownloadQueue([]), task_service)
+
+    result = service.retry_tasks(
+        ["task-queued", "task-succeeded", "task-scan", "task-missing"],
+        OperationContext.web("1", "127.0.0.1"),
+    )
+
+    statuses = {item.task_id: item.status for item in result.items}
+    assert statuses == {
+        "task-queued": "not_retryable",
+        "task-succeeded": "not_retryable",
+        "task-scan": "not_retryable",  # 非下载任务
+        "task-missing": "not_found",
+    }
+    assert result.succeeded_count == 0
+
+
+def test_retry_tasks_returns_duplicate_on_active_conflict() -> None:
+    """批量重试：同漫画已有活动任务时返回 duplicate。"""
+    task_service = _TaskService()
+    task_service.add_task("task-failed", "download", "failed", "100")
+    task_service.add_task("task-active", "download", "queued", "100")
+    service = _build_service(_DownloadQueue([]), task_service)
+
+    result = service.retry_tasks(
+        ["task-failed"], OperationContext.web("1", "127.0.0.1")
+    )
+
+    assert result.items[0].status == "duplicate"
+    assert result.succeeded_count == 0
