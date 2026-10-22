@@ -52,3 +52,13 @@ it('更换失败展示原因并保留当前关联', async () => {
   expect(wrapper.text()).toContain('当前关联：12345')
   wrapper.unmount()
 })
+
+it('删除权限名单说明同时用于拉黑权限', async () => {
+  const wrapper = await mountPage()
+  expect(wrapper.text()).toContain('删除与拉黑权限用户')
+  expect(wrapper.text()).toContain(
+    '拥有漫画删除与拉黑命令权限的 QQ 用户；拉黑权限与删除权限共用此名单',
+  )
+  expect(wrapper.text()).toContain('拥有漫画删除与拉黑权限')
+  wrapper.unmount()
+})

@@ -9,7 +9,12 @@ import time
 from src.database.repositories import MangaRepository, MangaTagRepository
 from src.download.manager import QQDownloadNotifier
 from src.logging.logger_config import logger
-from src.service import DownloadService, MangaService, OperationContext
+from src.service import (
+    DownloadService,
+    MangaBlacklistService,
+    MangaService,
+    OperationContext,
+)
 from src.service.manga_service import ADMIN_FAVORITE_DELETE_MESSAGE
 from src.service.results import MangaDeleteOutcome
 from src.utils.batch import (
@@ -32,7 +37,7 @@ class CommandExecutor:
 
     VERSION = "3.2.5"
 
-    def __init__(  # pylint: disable=too-many-arguments
+    def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         message_sender: Callable[[str, str, Optional[str], bool], None],
         file_sender: Callable[[str, str, Optional[str], bool], None],
@@ -46,6 +51,7 @@ class CommandExecutor:
         send_status_provider: Optional[Callable[[], Dict[str, Any]]] = None,
         manga_repo: Optional[MangaRepository] = None,
         tag_repo: Optional[MangaTagRepository] = None,
+        blacklist_service: Optional[MangaBlacklistService] = None,
     ) -> None:
         """
         初始化命令执行器
@@ -63,6 +69,7 @@ class CommandExecutor:
             send_status_provider: 获取文件发送队列状态的函数，返回包含running等字段的字典
             manga_repo: 漫画元数据仓储，用于数据库查询
             tag_repo: 漫画标签仓储，用于按标签查询漫画
+            blacklist_service: 漫画黑名单应用服务
         """
         self.message_sender = message_sender
         self.file_sender = file_sender
@@ -76,6 +83,7 @@ class CommandExecutor:
         self.send_status_provider = send_status_provider
         self.manga_repo = manga_repo
         self.tag_repo = tag_repo
+        self.blacklist_service = blacklist_service
         # 批量发送参数独立保存，SettingsService 通过 update_batch_settings 显式更新
         self.send_batch_size: int = int(self.config.get("FILE_SEND_BATCH_SIZE", 10))
         self.send_batch_interval: float = float(
@@ -200,6 +208,8 @@ class CommandExecutor:
             "test_file": self._test_file,
             "welcome": self._send_welcome,
             "delete": self._handle_manga_delete,
+            "blacklist": self._handle_manga_blacklist,
+            "unblacklist": self._handle_manga_unblacklist,
             "resend": self._handle_manga_resend,
             "egg": self._handle_egg,
         }
@@ -247,6 +257,8 @@ class CommandExecutor:
         help_text += "- 下载进度：查看当前漫画下载队列的状况\n"
         help_text += "- 发送进度：查看当前漫画发送队列的状况\n"
         help_text += "- 删除漫画 <漫画ID>：删除指定ID的已下载漫画（仅限特定用户）\n"
+        help_text += "- 拉黑 <漫画ID>：将漫画加入黑名单并拦截下载（仅限特定用户）\n"
+        help_text += "- 解除拉黑 <漫画ID>：将漫画移出黑名单（仅限特定用户）\n"
         help_text += "\n⚠️ 注意事项：\n"
         help_text += "- 命令与漫画ID之间记得加空格\n"
         help_text += "- 对漫画ID可进行批量操作,批量操作使用逗号分隔多个ID\n"
@@ -361,6 +373,14 @@ class CommandExecutor:
         manga_blocks: List[str] = []
         for manga_id in manga_ids:
             try:
+                # 黑名单优先于队列与已下载检查，避免已下载漫画绕过下载拦截
+                if (
+                    self.blacklist_service is not None
+                    and self.blacklist_service.is_blacklisted(manga_id)
+                ):
+                    manga_blocks.append(f"• {manga_id} — 🚫 已被拉黑，跳过下载")
+                    continue
+
                 if manga_id in self.download_manager.downloading_mangas:
                     manga_blocks.append(f"• {manga_id} — 正在下载中")
                     continue
@@ -383,7 +403,9 @@ class CommandExecutor:
                 request_result = self.download_service.request(
                     [manga_id], operation_context, notifier
                 )
-                if request_result.duplicate_count:
+                if request_result.skipped_blacklisted:
+                    manga_blocks.append(f"• {manga_id} — 🚫 已被拉黑，跳过下载")
+                elif request_result.duplicate_count:
                     manga_blocks.append(f"• {manga_id} — 已在下载队列中")
 
             except Exception as e:  # pylint: disable=broad-exception-caught
@@ -1116,6 +1138,84 @@ class CommandExecutor:
             group_id,
             private,
         )
+
+    def _handle_manga_blacklist(
+        self, user_id: str, params: str, group_id: Optional[str], private: bool
+    ) -> None:
+        """处理漫画拉黑请求，支持批量。"""
+        self._handle_blacklist_change(user_id, params, group_id, private, add=True)
+
+    def _handle_manga_unblacklist(
+        self, user_id: str, params: str, group_id: Optional[str], private: bool
+    ) -> None:
+        """处理漫画解除拉黑请求，支持批量。"""
+        self._handle_blacklist_change(user_id, params, group_id, private, add=False)
+
+    def _handle_blacklist_change(
+        self,
+        user_id: str,
+        params: str,
+        group_id: Optional[str],
+        private: bool,
+        add: bool,
+    ) -> None:
+        """拉黑与解除拉黑共用的权限校验、参数解析与结果回复。"""
+        action = "拉黑" if add else "解除拉黑"
+        self.logger.info(f"处理漫画{action}请求 - 用户{user_id}")
+
+        try:
+            self.permission_manager.check_blacklist_permission(user_id)
+        except ValueError as e:
+            if "未配置删除权限用户" in str(e):
+                response = "❌ 黑名单功能不可用：未配置删除权限用户"
+            else:
+                response = f"❌ 权限检查失败：{str(e)}"
+            self.message_sender(user_id, response, group_id, private)
+            return
+
+        if self.blacklist_service is None:
+            self.message_sender(
+                user_id,
+                "❌ 黑名单功能不可用：服务未配置",
+                group_id,
+                private,
+            )
+            return
+
+        try:
+            manga_ids, use_all = parse_batch_params(params)
+            if use_all:
+                self.message_sender(
+                    user_id,
+                    f"❌ {action}命令不支持 --all 参数\n请提供具体的漫画ID",
+                    group_id,
+                    private,
+                )
+                return
+            if not manga_ids:
+                self.message_sender(
+                    user_id, "❌ 参数错误！请提供有效的漫画ID", group_id, private
+                )
+                return
+            manga_ids = validate_manga_ids(manga_ids)
+            context = OperationContext.qq(user_id, group_id)
+            if add:
+                result = self.blacklist_service.add_batch(manga_ids, None, context)
+                response = f"✅ 已拉黑 {result.changed_count} 条漫画"
+                if result.unchanged_count:
+                    response += f"，其中 {result.unchanged_count} 条已在黑名单"
+                deleted_count = sum(1 for item in result.outcomes if item.deleted)
+                if deleted_count:
+                    response += f"，并同步删除 {deleted_count} 条本地漫画"
+            else:
+                result = self.blacklist_service.remove_batch(manga_ids, context)
+                response = f"✅ 已解除 {result.changed_count} 条漫画的黑名单"
+                if result.unchanged_count:
+                    response += f"，其中 {result.unchanged_count} 条不在黑名单"
+            self.message_sender(user_id, response, group_id, private)
+        except ValueError as e:
+            self.logger.warning(f"漫画{action}参数解析失败: {e}")
+            self.message_sender(user_id, str(e), group_id, private)
 
     def _handle_manga_delete(
         self, user_id: str, params: str, group_id: Optional[str], private: bool

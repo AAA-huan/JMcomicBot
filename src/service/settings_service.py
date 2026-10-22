@@ -1,6 +1,7 @@
 """运行时配置应用服务，统一注册表、校验、生效与审计。"""
 
 from dataclasses import dataclass
+from os import environ
 from typing import Any, Callable, Dict, Optional, Tuple
 from urllib.parse import urlparse
 
@@ -53,6 +54,7 @@ class SettingView:  # pylint: disable=too-many-instance-attributes
     value: Any
     is_set: bool
     restart_required: bool = False
+    overridden_by_env: bool = False
 
 
 SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
@@ -137,6 +139,17 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
     SettingDefinition(
         key="LOW_MEMORY_MODE",
         title="低内存模式",
+        value_type="bool",
+        default=False,
+        group="下载与存储",
+        editable=True,
+        sensitive=False,
+        effect=EFFECT_RESTART,
+        apply_target="重启机器人",
+    ),
+    SettingDefinition(
+        key="BLACKLIST_DELETE_BINDING",
+        title="漫画黑名单与删除绑定",
         value_type="bool",
         default=False,
         group="下载与存储",
@@ -413,6 +426,9 @@ class SettingsService:
             value=value,
             is_set=value != "" and value is not None,
             restart_required=restart_required,
+            overridden_by_env=(
+                definition.effect == EFFECT_RESTART and definition.key in environ
+            ),
         )
 
     def _effective_value(self, definition: SettingDefinition) -> Any:

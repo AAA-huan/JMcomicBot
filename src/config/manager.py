@@ -1,20 +1,19 @@
 """配置管理器模块，负责加载和管理应用程序配置"""
 
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional, Union, overload
 
 import os
 
-from dotenv import find_dotenv, load_dotenv, set_key
+from dotenv import dotenv_values, find_dotenv, set_key
 
 from src.logging.logger_config import logger
 
 
-def _parse_bool_config(name: str, default: bool) -> bool:
-    """解析布尔环境变量，非法值直接暴露配置错误。"""
-    value = os.getenv(name)
-    if value is None:
+def _parse_bool_config(name: str, raw_value: Optional[str], default: bool) -> bool:
+    """解析布尔配置，未配置时使用默认值，非法值直接暴露配置错误。"""
+    if raw_value is None:
         return default
-    normalized = value.strip().lower()
+    normalized = raw_value.strip().lower()
     if normalized in ("true", "1", "yes", "on"):
         return True
     if normalized in ("false", "0", "no", "off"):
@@ -22,9 +21,15 @@ def _parse_bool_config(name: str, default: bool) -> bool:
     raise ValueError(f"{name} 必须是布尔值")
 
 
-def _parse_int_config(name: str, default: int, minimum: int, maximum: int) -> int:
-    """解析有明确范围的整数环境变量。"""
-    raw_value = os.getenv(name, str(default))
+def _parse_int_config(
+    name: str,
+    raw_value: Optional[str],
+    default: int,
+    minimum: int,
+    maximum: int,
+) -> int:
+    """解析有明确范围的整数配置，未配置时使用默认值。"""
+    raw_value = str(default) if raw_value is None else raw_value
     try:
         value = int(raw_value)
     except ValueError as error:
@@ -42,11 +47,30 @@ class ConfigManager:
         self.env_file = os.path.abspath(env_file or find_dotenv() or ".env")
         self.logger = logger
         self.config_dict: Dict[str, Union[str, int, float, bool]] = {}
+        self._dotenv_values: Dict[str, Optional[str]] = {}
         self.group_whitelist: List[str] = []
         self.private_whitelist: List[str] = []
         self.global_blacklist: List[str] = []
         self.delete_permission_user: List[str] = []
         self.webui_dev_origins: List[str] = []
+
+    @overload
+    def _get_env(self, name: str) -> Optional[str]: ...
+
+    @overload
+    def _get_env(self, name: str, default: str) -> str: ...
+
+    def _get_env(self, name: str, default: Optional[str] = None) -> Optional[str]:
+        """读取配置值：显式环境变量优先，其次 .env，最后默认值。
+
+        这里刻意不使用 load_dotenv 写入 os.environ：否则当前进程会残留旧值，
+        自重启的子进程继承该旧值后，load_dotenv 默认不覆盖，导致设置页修改的
+        启动项在重启后回退。
+        """
+        if name in os.environ:
+            return os.environ[name]
+        value = self._dotenv_values.get(name)
+        return default if value is None else value
 
     def save_restart_setting(self, key: str, value: str) -> None:
         """原子更新启动配置文件，不改变当前进程的环境变量或运行配置。"""
@@ -54,16 +78,36 @@ class ConfigManager:
         if not success:
             raise OSError("无法保存启动配置文件")
 
+    def build_restart_environment(self) -> Dict[str, str]:
+        """构造网页一键重启使用的新进程环境。
+
+        普通启动仍遵循“显式环境变量优先于 .env”。但网页重启会继承当前进程
+        的环境变量，若其中残留了旧版本 load_dotenv 注入的值，就会继续覆盖
+        .env。因此这里只移除 .env 中由本程序管理的同名键，让 exec 后的新进程
+        重新读取 .env；PATH、HOME 以及非本程序管理的变量保持不变。
+        """
+        environment = dict(os.environ)
+        dotenv_keys = set(dotenv_values(self.env_file))
+        managed_keys = set(self.config_dict) | {
+            "GROUP_WHITELIST",
+            "PRIVATE_WHITELIST",
+            "GLOBAL_BLACKLIST",
+            "DELETE_PERMISSION_USER",
+        }
+        for key in dotenv_keys & managed_keys:
+            environment.pop(key, None)
+        return environment
+
     def load_config(self):
         """加载.env文件到内存配置（覆盖默认配置中同名项）"""
-        # 加载环境变量
-        load_dotenv(dotenv_path=self.env_file)
+        # 读取 .env，但不写入 os.environ，避免自重启继承旧配置值
+        self._dotenv_values = dotenv_values(self.env_file)
         # 初始化配置
         # 简化token配置，只使用NAPCAT_TOKEN作为唯一的token配置项
-        token = os.getenv("NAPCAT_TOKEN", "")
+        token = self._get_env("NAPCAT_TOKEN", "")
 
         # 构建带token的WebSocket URL（如果有token）
-        base_ws_url = os.getenv("NAPCAT_WS_URL", "ws://localhost:8080/qq")
+        base_ws_url = self._get_env("NAPCAT_WS_URL", "ws://localhost:8080/qq")
         if token:
             # 检查URL是否已经包含查询参数
             if "?" in base_ws_url:
@@ -74,7 +118,7 @@ class ConfigManager:
             ws_url = base_ws_url
 
         # 获取下载路径配置
-        download_path = os.getenv("MANGA_DOWNLOAD_PATH", "./downloads")
+        download_path = self._get_env("MANGA_DOWNLOAD_PATH", "./downloads")
         # 处理Linux系统中的波浪号(~)路径，将其扩展为用户主目录
         if download_path.startswith("~"):
             download_path = os.path.expanduser(download_path)
@@ -82,11 +126,11 @@ class ConfigManager:
         absolute_download_path = os.path.abspath(download_path)
 
         # 获取内存低占用模式配置
-        low_memory_mode_str = os.getenv("LOW_MEMORY_MODE", "false").lower()
+        low_memory_mode_str = self._get_env("LOW_MEMORY_MODE", "false").lower()
         low_memory_mode = low_memory_mode_str in ("true", "1", "yes", "on")
 
         # 获取低内存模式下的文件删除延迟时间（分钟）
-        low_memory_delete_delay_str = os.getenv("LOW_MEMORY_DELETE_DELAY", "3")
+        low_memory_delete_delay_str = self._get_env("LOW_MEMORY_DELETE_DELAY", "3")
         try:
             low_memory_delete_delay = int(low_memory_delete_delay_str)
             if low_memory_delete_delay < 1:
@@ -95,7 +139,7 @@ class ConfigManager:
             low_memory_delete_delay = 3
 
         # 获取文件发送间隔（秒）
-        file_send_interval_str = os.getenv("FILE_SEND_INTERVAL", "1.8")
+        file_send_interval_str = self._get_env("FILE_SEND_INTERVAL", "1.8")
         try:
             file_send_interval = float(file_send_interval_str)
             if file_send_interval < 1:
@@ -104,7 +148,7 @@ class ConfigManager:
             file_send_interval = 1.8
 
         # 获取文件发送每批数量
-        file_send_batch_size_str = os.getenv("FILE_SEND_BATCH_SIZE", "10")
+        file_send_batch_size_str = self._get_env("FILE_SEND_BATCH_SIZE", "10")
         try:
             file_send_batch_size = int(file_send_batch_size_str)
             if file_send_batch_size < 1:
@@ -113,7 +157,7 @@ class ConfigManager:
             file_send_batch_size = 10
 
         # 获取每批文件发送的间隔（秒）
-        file_send_batch_interval_str = os.getenv("FILE_SEND_BATCH_INTERVAL", "7")
+        file_send_batch_interval_str = self._get_env("FILE_SEND_BATCH_INTERVAL", "7")
         try:
             file_send_batch_interval = float(file_send_batch_interval_str)
             if file_send_batch_interval < 1:
@@ -122,7 +166,7 @@ class ConfigManager:
             file_send_batch_interval = 7
 
         # 获取文件发送重连等待超时（秒）
-        send_retry_timeout_str = os.getenv("SEND_RETRY_TIMEOUT", "30")
+        send_retry_timeout_str = self._get_env("SEND_RETRY_TIMEOUT", "30")
         try:
             send_retry_timeout = int(send_retry_timeout_str)
             if send_retry_timeout < 1:
@@ -131,7 +175,7 @@ class ConfigManager:
             send_retry_timeout = 30
 
         # 获取断线文件确认重发的等待超时（秒）
-        resend_confirm_timeout_str = os.getenv("RESEND_CONFIRM_TIMEOUT", "300")
+        resend_confirm_timeout_str = self._get_env("RESEND_CONFIRM_TIMEOUT", "300")
         try:
             resend_confirm_timeout = int(resend_confirm_timeout_str)
             if resend_confirm_timeout < 1:
@@ -140,29 +184,46 @@ class ConfigManager:
             resend_confirm_timeout = 300
 
         # 获取SQLite数据库目录配置，处理路径并转换为绝对路径
-        db_path = os.getenv("DB_PATH", "./data")
+        db_path = self._get_env("DB_PATH", "./data")
         if db_path.startswith("~"):
             db_path = os.path.expanduser(db_path)
         absolute_db_path = os.path.abspath(db_path)
 
         # 获取数据库备份目录配置，处理方式与 DB_PATH 一致
-        backup_path = os.getenv("BACKUP_PATH", "./data/backups")
+        backup_path = self._get_env("BACKUP_PATH", "./data/backups")
         if backup_path.startswith("~"):
             backup_path = os.path.expanduser(backup_path)
         absolute_backup_path = os.path.abspath(backup_path)
 
         # 获取数据库SQL日志开关
-        db_echo_str = os.getenv("DB_ECHO", "false").lower()
+        db_echo_str = self._get_env("DB_ECHO", "false").lower()
         db_echo = db_echo_str in ("true", "1", "yes", "on")
 
-        webui_enabled = _parse_bool_config("WEBUI_ENABLED", True)
-        webui_host = os.getenv("WEBUI_HOST", "127.0.0.1").strip()
+        webui_enabled = _parse_bool_config(
+            "WEBUI_ENABLED", self._get_env("WEBUI_ENABLED"), True
+        )
+        # 拉黑与删除的绑定开关：默认关闭，非法值在启动时直接报错
+        blacklist_delete_binding = _parse_bool_config(
+            "BLACKLIST_DELETE_BINDING",
+            self._get_env("BLACKLIST_DELETE_BINDING"),
+            False,
+        )
+        webui_host = (self._get_env("WEBUI_HOST", "127.0.0.1") or "").strip()
         if not webui_host:
             raise ValueError("WEBUI_HOST 不能为空")
-        webui_port = _parse_int_config("WEBUI_PORT", 7999, 1, 65535)
-        webui_session_hours = _parse_int_config("WEBUI_SESSION_HOURS", 24, 1, 24 * 30)
+        webui_port = _parse_int_config(
+            "WEBUI_PORT", self._get_env("WEBUI_PORT"), 7999, 1, 65535
+        )
+        webui_session_hours = _parse_int_config(
+            "WEBUI_SESSION_HOURS",
+            self._get_env("WEBUI_SESSION_HOURS"),
+            24,
+            1,
+            24 * 30,
+        )
         # 开发环境额外允许的页面来源（Vite 开发服务器），生产默认留空
-        webui_dev_origins = self._parse_id_list(os.getenv("WEBUI_DEV_ORIGINS", ""))
+        webui_dev_origins_raw = self._get_env("WEBUI_DEV_ORIGINS", "") or ""
+        webui_dev_origins = self._parse_id_list(webui_dev_origins_raw)
         for origin in webui_dev_origins:
             if not origin.startswith(("http://", "https://")):
                 raise ValueError(f"WEBUI_DEV_ORIGINS 必须是完整的来源地址: {origin}")
@@ -171,6 +232,7 @@ class ConfigManager:
             "MANGA_DOWNLOAD_PATH": absolute_download_path,
             "NAPCAT_WS_URL": ws_url,
             "NAPCAT_TOKEN": token,
+            "BLACKLIST_DELETE_BINDING": blacklist_delete_binding,
             "LOW_MEMORY_MODE": low_memory_mode,
             "LOW_MEMORY_DELETE_DELAY": low_memory_delete_delay,
             "FILE_SEND_INTERVAL": file_send_interval,
@@ -185,22 +247,22 @@ class ConfigManager:
             "WEBUI_HOST": webui_host,
             "WEBUI_PORT": webui_port,
             "WEBUI_SESSION_HOURS": webui_session_hours,
-            "WEBUI_DEV_ORIGINS": os.getenv("WEBUI_DEV_ORIGINS", ""),
+            "WEBUI_DEV_ORIGINS": self._get_env("WEBUI_DEV_ORIGINS", ""),
         }
 
         # 初始化黑白名单配置
         self.group_whitelist: List[str] = self._parse_id_list(
-            os.getenv("GROUP_WHITELIST", "")
+            self._get_env("GROUP_WHITELIST", "")
         )
         self.private_whitelist: List[str] = self._parse_id_list(
-            os.getenv("PRIVATE_WHITELIST", "")
+            self._get_env("PRIVATE_WHITELIST", "")
         )
         self.global_blacklist: List[str] = self._parse_id_list(
-            os.getenv("GLOBAL_BLACKLIST", "")
+            self._get_env("GLOBAL_BLACKLIST", "")
         )
         # 初始化删除权限用户名单配置
         self.delete_permission_user: List[str] = self._parse_id_list(
-            os.getenv("DELETE_PERMISSION_USER", "")
+            self._get_env("DELETE_PERMISSION_USER", "")
         )
         # WebUI 开发环境额外允许的页面来源
         self.webui_dev_origins: List[str] = webui_dev_origins

@@ -69,6 +69,18 @@ class _TaskService:
         return snapshot
 
 
+class _BlacklistService:
+    """提供黑名单命中检查的测试替身。"""
+
+    def __init__(self, blacklisted_ids: Optional[List[str]] = None) -> None:
+        self.blacklisted_ids = set(blacklisted_ids or [])
+        self.checked_ids: List[str] = []
+
+    def is_blacklisted(self, manga_id: str) -> bool:
+        self.checked_ids.append(manga_id)
+        return manga_id in self.blacklisted_ids
+
+
 class _DownloadQueue:
     """记录取消与入队调用的测试队列。"""
 
@@ -114,11 +126,13 @@ class _DownloadQueue:
 def _build_service(
     download_queue: _DownloadQueue,
     task_service: Optional[_TaskService] = None,
+    blacklist_service: Optional[_BlacklistService] = None,
 ) -> DownloadQueueService:
     """构造绑定测试队列与测试任务服务的下载服务。"""
     return DownloadQueueService(
         download_queue,
         task_service=task_service or _TaskService(),  # type: ignore[arg-type]
+        blacklist_service=blacklist_service,  # type: ignore[arg-type]
     )
 
 
@@ -153,6 +167,49 @@ def test_request_deduplicates_and_keeps_order() -> None:
     assert download_queue.requested_manga_ids == ["100", "101"]
     assert result.queued_count == 2
     assert result.duplicate_count == 0
+
+
+def test_request_skips_blacklisted_before_queueing() -> None:
+    """命中的黑名单 ID 只回传跳过列表，不进入活动任务或入队流程。"""
+    download_queue = _DownloadQueue([])
+    blacklist = _BlacklistService(["100"])
+    service = _build_service(download_queue, blacklist_service=blacklist)
+
+    result = service.request(["100", "101", "100"], OperationContext.qq("10001"))
+
+    assert result.skipped_blacklisted == ("100",)
+    assert result.skipped_count == 1
+    assert [item.manga_id for item in result.items] == ["101"]
+    assert download_queue.requested_manga_ids == ["101"]
+    assert blacklist.checked_ids == ["100", "101"]
+
+
+def test_request_blacklist_precedes_active_download_dedup() -> None:
+    """黑名单优先于数据库活动任务与内存队列去重。"""
+    download_queue = _DownloadQueue(["100"])
+    task_service = _TaskService(active_task_ids={"100": "active-100"})
+    service = _build_service(
+        download_queue,
+        task_service,
+        blacklist_service=_BlacklistService(["100"]),
+    )
+
+    result = service.request(["100"], OperationContext.qq("10001"))
+
+    assert result.items == ()
+    assert result.skipped_blacklisted == ("100",)
+    assert download_queue.requested_manga_ids == []
+
+
+def test_request_without_blacklist_service_keeps_behavior() -> None:
+    """未注入黑名单服务时保持原有入队行为。"""
+    download_queue = _DownloadQueue([])
+    service = _build_service(download_queue)
+
+    result = service.request(["100"], OperationContext.qq("10001"))
+
+    assert result.skipped_blacklisted == ()
+    assert download_queue.requested_manga_ids == ["100"]
 
 
 def test_request_returns_existing_task_for_active_download() -> None:

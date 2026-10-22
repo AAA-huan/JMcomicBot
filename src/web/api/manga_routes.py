@@ -6,7 +6,11 @@ from typing import Annotated, Callable, List, Optional
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
 
-from src.service import MangaDeleteOutcome
+from src.service import (
+    BlacklistBatchResult,
+    BlacklistOutcome,
+    MangaDeleteOutcome,
+)
 from src.service.manga_service import ADMIN_FAVORITE_DELETE_MESSAGE
 from src.service.web_auth_service import AuthenticatedSession
 from src.web.dependencies import WebDependencies
@@ -32,6 +36,33 @@ class MangaBatchDeleteRequest(BaseModel):
     """批量删除请求。"""
 
     manga_ids: List[str] = Field(min_length=1, max_length=BATCH_DELETE_LIMIT)
+
+
+class MangaBlacklistRequest(BaseModel):
+    """拉黑请求，原因可选。"""
+
+    reason: Optional[str] = Field(default=None, max_length=255)
+
+
+class MangaBatchBlacklistRequest(MangaBlacklistRequest):
+    """批量拉黑请求。"""
+
+    manga_ids: List[str] = Field(min_length=1, max_length=BATCH_DELETE_LIMIT)
+
+
+class MangaBatchUnblacklistRequest(BaseModel):
+    """批量解除拉黑请求。"""
+
+    manga_ids: List[str] = Field(min_length=1, max_length=BATCH_DELETE_LIMIT)
+
+
+def _blacklist_batch_payload(result: BlacklistBatchResult) -> dict[str, object]:
+    """把批量黑名单结果转换为稳定响应结构。"""
+    return {
+        "items": [asdict(outcome) for outcome in result.outcomes],
+        "changed_count": result.changed_count,
+        "unchanged_count": result.unchanged_count,
+    }
 
 
 def _raise_delete_error(outcome: MangaDeleteOutcome) -> None:
@@ -66,6 +97,7 @@ def create_manga_router(
         sort: str = "downloaded_at_desc",
         favorite_only: bool = False,
         history_only: bool = False,
+        blacklist_only: bool = False,
     ) -> dict[str, object]:
         try:
             return asdict(
@@ -78,11 +110,59 @@ def create_manga_router(
                     sort,
                     favorite_only=favorite_only,
                     history_only=history_only,
+                    blacklist_only=blacklist_only,
                     admin_id=authenticated.admin_id,
                 )
             )
         except ValueError as error:
             raise ApiError(400, "INVALID_QUERY", str(error)) from error
+
+    @router.get("/mangas/blacklist")
+    def list_blacklisted_mangas(
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+        page: Annotated[int, Query(ge=1)] = 1,
+        page_size: Annotated[int, Query(ge=1, le=100)] = 20,
+        search: Optional[str] = None,
+    ) -> dict[str, object]:
+        """分页查询黑名单；该静态路径必须先于 /mangas/{manga_id} 注册。"""
+        del authenticated
+        return asdict(
+            dependencies.manga_blacklist_service.list_blacklisted(
+                page, page_size, search
+            )
+        )
+
+    @router.post("/mangas/blacklist:batch")
+    def batch_blacklist_mangas(
+        body: MangaBatchBlacklistRequest,
+        request: Request,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """批量拉黑漫画，返回每一项的结构化结果。"""
+        context = build_operation_context(request, authenticated)
+        try:
+            result = dependencies.manga_blacklist_service.add_batch(
+                list(body.manga_ids), body.reason, context
+            )
+        except ValueError as error:
+            raise ApiError(400, "INVALID_BLACKLIST_REQUEST", str(error)) from error
+        return _blacklist_batch_payload(result)
+
+    @router.delete("/mangas/blacklist:batch")
+    def batch_unblacklist_mangas(
+        body: MangaBatchUnblacklistRequest,
+        request: Request,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """批量解除拉黑漫画，返回每一项的结构化结果。"""
+        context = build_operation_context(request, authenticated)
+        try:
+            result = dependencies.manga_blacklist_service.remove_batch(
+                list(body.manga_ids), context
+            )
+        except ValueError as error:
+            raise ApiError(400, "INVALID_BLACKLIST_REQUEST", str(error)) from error
+        return _blacklist_batch_payload(result)
 
     @router.get("/mangas/{manga_id}")
     def get_manga(
@@ -139,6 +219,41 @@ def create_manga_router(
     ) -> dict[str, object]:
         """幂等取消收藏。"""
         return change_favorite(manga_id, False, request, authenticated)
+
+    @router.post("/mangas/{manga_id}/blacklist")
+    def blacklist_manga(
+        manga_id: str,
+        request: Request,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+        body: Optional[MangaBlacklistRequest] = None,
+    ) -> dict[str, object]:
+        """拉黑单个漫画；已拉黑时返回 changed=false。"""
+        context = build_operation_context(request, authenticated)
+        try:
+            outcome: BlacklistOutcome = dependencies.manga_blacklist_service.add(
+                manga_id,
+                body.reason if body else None,
+                context,
+            )
+        except ValueError as error:
+            raise ApiError(400, "INVALID_BLACKLIST_REQUEST", str(error)) from error
+        return asdict(outcome)
+
+    @router.delete("/mangas/{manga_id}/blacklist")
+    def unblacklist_manga(
+        manga_id: str,
+        request: Request,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """解除单个漫画的拉黑；未拉黑时返回 changed=false。"""
+        context = build_operation_context(request, authenticated)
+        try:
+            outcome: BlacklistOutcome = dependencies.manga_blacklist_service.remove(
+                manga_id, context
+            )
+        except ValueError as error:
+            raise ApiError(400, "INVALID_BLACKLIST_REQUEST", str(error)) from error
+        return asdict(outcome)
 
     @router.patch("/mangas/{manga_id}")
     def patch_manga(

@@ -66,6 +66,7 @@ describe('DownloadPage', () => {
       ],
       queued_count: 1,
       duplicate_count: 1,
+      skipped_blacklisted: [],
     })
     const wrapper = mountPage()
     await flushPromises()
@@ -82,6 +83,27 @@ describe('DownloadPage', () => {
     expect(wrapper.text()).toContain('已入队 1 个')
     expect(wrapper.text()).toContain('1 个已有活动任务（200）')
     expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('')
+    wrapper.unmount()
+  })
+
+  it('提示因黑名单跳过的下载请求', async () => {
+    vi.mocked(requestDownloads).mockResolvedValue({
+      items: [{ manga_id: '200', status: 'queued', task_id: 'task-2' }],
+      queued_count: 1,
+      duplicate_count: 0,
+      skipped_blacklisted: ['100'],
+    })
+    const wrapper = mountPage()
+    await flushPromises()
+
+    await wrapper.find('textarea').setValue('100, 200')
+    const submitButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('请求下载'))
+    await submitButton!.trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('1 个已被拉黑跳过（100）')
     wrapper.unmount()
   })
 

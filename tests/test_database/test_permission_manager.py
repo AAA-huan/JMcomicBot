@@ -3,6 +3,7 @@
 import pytest
 
 from src.database.repositories.permission_repository import PermissionRepository
+from src.database.repositories.web_auth_repository import WebAdminRepository
 from src.permission.manager import PermissionManager
 
 
@@ -99,3 +100,44 @@ class TestPermissionManager:
         with pytest.raises(ValueError) as exc_info:
             manager.check_delete_permission("admin")
         assert "未配置删除权限用户" in str(exc_info.value)
+
+    def test_check_blacklist_permission_reuses_delete_list(
+        self, permission_repo: PermissionRepository
+    ) -> None:
+        """黑名单权限复用删除权限名单，名单内用户通过，普通用户拒绝"""
+        manager = PermissionManager(
+            permission_repo=permission_repo,
+            seed_delete_permission_user=["admin"],
+        )
+        assert manager.check_blacklist_permission("admin") is True
+
+        with pytest.raises(ValueError) as exc_info:
+            manager.check_blacklist_permission("other")
+        assert "没有拉黑漫画的权限" in str(exc_info.value)
+
+    def test_check_blacklist_disabled_when_empty(
+        self, permission_repo: PermissionRepository
+    ) -> None:
+        """删除权限名单为空时黑名单功能不可用"""
+        manager = PermissionManager(permission_repo=permission_repo)
+        with pytest.raises(ValueError) as exc_info:
+            manager.check_blacklist_permission("admin")
+        assert "未配置删除权限用户" in str(exc_info.value)
+
+    def test_check_blacklist_admin_qq_and_global_blacklist_priority(
+        self, permission_repo: PermissionRepository
+    ) -> None:
+        """关联管理员 QQ 可操作；全局黑名单优先于管理员授权"""
+        admin_repo = WebAdminRepository(permission_repo.db_manager)
+        admin_repo.create("hash")
+        admin_repo.set_qq_id("10001")
+        manager = PermissionManager(
+            permission_repo=permission_repo,
+            admin_repository=admin_repo,
+        )
+        assert manager.check_blacklist_permission("10001") is True
+
+        manager.add_to_scope("global_blacklist", "10001")
+        with pytest.raises(ValueError) as exc_info:
+            manager.check_blacklist_permission("10001")
+        assert "全局黑名单" in str(exc_info.value)

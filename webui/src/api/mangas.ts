@@ -1,9 +1,17 @@
 /** 漫画查询、元数据修改与删除接口。 */
 
 import { apiRequest } from './client'
-import type { Manga, MangaFile, PageResult } from '@/types/api'
+import type {
+  BlacklistBatchResult,
+  BlacklistOutcome,
+  Manga,
+  MangaBlacklistItem,
+  MangaFile,
+  PageResult,
+} from '@/types/api'
 
 export interface MangaListQuery {
+  blacklist_only?: boolean
   favorite_only?: boolean
   history_only?: boolean
   page?: number
@@ -67,5 +75,55 @@ export function batchDeleteMangas(mangaIds: string[]): Promise<BatchDeleteResult
   return apiRequest<BatchDeleteResult>('/mangas/batch-delete', {
     method: 'POST',
     body: { manga_ids: mangaIds },
+  })
+}
+
+export function blacklistManga(
+  mangaId: string,
+  reason?: string,
+): Promise<BlacklistOutcome> {
+  return apiRequest<BlacklistOutcome>(
+    `/mangas/${encodeURIComponent(mangaId)}/blacklist`,
+    { method: 'POST', body: { reason: reason || null } },
+  )
+}
+
+export function unblacklistManga(mangaId: string): Promise<BlacklistOutcome> {
+  return apiRequest<BlacklistOutcome>(
+    `/mangas/${encodeURIComponent(mangaId)}/blacklist`,
+    { method: 'DELETE' },
+  )
+}
+
+export function batchBlacklistMangas(
+  mangaIds: string[],
+  reason?: string,
+): Promise<BlacklistBatchResult> {
+  return apiRequest<BlacklistBatchResult>('/mangas/blacklist:batch', {
+    method: 'POST',
+    body: { manga_ids: mangaIds, reason: reason || null },
+  })
+}
+
+export function batchUnblacklistMangas(
+  mangaIds: string[],
+): Promise<BlacklistBatchResult> {
+  return apiRequest<BlacklistBatchResult>('/mangas/blacklist:batch', {
+    method: 'DELETE',
+    body: { manga_ids: mangaIds },
+  })
+}
+
+export interface BlacklistListQuery {
+  page?: number
+  page_size?: number
+  search?: string
+}
+
+export function listBlacklisted(
+  query: BlacklistListQuery = {},
+): Promise<PageResult<MangaBlacklistItem>> {
+  return apiRequest<PageResult<MangaBlacklistItem>>('/mangas/blacklist', {
+    query: { ...query },
   })
 }
