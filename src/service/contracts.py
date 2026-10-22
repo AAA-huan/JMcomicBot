@@ -2,6 +2,7 @@
 
 from typing import Any, Dict, List, Optional, Protocol
 
+from src.database.models import ReadingSetting
 from src.service.operation_context import OperationContext
 from src.service.query_service import PageResult
 from src.service.results import (
@@ -152,6 +153,23 @@ class MangaBlacklistService(Protocol):
         search: Optional[str] = None,
     ) -> PageResult[MangaBlacklistItem]:
         """分页查询黑名单。"""
+        raise NotImplementedError
+
+
+class ReadingSettingService(Protocol):
+    """阅读器偏好设置应用服务接口。"""
+
+    def get_or_default(self, admin_id: int) -> ReadingSetting:
+        """查询设置；未保存时返回全默认值且不落库。"""
+        raise NotImplementedError
+
+    def upsert(
+        self,
+        admin_id: int,
+        payload: Dict[str, Any],
+        context: Optional[OperationContext] = None,
+    ) -> ReadingSetting:
+        """整体更新设置，未传字段保留原值。"""
         raise NotImplementedError
 
 

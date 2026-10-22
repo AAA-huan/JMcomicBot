@@ -114,6 +114,67 @@ class MangaFile(Base):
     manga: Mapped["Manga"] = relationship(back_populates="files")
 
 
+class ReadingSetting(Base):
+    """PDF 阅读器偏好设置，按 Web 管理员账户保存一份。"""
+
+    __tablename__ = "reading_setting"
+    __table_args__ = (
+        CheckConstraint(
+            "reading_mode IN ('normal', 'manga', 'scroll')",
+            name="ck_reading_setting_mode",
+        ),
+    )
+
+    admin_id: Mapped[int] = mapped_column(
+        ForeignKey("web_admin.id", ondelete="CASCADE"),
+        primary_key=True,
+        comment="管理员账户ID",
+    )
+    reading_mode: Mapped[str] = mapped_column(
+        String(16),
+        nullable=False,
+        default="normal",
+        server_default=text("'normal'"),
+        comment="翻页方向: normal/manga/scroll",
+    )
+    continuous: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("0"),
+        comment="是否连续连排滚动",
+    )
+    click_to_turn: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("0"),
+        comment="是否允许点击翻页",
+    )
+    reverse_click: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("0"),
+        comment="是否反转点击翻页方向",
+    )
+    dark_background: Mapped[bool] = mapped_column(
+        Boolean,
+        nullable=False,
+        default=False,
+        server_default=text("0"),
+        comment="是否使用深色背景",
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utc_now,
+        onupdate=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+        comment="最近修改时间",
+    )
+
+
 class ReadingProgress(Base):
     """PDF 阅读进度表，记录每本 PDF 当前阅读位置；页码从 1 开始。"""
 

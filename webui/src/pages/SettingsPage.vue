@@ -1,9 +1,11 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
 
 import { errorMessage } from '@/api/client'
+import { getReaderSettings, updateReaderSettings } from '@/api/reader'
 import { getOptionFile, listSettings, updateOptionFile, updateSetting } from '@/api/settings'
 import EmptyState from '@/components/EmptyState.vue'
+import type { ReadingSettings } from '@/reader/types'
 import type { SettingValue, SettingView } from '@/types/api'
 import {
   SETTING_EFFECT_COLORS,
@@ -11,6 +13,12 @@ import {
   SETTING_ENV_OVERRIDE_HELP,
   SETTING_HELP_TEXTS,
 } from '@/utils/labels'
+
+const READING_MODE_OPTIONS = [
+  { value: 'normal', title: '普通模式', description: '左→右阅读，右滑 / ArrowRight 翻下页' },
+  { value: 'manga', title: '日漫模式', description: '右→左阅读，左滑 / ArrowLeft 翻下页' },
+  { value: 'scroll', title: '滚动模式', description: '上→下阅读，下滑 / ArrowDown 翻下页' },
+] as const
 
 const items = ref<SettingView[]>([])
 const loading = ref(false)
@@ -36,6 +44,50 @@ const optionSaving = ref(false)
 const optionError = ref('')
 const optionNotice = ref('')
 const optionDirty = ref(false)
+
+// 阅读器偏好设置状态，与阅读器工具栏共用同一份后端数据
+const EMPTY_READER_SETTINGS: ReadingSettings = {
+  reading_mode: 'normal',
+  continuous: false,
+  click_to_turn: false,
+  reverse_click: false,
+  dark_background: false,
+  updated_at: null,
+}
+const readerForm = ref<ReadingSettings>({ ...EMPTY_READER_SETTINGS })
+const readerLoaded = ref<ReadingSettings | null>(null)
+const readerLoading = ref(false)
+const readerSaving = ref(false)
+const readerError = ref('')
+const readerNotice = ref('')
+
+const readerDirty = computed(() => {
+  const form = readerForm.value
+  const loaded = readerLoaded.value
+  if (!loaded) return false
+  return (
+    form.reading_mode !== loaded.reading_mode ||
+    form.continuous !== loaded.continuous ||
+    form.click_to_turn !== loaded.click_to_turn ||
+    form.reverse_click !== loaded.reverse_click ||
+    form.dark_background !== loaded.dark_background
+  )
+})
+
+const selectedReadingMode = computed(
+  () =>
+    READING_MODE_OPTIONS.find(
+      (option) => option.value === readerForm.value.reading_mode,
+    ) ?? READING_MODE_OPTIONS[0],
+)
+
+// 关闭点击翻页时同步关闭反转，避免提交后端必然拒绝的组合
+watch(
+  () => readerForm.value.click_to_turn,
+  (enabled) => {
+    if (!enabled) readerForm.value.reverse_click = false
+  },
+)
 
 /** 按注册表顺序分组，保持后端返回的分组顺序。 */
 const groups = computed(() => {
@@ -148,9 +200,48 @@ async function saveSetting(): Promise<void> {
   }
 }
 
+async function loadReader(): Promise<void> {
+  readerLoading.value = true
+  readerError.value = ''
+  try {
+    const settings = await getReaderSettings()
+    readerForm.value = { ...settings }
+    readerLoaded.value = { ...settings }
+  } catch (err) {
+    readerError.value = errorMessage(err)
+  } finally {
+    readerLoading.value = false
+  }
+}
+
+async function saveReader(): Promise<void> {
+  const form = readerForm.value
+  if (!form || !readerLoaded.value) return
+  readerSaving.value = true
+  readerError.value = ''
+  readerNotice.value = ''
+  try {
+    const updated = await updateReaderSettings({
+      reading_mode: form.reading_mode,
+      continuous: form.continuous,
+      click_to_turn: form.click_to_turn,
+      reverse_click: form.reverse_click,
+      dark_background: form.dark_background,
+    })
+    readerForm.value = { ...updated }
+    readerLoaded.value = { ...updated }
+    readerNotice.value = '阅读偏好已保存，进入阅读器立即生效（无需重启）'
+  } catch (err) {
+    readerError.value = errorMessage(err)
+  } finally {
+    readerSaving.value = false
+  }
+}
+
 onMounted(() => {
   void load()
   void loadOption()
+  void loadReader()
 })
 </script>
 
@@ -186,6 +277,114 @@ onMounted(() => {
     </v-alert>
 
     <v-progress-linear v-if="loading" indeterminate class="mb-4" />
+
+    <v-card class="mb-4">
+      <v-card-title class="text-subtitle-1">阅读偏好</v-card-title>
+      <v-divider />
+      <v-card-text>
+        <v-alert
+          v-if="readerError"
+          type="error"
+          variant="tonal"
+          density="comfortable"
+          class="mb-3"
+        >
+          {{ readerError }}
+          <template #append>
+            <v-btn size="small" variant="text" @click="loadReader">重试</v-btn>
+          </template>
+        </v-alert>
+        <v-alert
+          v-if="readerNotice"
+          type="success"
+          variant="tonal"
+          density="comfortable"
+          closable
+          class="mb-3"
+          @click:close="readerNotice = ''"
+        >
+          {{ readerNotice }}
+        </v-alert>
+        <v-progress-linear v-if="readerLoading" indeterminate class="mb-3" />
+        <p class="text-body-2 text-medium-emphasis mb-4">
+          阅读偏好按管理员账户保存，与阅读器工具栏共用同一份设置，保存后立即生效且无需重启。
+        </p>
+
+        <div class="text-subtitle-2 mb-2">翻页方向</div>
+        <v-btn-toggle
+          v-model="readerForm.reading_mode"
+          mandatory
+          divided
+          color="primary"
+          variant="outlined"
+          class="mb-2"
+        >
+          <v-btn
+            v-for="option in READING_MODE_OPTIONS"
+            :key="option.value"
+            :value="option.value"
+          >
+            {{ option.title }}
+          </v-btn>
+        </v-btn-toggle>
+        <p class="text-caption text-medium-emphasis mb-4">
+          {{ selectedReadingMode.description }}
+        </p>
+
+        <v-switch
+          v-model="readerForm.continuous"
+          label="连续翻页"
+          color="primary"
+          density="compact"
+          hide-details
+          class="mb-2"
+        />
+        <p class="text-caption text-medium-emphasis mb-4">
+          关闭时一次一页；开启后普通/日漫模式水平连排，滚动模式垂直连排。
+        </p>
+        <v-switch
+          v-model="readerForm.click_to_turn"
+          label="点击翻页"
+          color="primary"
+          density="compact"
+          hide-details
+          class="mb-2"
+        />
+        <p class="text-caption text-medium-emphasis mb-4">
+          开启后点击屏幕左右两大区翻页，中间区域不响应。
+        </p>
+        <v-switch
+          v-model="readerForm.reverse_click"
+          label="反转点击翻页"
+          color="primary"
+          density="compact"
+          hide-details
+          :disabled="!readerForm.click_to_turn"
+          class="mb-2"
+        />
+        <p class="text-caption text-medium-emphasis mb-4">
+          仅在开启点击翻页后可用；反转只影响点击方向，不改变滑动与键盘方向。
+        </p>
+        <v-switch
+          v-model="readerForm.dark_background"
+          label="深色背景"
+          color="primary"
+          density="compact"
+          hide-details
+        />
+      </v-card-text>
+      <v-card-actions>
+        <v-spacer />
+        <v-btn
+          color="primary"
+          :disabled="readerLoading || !readerLoaded || !readerDirty"
+          :loading="readerSaving"
+          @click="saveReader"
+        >
+          保存阅读偏好
+        </v-btn>
+      </v-card-actions>
+    </v-card>
 
     <EmptyState
       v-if="!loading && items.length === 0"
