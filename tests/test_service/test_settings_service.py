@@ -87,6 +87,23 @@ def test_list_marks_empty_sensitive_as_unset(db_manager) -> None:
     assert token_view.is_set is False
 
 
+def test_view_marks_environment_override_for_restart_settings(
+    db_manager, monkeypatch
+) -> None:
+    """启动项被同名环境变量覆盖时返回标记，即时项不受此标记影响。"""
+    service, _applied = _build_service(
+        db_manager, {"DB_ECHO": False, "FILE_SEND_INTERVAL": 1.8}
+    )
+    monkeypatch.setenv("DB_ECHO", "false")
+    monkeypatch.setenv("FILE_SEND_INTERVAL", "1.8")
+
+    db_echo = _find_view(service, "DB_ECHO")
+    file_send_interval = _find_view(service, "FILE_SEND_INTERVAL")
+
+    assert db_echo.overridden_by_env is True
+    assert file_send_interval.overridden_by_env is False
+
+
 def test_update_persists_applies_and_audits(db_manager) -> None:
     """修改配置应调用显式接口、落库并写审计与脱敏历史。"""
     service, applied = _build_service(db_manager, {"FILE_SEND_INTERVAL": 1.8})
@@ -195,6 +212,7 @@ def test_register_appliers_requires_complete_set(db_manager) -> None:
     "key,value",
     [
         ("LOW_MEMORY_MODE", True),
+        ("BLACKLIST_DELETE_BINDING", True),
         ("MANGA_DOWNLOAD_PATH", "./new-downloads"),
         ("DB_PATH", "./new-data"),
         ("BACKUP_PATH", "./new-backups"),

@@ -16,6 +16,8 @@ export WEBUI_ENABLED=true
 export WEBUI_HOST=127.0.0.1
 export WEBUI_PORT="${E2E_PORT:-18080}"
 export WEBUI_SESSION_HOURS=24
+# 固定黑名单绑定为关闭，避免开发者本地 .env 开启绑定导致删除行为影响用例
+export BLACKLIST_DELETE_BINDING=false
 
 uv run python tests/smoke/prepare_test_data.py --mangas 6 >/dev/null 2>&1
 

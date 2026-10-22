@@ -1,6 +1,7 @@
 """应用服务对外返回的渠道无关结果对象。"""
 
 from dataclasses import dataclass
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Tuple
 
@@ -68,6 +69,7 @@ class DownloadRequestResult:
     """批量下载请求的汇总结果，保持请求顺序且已去重。"""
 
     items: Tuple[DownloadRequestItem, ...]
+    skipped_blacklisted: Tuple[str, ...] = ()
 
     @property
     def queued_items(self) -> Tuple[DownloadRequestItem, ...]:
@@ -88,6 +90,11 @@ class DownloadRequestResult:
     def duplicate_count(self) -> int:
         """已有活动任务的请求数量。"""
         return len(self.duplicate_items)
+
+    @property
+    def skipped_count(self) -> int:
+        """因命中漫画黑名单而跳过的请求数量。"""
+        return len(self.skipped_blacklisted)
 
 
 @dataclass(frozen=True)
@@ -142,6 +149,51 @@ class MangaDeleteResult:
     def deleted_file_count(self) -> int:
         """实际删除的文件总数。"""
         return sum(outcome.deleted_file_count for outcome in self.outcomes)
+
+
+@dataclass(frozen=True)
+class MangaBlacklistItem:
+    """黑名单列表项，标题仅在漫画元数据存在时返回。"""
+
+    manga_id: str
+    title: Optional[str]
+    reason: Optional[str]
+    requested_by: Optional[str]
+    source: str
+    blacklisted_at: datetime
+    operation_task_id: Optional[str]
+
+
+@dataclass(frozen=True)
+class BlacklistOutcome:
+    """单个漫画的拉黑或解除结果。
+
+    status: blacklisted / already_blacklisted / unblacklisted / not_blacklisted
+    """
+
+    manga_id: str
+    changed: bool
+    status: str
+    task_id: Optional[str] = None
+    deleted: bool = False
+    delete_error_code: Optional[str] = None
+
+
+@dataclass(frozen=True)
+class BlacklistBatchResult:
+    """批量拉黑或解除的汇总结果，保持请求顺序且已去重。"""
+
+    outcomes: Tuple[BlacklistOutcome, ...]
+
+    @property
+    def changed_count(self) -> int:
+        """实际发生状态变化的漫画数量。"""
+        return sum(1 for outcome in self.outcomes if outcome.changed)
+
+    @property
+    def unchanged_count(self) -> int:
+        """状态未变化（已在黑名单或本就未拉黑）的漫画数量。"""
+        return len(self.outcomes) - self.changed_count
 
 
 @dataclass(frozen=True)

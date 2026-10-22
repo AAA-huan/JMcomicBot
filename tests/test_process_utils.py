@@ -1,7 +1,7 @@
-"""restart_process 工具函数测试：验证 os.execv 调用参数。
+"""restart_process 工具函数测试：验证 os.execv / os.execve 调用参数。
 
-语义：argv 是传给新进程的完整参数列表（含 argv[0]），函数直接传给 os.execv，
-不在内部额外加前缀——调用方负责构造正确的 argv（惯例 argv[0]=executable）。
+语义：argv 是传给新进程的完整参数列表（含 argv[0]），函数直接传给
+os.execv / os.execve，不在内部额外加前缀——调用方负责构造正确的 argv。
 """
 
 import sys
@@ -37,6 +37,29 @@ def test_restart_process_defaults_to_sys_executable_and_argv(monkeypatch) -> Non
 
     # argv[0]=executable（程序名占位），argv[1]="main.py"（脚本路径）
     assert calls == [("/default/python", ["/default/python", "main.py"])]
+
+
+def test_restart_process_uses_execve_when_env_provided(monkeypatch) -> None:
+    """显式传入环境变量时使用 os.execve，避免继承旧进程环境。"""
+    calls = []
+
+    def fake_execve(executable, argv, env):
+        calls.append((executable, argv, env))
+
+    monkeypatch.setattr("os.execve", fake_execve)
+    restart_process(
+        "/usr/bin/python3",
+        ["/usr/bin/python3", "main.py"],
+        env={"PATH": "/usr/bin", "DB_ECHO": "true"},
+    )
+
+    assert calls == [
+        (
+            "/usr/bin/python3",
+            ["/usr/bin/python3", "main.py"],
+            {"PATH": "/usr/bin", "DB_ECHO": "true"},
+        )
+    ]
 
 
 def test_restart_process_propagates_oserror(monkeypatch) -> None:

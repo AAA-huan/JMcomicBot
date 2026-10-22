@@ -3,11 +3,15 @@
 from typing import Any, Dict, List, Optional, Protocol
 
 from src.service.operation_context import OperationContext
+from src.service.query_service import PageResult
 from src.service.results import (
     BatchTaskResult,
+    BlacklistBatchResult,
+    BlacklistOutcome,
     DownloadCancellationResult,
     DownloadRequestItem,
     DownloadRequestResult,
+    MangaBlacklistItem,
     TaskCancellationResult,
     TaskResult,
 )
@@ -98,6 +102,59 @@ class DownloadService(Protocol):
         raise NotImplementedError
 
 
+class MangaBlacklistService(Protocol):
+    """漫画黑名单应用服务接口。"""
+
+    def add(
+        self,
+        manga_id: str,
+        reason: Optional[str] = None,
+        context: Optional[OperationContext] = None,
+        *,
+        cascade_delete: bool = True,
+    ) -> BlacklistOutcome:
+        """拉黑漫画，已存在时幂等返回。"""
+        raise NotImplementedError
+
+    def remove(
+        self,
+        manga_id: str,
+        context: Optional[OperationContext] = None,
+    ) -> BlacklistOutcome:
+        """解除拉黑，不在黑名单时幂等返回。"""
+        raise NotImplementedError
+
+    def add_batch(
+        self,
+        manga_ids: List[str],
+        reason: Optional[str] = None,
+        context: Optional[OperationContext] = None,
+    ) -> BlacklistBatchResult:
+        """批量拉黑漫画。"""
+        raise NotImplementedError
+
+    def remove_batch(
+        self,
+        manga_ids: List[str],
+        context: Optional[OperationContext] = None,
+    ) -> BlacklistBatchResult:
+        """批量解除拉黑。"""
+        raise NotImplementedError
+
+    def is_blacklisted(self, manga_id: str) -> bool:
+        """判断漫画是否在黑名单中。"""
+        raise NotImplementedError
+
+    def list_blacklisted(
+        self,
+        page: int,
+        page_size: int,
+        search: Optional[str] = None,
+    ) -> PageResult[MangaBlacklistItem]:
+        """分页查询黑名单。"""
+        raise NotImplementedError
+
+
 class TaskService(Protocol):
     """持久化操作任务的应用服务接口。"""
 
@@ -129,6 +186,8 @@ class TaskService(Protocol):
         task_id: str,
         metadata: Optional[Dict[str, Any]] = None,
         context: Optional[OperationContext] = None,
+        audit_event_type: Optional[str] = None,
+        stage: str = "completed",
     ) -> TaskResult:
         """完成任务。"""
         raise NotImplementedError

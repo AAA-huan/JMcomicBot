@@ -5,7 +5,15 @@ import { useDisplay } from 'vuetify'
 
 import { errorMessage } from '@/api/client'
 import { setFavorite } from '@/api/favorites'
-import { batchDeleteMangas, deleteManga, listMangas } from '@/api/mangas'
+import {
+  batchBlacklistMangas,
+  batchDeleteMangas,
+  batchUnblacklistMangas,
+  blacklistManga,
+  deleteManga,
+  listMangas,
+  unblacklistManga,
+} from '@/api/mangas'
 import { requestDownloads } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -66,7 +74,7 @@ const filters = reactive({
   page: 1,
   pageSize: 20,
   favoriteOnly: false,
-  collection: 'local' as 'local' | 'favorites' | 'history',
+  collection: 'local' as 'local' | 'favorites' | 'history' | 'blacklist_only',
 })
 
 interface LibraryListCache {
@@ -87,6 +95,7 @@ const libraryListCache: LibraryListCache = {
 const actionError = ref('')
 const actionNotice = ref('')
 const favoriteBusy = reactive<Record<string, boolean>>({})
+const blacklistBusy = reactive<Record<string, boolean>>({})
 
 const deleteTarget = ref<Manga | null>(null)
 const deleteDialog = ref(false)
@@ -95,7 +104,30 @@ const deleteLoading = ref(false)
 const batchDeleteDialog = ref(false)
 const batchDeleteLoading = ref(false)
 
+const blacklistTarget = ref<Manga | null>(null)
+const blacklistDialog = ref(false)
+const blacklistLoading = ref(false)
+const blacklistMode = ref<'add' | 'remove'>('add')
+
+const batchBlacklistDialog = ref(false)
+const batchBlacklistLoading = ref(false)
+const batchBlacklistMode = ref<'add' | 'remove'>('add')
+
 const selectedCount = computed(() => selected.value.length)
+
+/** 选中项中已拉黑的 ID，批量解除只提交这些漫画。 */
+const selectedBlacklistedIds = computed(() =>
+  mangas.value
+    .filter((manga) => selected.value.includes(manga.id) && manga.is_blacklisted)
+    .map((manga) => manga.id),
+)
+
+const hasSelectedBlacklisted = computed(() => selectedBlacklistedIds.value.length > 0)
+
+/** 状态列优先展示黑名单标签，覆盖底层下载状态。 */
+function mangaStatusKey(manga: Manga): string {
+  return manga.is_blacklisted ? 'blacklisted' : manga.status
+}
 
 /** 当前页是否已全部选中；分页加载时会清空选择，因此只比较当前页数据。 */
 const allSelectableSelected = computed(
@@ -121,7 +153,8 @@ function readQuery(): void {
     filters.scope = rawTag ? 'tag' : 'keyword'
   }
   filters.keyword = rawTag || rawSearch
-  filters.collection = query.collection === 'history' ? 'history'
+  filters.collection = query.collection === 'blacklist_only' ? 'blacklist_only'
+    : query.collection === 'history' ? 'history'
     : query.collection === 'favorites' || query.favorite_only === 'true' ? 'favorites' : 'local'
   filters.favoriteOnly = filters.collection === 'favorites'
   filters.status = typeof query.status === 'string' ? query.status : ''
@@ -158,6 +191,7 @@ async function load(options: { silent?: boolean } = {}): Promise<void> {
       sort: filters.sort,
       favorite_only: filters.favoriteOnly || undefined,
       history_only: filters.collection === 'history' || undefined,
+      blacklist_only: filters.collection === 'blacklist_only' || undefined,
     })
     mangas.value = result.items
     total.value = result.total
@@ -185,7 +219,9 @@ function updateQuery(patch: Record<string, string | number | undefined>): void {
 }
 
 /** 切换分组时恢复默认排序并回到第一页。 */
-function switchCollection(collection: 'local' | 'favorites' | 'history'): void {
+function switchCollection(
+  collection: 'local' | 'favorites' | 'history' | 'blacklist_only',
+): void {
   updateQuery({
     collection: collection === 'local' ? undefined : collection,
     favorite_only: undefined,
@@ -240,6 +276,11 @@ async function requestDownloadIds(ids: string[]): Promise<void> {
   try {
     const result = await requestDownloads(ids)
     const parts = [`已入队 ${result.queued_count} 个`]
+    if (result.skipped_blacklisted.length > 0) {
+      parts.push(
+        `${result.skipped_blacklisted.length} 个已被拉黑跳过（${result.skipped_blacklisted.join('、')}）`,
+      )
+    }
     if (result.duplicate_count > 0) {
       const duplicates = result.items
         .filter((item) => item.status === 'duplicate')
@@ -289,6 +330,96 @@ async function toggleFavorite(manga: Manga): Promise<void> {
 function askDelete(manga: Manga): void {
   deleteTarget.value = manga
   deleteDialog.value = true
+}
+
+function askBlacklist(manga: Manga): void {
+  blacklistTarget.value = manga
+  blacklistMode.value = 'add'
+  blacklistDialog.value = true
+}
+
+function askUnblacklist(manga: Manga): void {
+  blacklistTarget.value = manga
+  blacklistMode.value = 'remove'
+  blacklistDialog.value = true
+}
+
+/** 单个拉黑/解除提交，成功后刷新列表以同步黑名单筛选与状态。 */
+async function confirmBlacklist(): Promise<void> {
+  const target = blacklistTarget.value
+  if (!target || blacklistBusy[target.id]) return
+  blacklistLoading.value = true
+  blacklistBusy[target.id] = true
+  actionError.value = ''
+  actionNotice.value = ''
+  try {
+    const result = blacklistMode.value === 'add'
+      ? await blacklistManga(target.id)
+      : await unblacklistManga(target.id)
+    if (result.changed) {
+      actionNotice.value = blacklistMode.value === 'add'
+        ? `已将《${target.title}》加入黑名单`
+        : `已将《${target.title}》移出黑名单`
+    } else {
+      actionNotice.value = blacklistMode.value === 'add'
+        ? `《${target.title}》已在黑名单中`
+        : `《${target.title}》不在黑名单中`
+    }
+    blacklistDialog.value = false
+    await load()
+  } catch (err) {
+    actionError.value = errorMessage(err)
+    blacklistDialog.value = false
+  } finally {
+    blacklistLoading.value = false
+    blacklistBusy[target.id] = false
+  }
+}
+
+function openBatchBlacklist(mode: 'add' | 'remove'): void {
+  batchBlacklistMode.value = mode
+  batchBlacklistDialog.value = true
+}
+
+/** 批量拉黑提交；批量解除只处理选中项中已拉黑的漫画。 */
+async function confirmBatchBlacklist(): Promise<void> {
+  if (selectedCount.value === 0) return
+  const ids = batchBlacklistMode.value === 'remove'
+    ? selectedBlacklistedIds.value
+    : [...selected.value]
+  if (ids.length === 0) {
+    actionError.value = '选中的漫画中没有已拉黑项'
+    batchBlacklistDialog.value = false
+    return
+  }
+  if (ids.length > 100) {
+    actionError.value = '单次最多操作 100 个漫画'
+    batchBlacklistDialog.value = false
+    return
+  }
+  batchBlacklistLoading.value = true
+  actionError.value = ''
+  actionNotice.value = ''
+  try {
+    const result = batchBlacklistMode.value === 'add'
+      ? await batchBlacklistMangas(ids)
+      : await batchUnblacklistMangas(ids)
+    const action = batchBlacklistMode.value === 'add' ? '拉黑' : '解除拉黑'
+    let notice = `已${action} ${result.changed_count} 个漫画`
+    if (result.unchanged_count > 0) {
+      notice += batchBlacklistMode.value === 'add'
+        ? `，${result.unchanged_count} 个已在黑名单`
+        : `，${result.unchanged_count} 个不在黑名单`
+    }
+    actionNotice.value = notice
+    batchBlacklistDialog.value = false
+    await load()
+  } catch (err) {
+    actionError.value = errorMessage(err)
+    batchBlacklistDialog.value = false
+  } finally {
+    batchBlacklistLoading.value = false
+  }
 }
 
 async function confirmDelete(): Promise<void> {
@@ -449,11 +580,12 @@ watch(
         :model-value="filters.collection"
         color="primary"
         aria-label="漫画库分组"
-        @update:model-value="switchCollection($event as 'local' | 'favorites' | 'history')"
+        @update:model-value="switchCollection($event as 'local' | 'favorites' | 'history' | 'blacklist_only')"
       >
         <v-tab value="local" prepend-icon="mdi-folder-outline">本地</v-tab>
         <v-tab value="favorites" prepend-icon="mdi-star-outline">收藏</v-tab>
         <v-tab value="history" prepend-icon="mdi-history">历史</v-tab>
+        <v-tab value="blacklist_only" prepend-icon="mdi-lock">黑名单</v-tab>
       </v-tabs>
       <v-card-actions class="flex-wrap">
         <v-switch
@@ -500,6 +632,24 @@ watch(
           @click="batchDeleteDialog = true"
         >
           批量删除
+        </v-btn>
+        <v-btn
+          variant="tonal"
+          color="warning"
+          prepend-icon="mdi-lock"
+          :disabled="selectedCount === 0"
+          @click="openBatchBlacklist('add')"
+        >
+          批量拉黑
+        </v-btn>
+        <v-btn
+          variant="tonal"
+          color="warning"
+          prepend-icon="mdi-lock-off"
+          :disabled="!hasSelectedBlacklisted"
+          @click="openBatchBlacklist('remove')"
+        >
+          批量解除
         </v-btn>
         <v-btn icon="mdi-refresh" variant="text" aria-label="刷新" @click="load" />
       </v-card-actions>
@@ -575,9 +725,9 @@ watch(
                 <v-chip
                   size="small"
                   variant="tonal"
-                  :color="colorOf(MANGA_STATUS_COLORS, manga.status)"
+                  :color="colorOf(MANGA_STATUS_COLORS, mangaStatusKey(manga))"
                 >
-                  {{ labelOf(MANGA_STATUS_LABELS, manga.status) }}
+                  {{ labelOf(MANGA_STATUS_LABELS, mangaStatusKey(manga)) }}
                 </v-chip>
               </td>
               <td class="text-no-wrap">{{ formatDateTime(manga.downloaded_at) }}</td>
@@ -618,6 +768,17 @@ watch(
                   :disabled="manga.status === 'deleted'"
                   @click="askDelete(manga)"
                 />
+                <v-btn
+                  :icon="manga.is_blacklisted ? 'mdi-lock-off' : 'mdi-lock'"
+                  :color="manga.is_blacklisted ? 'warning' : undefined"
+                  size="small"
+                  variant="text"
+                  :loading="blacklistBusy[manga.id]"
+                  :disabled="blacklistBusy[manga.id] || manga.status === 'deleted'"
+                  :aria-label="manga.is_blacklisted ? '解除拉黑' : '加入黑名单'"
+                  :aria-pressed="manga.is_blacklisted"
+                  @click="manga.is_blacklisted ? askUnblacklist(manga) : askBlacklist(manga)"
+                />
               </td>
             </tr>
           </tbody>
@@ -643,10 +804,10 @@ watch(
               <v-chip
                 size="x-small"
                 variant="tonal"
-                :color="colorOf(MANGA_STATUS_COLORS, manga.status)"
+                :color="colorOf(MANGA_STATUS_COLORS, mangaStatusKey(manga))"
                 class="mr-1"
               >
-                {{ labelOf(MANGA_STATUS_LABELS, manga.status) }}
+                {{ labelOf(MANGA_STATUS_LABELS, mangaStatusKey(manga)) }}
               </v-chip>
               <v-chip
                 v-for="tag in manga.tags"
@@ -707,6 +868,17 @@ watch(
                   :disabled="manga.status === 'deleted'"
                   @click="askDelete(manga)"
                 />
+                <v-btn
+                  :icon="manga.is_blacklisted ? 'mdi-lock-off' : 'mdi-lock'"
+                  :color="manga.is_blacklisted ? 'warning' : undefined"
+                  size="small"
+                  variant="text"
+                  :loading="blacklistBusy[manga.id]"
+                  :disabled="blacklistBusy[manga.id] || manga.status === 'deleted'"
+                  :aria-label="manga.is_blacklisted ? '解除拉黑' : '加入黑名单'"
+                  :aria-pressed="manga.is_blacklisted"
+                  @click="manga.is_blacklisted ? askUnblacklist(manga) : askBlacklist(manga)"
+                />
               </div>
             </template>
           </v-list-item>
@@ -751,6 +923,32 @@ watch(
       confirm-text="确认批量删除"
       :loading="batchDeleteLoading"
       @confirm="confirmBatchDelete"
+    />
+
+    <ConfirmDialog
+      v-model="blacklistDialog"
+      :title="blacklistMode === 'add'
+        ? `拉黑《${blacklistTarget?.title ?? ''}》？`
+        : `解除拉黑《${blacklistTarget?.title ?? ''}》？`"
+      :text="blacklistMode === 'add'
+        ? '加入黑名单后，该漫画的下载请求将被跳过。默认不删除本地 PDF；若开启删除绑定则会同时执行删除。'
+        : '移出黑名单后，该漫画可重新下载。已经删除的漫画和 PDF 不会恢复。'"
+      :confirm-text="blacklistMode === 'add' ? '确认拉黑' : '确认解除'"
+      :loading="blacklistLoading"
+      @confirm="confirmBlacklist"
+    />
+
+    <ConfirmDialog
+      v-model="batchBlacklistDialog"
+      :title="batchBlacklistMode === 'add'
+        ? `批量拉黑 ${selectedCount} 个漫画？`
+        : `批量解除 ${selectedBlacklistedIds.length} 个漫画？`"
+      :text="batchBlacklistMode === 'add'
+        ? '选中的漫画将加入黑名单，之后的下载请求会被跳过。默认不删除本地 PDF；若开启删除绑定则会同时执行删除。'
+        : '仅会解除选中项中已拉黑的漫画。解除后这些漫画可重新下载，已经删除的内容不会恢复。'"
+      :confirm-text="batchBlacklistMode === 'add' ? '确认批量拉黑' : '确认批量解除'"
+      :loading="batchBlacklistLoading"
+      @confirm="confirmBatchBlacklist"
     />
   </div>
 </template>

@@ -167,7 +167,7 @@ onMounted(load)
       <v-card-text>
         <div class="mb-2">当前关联：{{ linkedQQ ?? '未关联' }}</div>
         <p class="text-body-2 text-medium-emphasis mb-3">
-          关联后该 QQ 可绕过机器人白名单并删除漫画，黑名单仍优先拦截。解除关联会立即撤销这些权限，不改变其他名单。WebUI 登录仍需管理员密码。
+          关联后该 QQ 可绕过机器人白名单，并拥有漫画删除与拉黑权限，黑名单仍优先拦截。解除关联会立即撤销这些权限，不改变其他名单。WebUI 登录仍需管理员密码。
         </p>
         <v-text-field
           v-model="qqInput"

@@ -104,6 +104,21 @@ def test_new_settings_db_echo_and_webui_dev_origins_listed(db_manager) -> None:
         assert db_echo["value_type"] == "bool"
         assert db_echo["group"] == "数据库"
         assert db_echo["effect"] == "restart"
+        assert "overridden_by_env" in db_echo
+
+
+def test_setting_list_reports_environment_override(db_manager, monkeypatch) -> None:
+    """设置接口返回启动项是否被环境变量覆盖。"""
+    monkeypatch.setenv("DB_ECHO", "true")
+    client = _make_client(db_manager)
+    with client:
+        setup_and_login(client)
+        listing = client.get("/api/v1/settings")
+        db_echo = next(
+            item for item in listing.json()["items"] if item["key"] == "DB_ECHO"
+        )
+
+    assert db_echo["overridden_by_env"] is True
 
 
 def test_webui_dev_origins_accepts_empty_and_valid(db_manager) -> None:
@@ -143,3 +158,52 @@ def test_webui_dev_origins_rejects_invalid_origin(db_manager) -> None:
         assert response.status_code == 400
         assert response.json()["code"] == "SETTING_INVALID_VALUE"
         assert "ftp://bad-origin" in response.json()["message"]
+
+
+def test_blacklist_delete_binding_is_restart_setting(db_manager) -> None:
+    """绑定开关应可查询、可修改，且始终标记为重启生效。"""
+    client, _context = create_client_for(db_manager)
+    with client:
+        setup_and_login(client)
+
+        listing = client.get("/api/v1/settings")
+        assert listing.status_code == 200
+        binding = next(
+            item
+            for item in listing.json()["items"]
+            if item["key"] == "BLACKLIST_DELETE_BINDING"
+        )
+        assert binding["title"] == "漫画黑名单与删除绑定"
+        assert binding["value_type"] == "bool"
+        assert binding["group"] == "下载与存储"
+        assert binding["value"] is False
+        assert binding["restart_required"] is False
+
+        headers = csrf_headers(client)
+        updated = client.patch(
+            "/api/v1/settings/BLACKLIST_DELETE_BINDING",
+            json={"value": True},
+            headers=headers,
+        )
+        assert updated.status_code == 200
+        assert updated.json()["value"] is True
+        assert updated.json()["effect"] == "restart"
+        assert updated.json()["restart_required"] is True
+
+        refreshed = client.get("/api/v1/settings")
+        item = next(
+            item
+            for item in refreshed.json()["items"]
+            if item["key"] == "BLACKLIST_DELETE_BINDING"
+        )
+        assert item["value"] is True
+        assert item["restart_required"] is True
+
+        invalid = client.patch(
+            "/api/v1/settings/BLACKLIST_DELETE_BINDING",
+            json={"value": "true"},
+            headers=headers,
+        )
+        assert invalid.status_code == 400
+        assert invalid.json()["code"] == "SETTING_INVALID_VALUE"
+        assert "需要布尔值" in invalid.json()["message"]

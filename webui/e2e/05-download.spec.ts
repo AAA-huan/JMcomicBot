@@ -28,6 +28,7 @@ test('漫画下载页空态与已有任务提示（不触发真实下载）', as
         items: [{ manga_id: '900004', status: 'duplicate', task_id: 'task-900004' }],
         queued_count: 0,
         duplicate_count: 1,
+        skipped_blacklisted: [],
       }),
     })
   })

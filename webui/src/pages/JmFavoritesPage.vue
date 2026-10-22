@@ -161,7 +161,10 @@ async function download(): Promise<void> {
   notice.value = ''
   try {
     const result = await requestJmDownloads(selectedIds.value)
-    notice.value = `已加入下载队列 ${result.queued_count} 本，已有任务 ${result.duplicate_count} 本。可在任务管理页查看进度，完成后刷新本页。`
+    const skipped = result.skipped_blacklisted.length > 0
+      ? `，${result.skipped_blacklisted.length} 本已被拉黑跳过`
+      : ''
+    notice.value = `已加入下载队列 ${result.queued_count} 本，已有任务 ${result.duplicate_count} 本${skipped}。可在任务管理页查看进度，完成后刷新本页。`
     selected.value = []
   } catch (err) {
     error.value = errorMessage(err)

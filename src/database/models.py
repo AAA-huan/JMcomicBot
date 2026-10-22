@@ -15,6 +15,7 @@ from sqlalchemy import (
     String,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 
@@ -191,6 +192,46 @@ class MangaFavorite(Base):
     )
 
 
+class MangaBlacklist(Base):
+    """漫画黑名单表，按漫画 ID 记录拉黑状态与操作来源。
+
+    黑名单 ID 可能对应尚未下载的漫画，因此不与 manga 表建立物理外键；
+    列表展示标题时通过 LEFT JOIN 读取可选的漫画元数据。
+    """
+
+    __tablename__ = "manga_blacklist"
+    __table_args__ = (
+        CheckConstraint(
+            "source IN ('qq', 'web', 'system')",
+            name="ck_manga_blacklist_source",
+        ),
+        Index("ix_manga_blacklist_manga_id", "manga_id"),
+    )
+
+    manga_id: Mapped[str] = mapped_column(
+        String(32), primary_key=True, comment="被拉黑的漫画ID"
+    )
+    reason: Mapped[Optional[str]] = mapped_column(
+        String(255), nullable=True, comment="拉黑原因"
+    )
+    requested_by: Mapped[Optional[str]] = mapped_column(
+        String(64), nullable=True, comment="操作人QQ号或web admin标识"
+    )
+    source: Mapped[str] = mapped_column(
+        String(16), nullable=False, default="system", comment="操作来源"
+    )
+    blacklisted_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        nullable=False,
+        default=utc_now,
+        server_default=text("CURRENT_TIMESTAMP"),
+        comment="拉黑时间",
+    )
+    operation_task_id: Mapped[Optional[str]] = mapped_column(
+        String(36), nullable=True, comment="创建拉黑记录的任务ID，仅逻辑关联"
+    )
+
+
 class JmRemoteFavorite(Base):
     """远端收藏索引，不为尚未下载的漫画创建本地漫画或文件记录。"""
 
@@ -294,7 +335,8 @@ class OperationTask(Base):
     __tablename__ = "operation_task"
     __table_args__ = (
         CheckConstraint(
-            "task_type IN ('download', 'scan', 'repair', 'delete', 'backup', 'verify')",
+            "task_type IN ('download', 'scan', 'repair', 'delete', 'backup', "
+            "'verify', 'blacklist')",
             name="ck_operation_task_type",
         ),
         CheckConstraint(

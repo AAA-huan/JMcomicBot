@@ -8,6 +8,8 @@ import type { SettingValue, SettingView } from '@/types/api'
 import {
   SETTING_EFFECT_COLORS,
   SETTING_EFFECT_LABELS,
+  SETTING_ENV_OVERRIDE_HELP,
+  SETTING_HELP_TEXTS,
 } from '@/utils/labels'
 
 const items = ref<SettingView[]>([])
@@ -24,6 +26,7 @@ const editEffect = ref('')
 const editSensitive = ref(false)
 const editValue = ref<SettingValue>(null)
 const editError = ref('')
+const editOverriddenByEnv = ref(false)
 const saving = ref(false)
 
 // option.yml 编辑器状态
@@ -103,6 +106,7 @@ function openEdit(item: SettingView): void {
   editSensitive.value = item.sensitive
   editValue.value = item.value
   editError.value = ''
+  editOverriddenByEnv.value = Boolean(item.overridden_by_env)
   editDialog.value = true
 }
 
@@ -220,6 +224,18 @@ onMounted(() => {
             </v-list-item-title>
             <v-list-item-subtitle class="text-wrap">
               {{ item.key }} · {{ item.apply_target }}
+              <div
+                v-if="SETTING_HELP_TEXTS[item.key]"
+                class="text-caption text-medium-emphasis mt-1"
+              >
+                {{ SETTING_HELP_TEXTS[item.key] }}
+              </div>
+              <div
+                v-if="item.overridden_by_env"
+                class="text-caption text-warning mt-1"
+              >
+                {{ SETTING_ENV_OVERRIDE_HELP }}
+              </div>
             </v-list-item-subtitle>
             <template #append>
               <div class="d-flex align-center ga-2">
@@ -313,6 +329,15 @@ onMounted(() => {
             class="mb-3"
           >
             {{ editError }}
+          </v-alert>
+          <v-alert
+            v-if="editOverriddenByEnv"
+            type="warning"
+            variant="tonal"
+            density="comfortable"
+            class="mb-3"
+          >
+            {{ SETTING_ENV_OVERRIDE_HELP }}
           </v-alert>
           <v-switch
             v-if="editValueType === 'bool'"

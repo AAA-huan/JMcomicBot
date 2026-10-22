@@ -106,6 +106,11 @@ async function submitDownload(): Promise<void> {
   try {
     const result = await requestDownloads(mangaIds)
     const parts = [`已入队 ${result.queued_count} 个`]
+    if (result.skipped_blacklisted.length > 0) {
+      parts.push(
+        `${result.skipped_blacklisted.length} 个已被拉黑跳过（${result.skipped_blacklisted.join('、')}）`,
+      )
+    }
     if (result.duplicate_count > 0) {
       const duplicates = result.items
         .filter((item) => item.status === 'duplicate')

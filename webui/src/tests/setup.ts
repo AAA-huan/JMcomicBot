@@ -27,3 +27,23 @@ if (typeof window.matchMedia !== 'function') {
     })),
   })
 }
+
+// jsdom 未实现 visualViewport，Vuetify 弹层定位依赖该接口
+if (typeof window.visualViewport === 'undefined') {
+  Object.defineProperty(window, 'visualViewport', {
+    writable: true,
+    configurable: true,
+    value: {
+      width: 1024,
+      height: 768,
+      offsetLeft: 0,
+      offsetTop: 0,
+      pageLeft: 0,
+      pageTop: 0,
+      scale: 1,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+      dispatchEvent: vi.fn(),
+    },
+  })
+}

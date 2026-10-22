@@ -24,13 +24,22 @@ class CommandParser:
             "test_id": ["测试id"],
             "test_file": ["测试文件"],
             "delete": ["删除", "删除漫画", "漫画删除"],
+            "blacklist": ["拉黑", "加入黑名单", "blacklist"],
+            "unblacklist": ["解除拉黑", "移出黑名单", "unblacklist"],
             "resend": ["重发重发"],
             "egg": ["我坐好了"],
             "welcome": ["你好", "在吗", "hello", "hi"],
         }
 
         # 支持批量操作的命令
-        self.batch_commands = {"download", "send", "query", "delete"}
+        self.batch_commands = {
+            "download",
+            "send",
+            "query",
+            "delete",
+            "blacklist",
+            "unblacklist",
+        }
 
     def parse(self, message: str) -> Tuple[str, str]:
         """
@@ -235,6 +244,14 @@ class CommandParser:
             "  - 单个ID：删除 350234\n"
             "  - 多个ID（逗句号分隔）：删除 350234,350235,350236\n"
             "  - 所有已下载漫画：删除 --all",
+            "blacklist": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n"
+            "支持格式：\n"
+            "  - 单个ID：拉黑 350234\n"
+            "  - 多个ID（逗句号分隔）：拉黑 350234,350235,350236",
+            "unblacklist": "❌ 参数错误！请提供有效的漫画ID（纯数字）\n"
+            "支持格式：\n"
+            "  - 单个ID：解除拉黑 350234\n"
+            "  - 多个ID（逗句号分隔）：解除拉黑 350234,350235,350236",
             "help": "❌ 命令格式错误！'漫画帮助'命令不需要额外参数\n直接输入：漫画帮助",
             "list": "❌ 参数错误！'漫画列表'命令参数格式错误\n"
             "支持格式：\n"
