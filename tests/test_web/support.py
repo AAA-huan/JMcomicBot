@@ -21,6 +21,7 @@ from src.database.repositories import (
     OperationTaskRepository,
     PermissionRepository,
     ReadingProgressRepository,
+    ReadingSettingRepository,
     ScanRecordRepository,
     SettingHistoryRepository,
     SettingRepository,
@@ -39,6 +40,7 @@ from src.service import (
     OptionFileService,
     PermissionService,
     ReadingProgressService,
+    ReadingSettingService,
     RepairService,
     ScanService,
     SettingsService,
@@ -282,6 +284,9 @@ def build_web_context(  # pylint: disable=too-many-locals
         ),
         reading_progress_service=ReadingProgressService(
             ReadingProgressRepository(db_manager), manga_repo
+        ),
+        reading_setting_service=ReadingSettingService(
+            ReadingSettingRepository(db_manager), audit_repo
         ),
         favorite_service=FavoriteService(FavoriteRepository(db_manager), audit_repo),
         jm_favorite_service=JmFavoriteService(JmFavoriteRepository(db_manager)),

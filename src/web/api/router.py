@@ -34,6 +34,7 @@ from .jm_favorite_routes import create_jm_favorite_router
 from .maintenance_routes import create_maintenance_router
 from .manga_routes import create_manga_router
 from .permission_routes import create_permission_router
+from .reader_routes import create_reader_router
 from .setting_routes import create_setting_router
 from .system_routes import create_system_router
 from .task_routes import create_task_router
@@ -179,6 +180,7 @@ def create_api_router(  # pylint: disable=too-many-locals
     router.include_router(create_jm_favorite_router(dependencies, authenticate))
     router.include_router(create_audit_router(dependencies, authenticate))
     router.include_router(create_permission_router(dependencies, authenticate))
+    router.include_router(create_reader_router(dependencies, authenticate))
     router.include_router(create_setting_router(dependencies, authenticate))
     router.include_router(create_maintenance_router(dependencies, authenticate))
     router.include_router(

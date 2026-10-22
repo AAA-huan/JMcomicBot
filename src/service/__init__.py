@@ -24,6 +24,7 @@ from src.service.reading_progress_service import (
     ReadingProgressService,
     ReadingProgressView,
 )
+from src.service.reading_setting_service import ReadingSettingService
 from src.service.repair_service import RepairService
 from src.service.results import (
     BackupResult,
@@ -71,6 +72,7 @@ __all__ = [
     "ReadingProgressFileNotFoundError",
     "ReadingProgressService",
     "ReadingProgressView",
+    "ReadingSettingService",
     "RepairService",
     "ScanRunResult",
     "ScanService",
