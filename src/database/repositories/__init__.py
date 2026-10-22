@@ -15,6 +15,7 @@ from .permission_repository import PermissionRepository
 from .reading_progress_repository import (
     ReadingProgressRepository,
 )
+from .reading_setting_repository import ReadingSettingRepository
 from .scan_record_repository import ScanRecordRepository
 from .setting_history_repository import (
     SettingHistoryRepository,
@@ -38,6 +39,7 @@ __all__ = [
     "OperationTaskRepository",
     "PermissionRepository",
     "ReadingProgressRepository",
+    "ReadingSettingRepository",
     "ScanRecordRepository",
     "SettingHistoryRepository",
     "SettingRepository",

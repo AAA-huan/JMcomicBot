@@ -13,7 +13,7 @@ from src.database.migrations import upgrade_schema
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LEGACY_REVISION = "0007_unique_relative_file_path"
-HEAD_REVISION = "0026_manga_blacklist"
+HEAD_REVISION = "0027_reading_setting"
 
 
 def _engine_for(tmp_path: Path) -> Engine:

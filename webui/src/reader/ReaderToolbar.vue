@@ -1,7 +1,7 @@
 <script setup lang="ts">
-/** 阅读器顶部工具栏：返回、页码跳转、缩放、模式、深色背景、全屏与进度状态。 */
+/** 阅读器顶部工具栏：返回、页码跳转、缩放、阅读模式、阅读开关、全屏与进度状态。 */
 
-import { ref, watch } from 'vue'
+import { computed, ref, watch } from 'vue'
 import { useDisplay } from 'vuetify'
 
 import type { ProgressSyncState } from './progressSync'
@@ -11,6 +11,9 @@ const props = defineProps<{
   pageNumber: number
   pageCount: number
   mode: ReaderMode
+  continuous: boolean
+  clickToTurn: boolean
+  reverseClick: boolean
   zoomMode: ZoomMode
   zoomPercent: number
   dark: boolean
@@ -24,6 +27,9 @@ const emit = defineEmits<{
   (event: 'back'): void
   (event: 'go', page: number): void
   (event: 'update:mode', mode: ReaderMode): void
+  (event: 'update:continuous', continuous: boolean): void
+  (event: 'update:click-to-turn', clickToTurn: boolean): void
+  (event: 'update:reverse-click', reverseClick: boolean): void
   (event: 'update:zoomMode', mode: ZoomMode): void
   (event: 'zoom-percent', percent: number): void
   (event: 'update:dark', dark: boolean): void
@@ -32,9 +38,27 @@ const emit = defineEmits<{
   (event: 'reload-progress'): void
 }>()
 
+interface ModeOption {
+  value: ReaderMode
+  title: string
+  icon: string
+}
+
+const MODE_OPTIONS: ModeOption[] = [
+  { value: 'normal', title: '普通模式', icon: 'mdi-book-open-page-variant-outline' },
+  { value: 'manga', title: '日漫模式', icon: 'mdi-book-open-variant' },
+  { value: 'scroll', title: '滚动模式', icon: 'mdi-view-agenda-outline' },
+]
+
 const { mobile } = useDisplay()
 const pageInput = ref(String(props.pageNumber))
 const menuOpen = ref(false)
+const modeMenuOpen = ref(false)
+const settingsMenuOpen = ref(false)
+
+const modeOption = computed(
+  () => MODE_OPTIONS.find((option) => option.value === props.mode) ?? MODE_OPTIONS[0],
+)
 
 watch(
   () => props.pageNumber,
@@ -54,8 +78,22 @@ function submitPage(): void {
   if (target !== props.pageNumber) emit('go', target)
 }
 
-function toggleMode(): void {
-  emit('update:mode', props.mode === 'single' ? 'continuous' : 'single')
+function selectMode(mode: ReaderMode): void {
+  emit('update:mode', mode)
+  modeMenuOpen.value = false
+  menuOpen.value = false
+}
+
+function setContinuous(value: unknown): void {
+  emit('update:continuous', Boolean(value))
+}
+
+function setClickToTurn(value: unknown): void {
+  emit('update:click-to-turn', Boolean(value))
+}
+
+function setReverseClick(value: unknown): void {
+  emit('update:reverse-click', Boolean(value))
 }
 
 function selectZoom(mode: ZoomMode): void {
@@ -148,7 +186,7 @@ function zoomLabel(): string {
 
     <v-spacer />
 
-    <!-- 桌面端直接展示操作按钮 -->
+    <!-- 桌面端直接展示缩放、模式与设置入口 -->
     <template v-if="!mobile">
       <v-menu location="bottom end">
         <template #activator="{ props: menuProps }">
@@ -173,19 +211,80 @@ function zoomLabel(): string {
         </v-list>
       </v-menu>
 
-      <v-btn
-        :icon="mode === 'single' ? 'mdi-file-document-outline' : 'mdi-view-agenda-outline'"
-        variant="text"
-        :aria-label="mode === 'single' ? '切换到连续滚动' : '切换到单页模式'"
-        @click="toggleMode"
-      />
+      <v-menu v-model="modeMenuOpen" location="bottom end">
+        <template #activator="{ props: menuProps }">
+          <v-btn
+            v-bind="menuProps"
+            variant="text"
+            :prepend-icon="modeOption.icon"
+            aria-label="阅读模式"
+          >
+            {{ modeOption.title }}
+          </v-btn>
+        </template>
+        <v-list density="comfortable">
+          <v-list-item
+            v-for="option in MODE_OPTIONS"
+            :key="option.value"
+            :title="option.title"
+            :prepend-icon="option.icon"
+            :active="mode === option.value"
+            @click="selectMode(option.value)"
+          />
+        </v-list>
+      </v-menu>
 
-      <v-btn
-        :icon="dark ? 'mdi-white-balance-sunny' : 'mdi-weather-night'"
-        variant="text"
-        :aria-label="dark ? '切换到浅色背景' : '切换到深色背景'"
-        @click="emit('update:dark', !dark)"
-      />
+      <v-menu v-model="settingsMenuOpen" location="bottom end">
+        <template #activator="{ props: menuProps }">
+          <v-btn
+            v-bind="menuProps"
+            icon="mdi-tune"
+            variant="text"
+            aria-label="阅读设置"
+          />
+        </template>
+        <v-list density="comfortable" min-width="260">
+          <v-list-subheader>显示方式</v-list-subheader>
+          <div class="px-4 pb-2">
+            <v-switch
+              :model-value="continuous"
+              label="连续翻页"
+              color="primary"
+              density="compact"
+              hide-details
+              @update:model-value="setContinuous"
+            />
+            <v-switch
+              :model-value="clickToTurn"
+              label="点击翻页"
+              color="primary"
+              density="compact"
+              hide-details
+              @update:model-value="setClickToTurn"
+            />
+            <v-switch
+              :model-value="reverseClick"
+              label="反转点击翻页"
+              color="primary"
+              density="compact"
+              hide-details
+              :disabled="!clickToTurn"
+              @update:model-value="setReverseClick"
+            />
+          </div>
+          <v-divider class="my-1" />
+          <div class="px-4 py-2">
+            <v-switch
+              :model-value="dark"
+              label="深色背景"
+              color="primary"
+              density="compact"
+              hide-details
+              @update:model-value="emit('update:dark', Boolean($event))"
+            />
+          </div>
+        </v-list>
+      </v-menu>
 
       <v-btn
         :icon="fullscreen ? 'mdi-fullscreen-exit' : 'mdi-fullscreen'"
@@ -205,7 +304,7 @@ function zoomLabel(): string {
           aria-label="阅读设置"
         />
       </template>
-      <v-list density="comfortable">
+      <v-list density="comfortable" min-width="260">
         <v-list-subheader>缩放</v-list-subheader>
         <v-list-item title="适应宽度" @click="selectZoom('fit-width')" />
         <v-list-item title="适应页面" @click="selectZoom('fit-page')" />
@@ -216,16 +315,53 @@ function zoomLabel(): string {
           @click="selectPercent(percent)"
         />
         <v-divider class="my-1" />
+        <v-list-subheader>阅读模式</v-list-subheader>
         <v-list-item
-          :title="mode === 'single' ? '连续滚动' : '单页模式'"
-          :prepend-icon="mode === 'single' ? 'mdi-view-agenda-outline' : 'mdi-file-document-outline'"
-          @click="emit('update:mode', mode === 'single' ? 'continuous' : 'single'); menuOpen = false"
+          v-for="option in MODE_OPTIONS"
+          :key="option.value"
+          :title="option.title"
+          :prepend-icon="option.icon"
+          :active="mode === option.value"
+          @click="selectMode(option.value)"
         />
-        <v-list-item
-          :title="dark ? '浅色背景' : '深色背景'"
-          :prepend-icon="dark ? 'mdi-white-balance-sunny' : 'mdi-weather-night'"
-          @click="emit('update:dark', !dark); menuOpen = false"
-        />
+        <v-divider class="my-1" />
+        <v-list-subheader>显示方式</v-list-subheader>
+        <div class="px-4 pb-2">
+          <v-switch
+            :model-value="continuous"
+            label="连续翻页"
+            color="primary"
+            density="compact"
+            hide-details
+            @update:model-value="setContinuous"
+          />
+          <v-switch
+            :model-value="clickToTurn"
+            label="点击翻页"
+            color="primary"
+            density="compact"
+            hide-details
+            @update:model-value="setClickToTurn"
+          />
+          <v-switch
+            :model-value="reverseClick"
+            label="反转点击翻页"
+            color="primary"
+            density="compact"
+            hide-details
+            :disabled="!clickToTurn"
+            @update:model-value="setReverseClick"
+          />
+          <v-switch
+            :model-value="dark"
+            label="深色背景"
+            color="primary"
+            density="compact"
+            hide-details
+            @update:model-value="emit('update:dark', Boolean($event))"
+          />
+        </div>
+        <v-divider class="my-1" />
         <v-list-item
           :title="fullscreen ? '退出全屏' : '进入全屏'"
           :prepend-icon="fullscreen ? 'mdi-fullscreen-exit' : 'mdi-fullscreen'"

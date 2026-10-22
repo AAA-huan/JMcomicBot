@@ -12,7 +12,12 @@ async function login(page: Page): Promise<void> {
 }
 
 /** 打开 900001 详情页并进入阅读器，等待第一页 Canvas 渲染出尺寸。 */
-async function openReader(page: Page): Promise<void> {
+async function openReader(
+  page: Page,
+  options: { resetSettings?: boolean } = {},
+): Promise<void> {
+  // 每个用例默认从默认阅读设置开始，避免前一个用例的模式影响翻页方向。
+  if (options.resetSettings !== false) await resetReaderSettings(page)
   await page.goto('/library/900001')
   const readButton = page.getByRole('button', { name: /阅读/ }).first()
   await expect(readButton).toBeVisible()
@@ -35,6 +40,32 @@ async function openReader(page: Page): Promise<void> {
 async function currentPage(page: Page): Promise<number> {
   const value = await page.getByRole('textbox', { name: '跳转页码' }).inputValue()
   return Number.parseInt(value, 10)
+}
+
+/** 通过 API 恢复默认阅读设置，避免用例之间的状态串扰。 */
+async function resetReaderSettings(page: Page): Promise<void> {
+  const cookies = await page.context().cookies()
+  const csrf = cookies.find((cookie) => cookie.name === 'jmbot_csrf')?.value ?? ''
+  const response = await page.request.put('/api/v1/reader/settings', {
+    headers: { 'X-CSRF-Token': csrf },
+    data: {
+      reading_mode: 'normal',
+      continuous: false,
+      click_to_turn: false,
+      reverse_click: false,
+      dark_background: false,
+    },
+  })
+  expect(response.ok()).toBe(true)
+}
+
+/** 打开抽屉/菜单后，点击其中文本匹配的列表项。 */
+async function clickMenuItem(page: Page, text: string): Promise<void> {
+  await page
+    .locator('.v-overlay--active .v-list-item')
+    .filter({ hasText: text })
+    .first()
+    .click()
 }
 
 test.describe.configure({ mode: 'serial' })
@@ -110,10 +141,30 @@ test('连续滚动模式可用且不横向滚动、渲染窗口受限', async ({
 
   if (isMobile) {
     await page.getByRole('button', { name: '阅读设置' }).click()
-    await page.getByText('连续滚动', { exact: true }).click()
+    await clickMenuItem(page, '滚动模式')
+    // 选择模式会关闭菜单，等待过场与 Vuetify 内部状态同步后再重新打开
+    await expect(page.locator('.v-overlay--active')).toHaveCount(0)
+    await page.waitForTimeout(400)
   } else {
-    await page.getByRole('button', { name: '切换到连续滚动' }).click()
+    await page.getByRole('button', { name: '阅读模式' }).click()
+    await clickMenuItem(page, '滚动模式')
   }
+  // 连续翻页在桌面与移动端的设置菜单中均可切换
+  await page.getByRole('button', { name: '阅读设置' }).click()
+  await expect(page.locator('.v-overlay--active')).toBeVisible()
+  await page.waitForTimeout(300)
+  const continuousResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes('/reader/settings') &&
+      response.request().method() === 'PUT',
+  )
+  await page
+    .locator('.v-overlay--active')
+    .getByText('连续翻页', { exact: true })
+    .click()
+  await continuousResponse
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.reader-pages')).toBeVisible()
 
   // 连续模式至少渲染当前页，且不超过 ±1 窗口
   await expect.poll(() => page.locator('.reader-scroll canvas').count()).toBeGreaterThan(0)
@@ -130,6 +181,107 @@ test('连续滚动模式可用且不横向滚动、渲染窗口受限', async ({
     () => document.documentElement.scrollWidth - window.innerWidth,
   )
   expect(overflow).toBeLessThanOrEqual(0)
+})
+
+test('设置页保存的阅读偏好会在阅读器生效，工具栏修改后回写并重启保持', async ({ page }, testInfo) => {
+  await login(page)
+  await resetReaderSettings(page)
+  const isMobile = testInfo.project.name.startsWith('mobile')
+
+  // 1. 在设置页改为日漫 + 连续 + 点击 + 反转 + 深色
+  await page.goto('/settings')
+  await expect(page.getByText('阅读偏好', { exact: true })).toBeVisible()
+  await page.getByRole('button', { name: '日漫模式', exact: true }).click()
+  await page.getByText('连续翻页', { exact: true }).click()
+  await page.getByText('点击翻页', { exact: true }).click()
+  await page.getByText('反转点击翻页', { exact: true }).click()
+  await page.getByText('深色背景', { exact: true }).click()
+  const saveResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes('/reader/settings') &&
+      response.request().method() === 'PUT',
+  )
+  await page.getByRole('button', { name: '保存阅读偏好' }).click()
+  await saveResponse
+  await expect(page.getByText(/阅读偏好已保存/)).toBeVisible()
+
+  // 2. 进入阅读器，五项设置全部生效
+  await page.goto('/library/900001')
+  await page.getByRole('button', { name: /阅读/ }).first().click()
+  await expect(page).toHaveURL(/\/reader\/\d+/)
+  await expect(page.locator('canvas').first()).toBeVisible()
+  await expect(page.locator('.reader-root--dark')).toBeVisible()
+  await expect(page.locator('.reader-pages--horizontal.reader-pages--reverse')).toBeVisible()
+  await expect(page.locator('.reader-pages')).toHaveAttribute(
+    'style',
+    /--reader-page-gap: 4px/,
+  )
+  if (isMobile) {
+    await page.getByRole('button', { name: '阅读设置' }).click()
+    await expect(
+      page.locator('.v-overlay--active .v-list-item--active').filter({
+        hasText: '日漫模式',
+      }),
+    ).toBeVisible()
+  } else {
+    await expect(page.getByRole('button', { name: '阅读模式' })).toContainText(
+      '日漫模式',
+    )
+  }
+
+  // 3. 在工具栏改回普通模式并关闭深色背景，等待两次持久化完成
+  const modeResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes('/reader/settings') &&
+      response.request().method() === 'PUT',
+  )
+  if (isMobile) {
+    await clickMenuItem(page, '普通模式')
+  } else {
+    await page.getByRole('button', { name: '阅读模式' }).click()
+    await clickMenuItem(page, '普通模式')
+  }
+  await modeResponse
+  if (!isMobile) {
+    await expect(page.getByRole('button', { name: '阅读模式' })).toContainText(
+      '普通模式',
+    )
+  }
+  // 移动端选择模式会关闭菜单，等待过场结束再打开阅读设置
+  await expect(page.locator('.v-overlay--active')).toHaveCount(0)
+
+  await page.getByRole('button', { name: '阅读设置' }).click()
+  const darkResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes('/reader/settings') &&
+      response.request().method() === 'PUT',
+  )
+  await page
+    .locator('.v-overlay--active')
+    .getByText('深色背景', { exact: true })
+    .click()
+  await darkResponse
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.reader-root--dark')).toHaveCount(0)
+
+  // 4. 设置页同步工具栏改动，刷新后仍保持
+  await page.goto('/settings')
+  await expect(page.getByText('左→右阅读')).toBeVisible()
+  await expect(page.getByLabel('深色背景')).not.toBeChecked()
+  await page.reload()
+  await expect(page.getByText('左→右阅读')).toBeVisible()
+  await expect(page.getByLabel('深色背景')).not.toBeChecked()
+
+  // 5. 再次进入阅读器确认重启/刷新后仍为普通模式与浅色背景
+  await page.goto('/library/900001')
+  await page.getByRole('button', { name: /阅读/ }).first().click()
+  await expect(page).toHaveURL(/\/reader\/\d+/)
+  await expect(page.locator('canvas').first()).toBeVisible()
+  await expect(page.locator('.reader-root--dark')).toHaveCount(0)
+  await expect(page.locator('.reader-pages--horizontal')).toBeVisible()
+  await expect(page.locator('.reader-pages--reverse')).toHaveCount(0)
+
+  await resetReaderSettings(page)
 })
 
 test('损坏 PDF 显示明确的中文错误界面', async ({ page }) => {
@@ -157,13 +309,13 @@ test('移动端单页模式左右滑动翻页', async ({ page }, testInfo) => {
     const startTouch = new Touch({
       identifier: 1,
       target: element,
-      clientX: 300,
+      clientX: 60,
       clientY: 240,
     })
     const endTouch = new Touch({
       identifier: 2,
       target: element,
-      clientX: 60,
+      clientX: 300,
       clientY: 245,
     })
     element.dispatchEvent(

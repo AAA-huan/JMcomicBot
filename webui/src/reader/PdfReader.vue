@@ -1,10 +1,11 @@
 <script setup lang="ts">
 /**
- * PDF 在线阅读器：单页/连续滚动、缩放、跳页、全屏、深色背景与进度同步。
+ * PDF 在线阅读器：单页/连排滚动、缩放、跳页、全屏、阅读设置与进度同步。
  *
  * 渲染只覆盖当前页 ±1，离开窗口释放 Canvas；缩放/翻页取消过期渲染任务。
- * 进度 1 秒防抖写入，页面隐藏/离开时 keepalive 立即刷新；失败明确提示
- * 「进度未同步」并可重试，不阻塞阅读。
+ * 阅读模式、连续显示、点击翻页与深色背景统一保存在后端，工具栏改动即时
+ * 同步并在失败时回滚。进度 1 秒防抖写入，页面隐藏/离开时 keepalive 立即
+ * 刷新；失败明确提示「进度未同步」并可重试，不阻塞阅读。
  */
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Directive } from 'vue'
@@ -12,6 +13,7 @@ import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 
 import { ApiError, errorMessage } from '@/api/client'
 import { fileDownloadUrl, getReadingProgress, updateFilePageCount } from '@/api/files'
+import { getReaderSettings, updateReaderSettings } from '@/api/reader'
 import ReaderToolbar from './ReaderToolbar.vue'
 import {
   createProgressSync,
@@ -19,10 +21,17 @@ import {
   type ProgressSyncState,
 } from './progressSync'
 import {
+  clickTurnDelta,
   computeFitScale,
+  isHorizontalScroll,
+  keyTurnDelta,
+  pageGap,
+  swipeTurnDelta,
   windowPagesFor,
   type PageBaseSize,
   type ReaderMode,
+  type ReadingSettingUpdate,
+  type ReadingSettings,
   type ZoomMode,
 } from './types'
 import { mapPdfError, type ReaderError } from './pdfErrors'
@@ -43,7 +52,12 @@ const loading = ref(true)
 const error = ref<ReaderError | null>(null)
 const pageNumber = ref(1)
 const pageCount = ref(0)
-const mode = ref<ReaderMode>('single')
+const mode = ref<ReaderMode>('normal')
+const continuous = ref(false)
+const clickToTurn = ref(false)
+const reverseClick = ref(false)
+const dark = ref(false)
+const settingsError = ref('')
 const zoomMode = ref<ZoomMode>('fit-width')
 const customScale = ref(1)
 const fullscreen = ref(false)
@@ -54,24 +68,129 @@ const baseSizes = ref<PageBaseSize[]>([])
 const containerWidth = ref(0)
 const containerHeight = ref(0)
 
-const DARK_BACKGROUND_KEY = 'jmbot-reader-dark'
 const PAGE_PADDING = 16
-const PAGE_GAP = 12
-
-const dark = ref(window.localStorage.getItem(DARK_BACKGROUND_KEY) === '1')
-watch(dark, (value) => {
-  window.localStorage.setItem(DARK_BACKGROUND_KEY, value ? '1' : '0')
-})
 
 const downloadUrl = computed(() => fileDownloadUrl(fileId))
+const horizontal = computed(() => isHorizontalScroll(mode.value))
+
+// ---------- 阅读设置 ----------
+
+/** 把后端设置应用到阅读器状态。 */
+function applyReaderSettings(settings: ReadingSettings): void {
+  mode.value = settings.reading_mode
+  continuous.value = settings.continuous
+  clickToTurn.value = settings.click_to_turn
+  reverseClick.value = settings.reverse_click
+  dark.value = settings.dark_background
+}
+
+/** 启动时加载后端设置；401 时返回 false，由调用方中止初始化。 */
+async function loadReaderSettings(): Promise<boolean> {
+  try {
+    applyReaderSettings(await getReaderSettings())
+    return true
+  } catch (settingsLoadError) {
+    if (settingsLoadError instanceof ApiError && settingsLoadError.status === 401) {
+      redirectToLogin()
+      return false
+    }
+    settingsError.value = `阅读设置加载失败：${errorMessage(settingsLoadError)}`
+    return true
+  }
+}
+
+let settingsRequestId = 0
+
+/** 保存部分设置；失败回滚本地状态并提示。*/
+async function persistReaderSettings(
+  payload: ReadingSettingUpdate,
+  rollback: () => void,
+): Promise<void> {
+  const requestId = (settingsRequestId += 1)
+  try {
+    const updated = await updateReaderSettings(payload)
+    if (requestId === settingsRequestId) applyReaderSettings(updated)
+  } catch (saveError) {
+    if (requestId !== settingsRequestId) return
+    rollback()
+    if (saveError instanceof ApiError && saveError.status === 401) {
+      redirectToLogin()
+      return
+    }
+    settingsError.value = `阅读设置保存失败：${errorMessage(saveError)}`
+  }
+}
+
+/** 布局或滚动轴变化后，把当前页重新对齐到容器起始位置。 */
+function alignCurrentPage(): void {
+  if (!continuous.value) return
+  void nextTick(() => scrollToPage(pageNumber.value))
+}
+
+function setMode(value: ReaderMode): void {
+  if (mode.value === value) return
+  const previous = mode.value
+  mode.value = value
+  alignCurrentPage()
+  void persistReaderSettings({ reading_mode: value }, () => {
+    mode.value = previous
+    alignCurrentPage()
+  })
+}
+
+function setContinuous(value: boolean): void {
+  if (continuous.value === value) return
+  continuous.value = value
+  alignCurrentPage()
+  void persistReaderSettings({ continuous: value }, () => {
+    continuous.value = !value
+    alignCurrentPage()
+  })
+}
+
+function setClickToTurn(value: boolean): void {
+  if (clickToTurn.value === value) return
+  const previous = clickToTurn.value
+  const previousReverse = reverseClick.value
+  clickToTurn.value = value
+  // 关闭点击翻页时同时关闭反转，避免触发后端依赖校验失败
+  if (!value) reverseClick.value = false
+  void persistReaderSettings(
+    value
+      ? { click_to_turn: true }
+      : { click_to_turn: false, reverse_click: false },
+    () => {
+      clickToTurn.value = previous
+      reverseClick.value = previousReverse
+    },
+  )
+}
+
+function setReverseClick(value: boolean): void {
+  if (!clickToTurn.value || reverseClick.value === value) return
+  const previous = reverseClick.value
+  reverseClick.value = value
+  void persistReaderSettings({ reverse_click: value }, () => {
+    reverseClick.value = previous
+  })
+}
+
+function setDark(value: boolean): void {
+  if (dark.value === value) return
+  const previous = dark.value
+  dark.value = value
+  void persistReaderSettings({ dark_background: value }, () => {
+    dark.value = previous
+  })
+}
 
 // ---------- 缩放 ----------
 
-/** 适应计算的目标页面尺寸：单页用当前页，连续模式用最大页保证不溢出。 */
+/** 适应计算的目标页面尺寸：单页用当前页，连排用最大页保证不溢出。 */
 const fitBase = computed<PageBaseSize | null>(() => {
   const sizes = baseSizes.value
   if (sizes.length === 0) return null
-  if (mode.value === 'single') {
+  if (!continuous.value) {
     const current = sizes[pageNumber.value - 1]
     return current ?? null
   }
@@ -93,39 +212,18 @@ const scale = computed(() => {
   return computeFitScale(base, availableWidth, availableHeight, zoomMode.value)
 })
 
-// ---------- 连续模式布局 ----------
-
-interface PageLayout {
-  pageNumber: number
-  top: number
-  height: number
-  width: number
-}
-
-const pageLayouts = computed<PageLayout[]>(() => {
-  const layouts: PageLayout[] = []
-  const currentScale = scale.value
-  let top = PAGE_GAP
-  for (let index = 0; index < baseSizes.value.length; index += 1) {
-    const base = baseSizes.value[index]
-    const width = base.width * currentScale
-    const height = base.height * currentScale
-    layouts.push({ pageNumber: index + 1, top, height, width })
-    top += height + PAGE_GAP
-  }
-  return layouts
-})
-
-const totalHeight = computed(() => {
-  const layouts = pageLayouts.value
-  const last = layouts[layouts.length - 1]
-  return last ? last.top + last.height + PAGE_GAP : 0
-})
+/** 连排占位尺寸，未进入渲染窗口的页面仍保留布局高度/宽度。 */
+const pageSizes = computed<PageBaseSize[]>(() =>
+  baseSizes.value.map((size) => ({
+    width: size.width * scale.value,
+    height: size.height * scale.value,
+  })),
+)
 
 const windowPages = computed(() =>
-  mode.value === 'single'
-    ? [pageNumber.value]
-    : windowPagesFor(pageNumber.value, pageCount.value),
+  continuous.value
+    ? windowPagesFor(pageNumber.value, pageCount.value)
+    : [pageNumber.value],
 )
 
 // ---------- 渲染 ----------
@@ -180,13 +278,6 @@ const vReaderSize: Directive<HTMLElement> = {
 
 // ---------- 翻页与滚动 ----------
 
-function scrollToPage(target: number, behavior: 'auto' | 'smooth' = 'auto'): void {
-  const layout = pageLayouts.value[target - 1]
-  const container = scrollElement
-  if (!layout || !container) return
-  container.scrollTo({ top: layout.top, behavior })
-}
-
 let scrollElement: HTMLElement | null = null
 let scrollRaf: number | null = null
 
@@ -201,6 +292,28 @@ const vReaderScroll: Directive<HTMLElement> = {
   },
 }
 
+/** 在连排容器内查找指定页的占位元素。 */
+function pageElement(target: number): HTMLElement | null {
+  return (
+    scrollElement?.querySelector<HTMLElement>(
+      `[data-reader-page="${target}"]`,
+    ) ?? null
+  )
+}
+
+/** 连排模式：把目标页对齐到滚动容器起始位置。 */
+function scrollToPage(target: number, behavior: 'auto' | 'smooth' = 'auto'): void {
+  const container = scrollElement
+  const element = pageElement(target)
+  if (!container || !element) return
+  const gap = pageGap(true)
+  if (horizontal.value) {
+    container.scrollTo({ left: Math.max(element.offsetLeft - gap, 0), behavior })
+  } else {
+    container.scrollTo({ top: Math.max(element.offsetTop - gap, 0), behavior })
+  }
+}
+
 function onScroll(): void {
   if (scrollRaf !== null) return
   scrollRaf = window.requestAnimationFrame(() => {
@@ -209,19 +322,38 @@ function onScroll(): void {
   })
 }
 
-/** 连续模式：取视口中心所在的页面为当前页。 */
+/** 连排模式：取视口中心所在的页面为当前页。 */
 function updateCurrentFromScroll(): void {
   const container = scrollElement
-  if (!container || mode.value !== 'continuous') return
-  const center = container.scrollTop + container.clientHeight / 2
-  let current = 1
-  for (const layout of pageLayouts.value) {
-    const bottom = layout.top + layout.height
-    if (center < bottom) {
-      current = layout.pageNumber
+  if (!container || !continuous.value) return
+  const containerRect = container.getBoundingClientRect()
+  const centerX = containerRect.left + container.clientWidth / 2
+  const centerY = containerRect.top + container.clientHeight / 2
+  let current = pageNumber.value
+  let nearestDistance = Number.POSITIVE_INFINITY
+  for (const element of container.querySelectorAll<HTMLElement>(
+    '[data-reader-page]',
+  )) {
+    const page = Number(element.dataset.readerPage)
+    if (!Number.isInteger(page)) continue
+    const rect = element.getBoundingClientRect()
+    const inside = horizontal.value
+      ? centerX >= rect.left && centerX <= rect.right
+      : centerY >= rect.top && centerY <= rect.bottom
+    if (inside) {
+      current = page
       break
     }
-    current = layout.pageNumber
+    const pageCenter = horizontal.value
+      ? rect.left + rect.width / 2
+      : rect.top + rect.height / 2
+    const distance = Math.abs(
+      (horizontal.value ? centerX : centerY) - pageCenter,
+    )
+    if (distance < nearestDistance) {
+      nearestDistance = distance
+      current = page
+    }
   }
   if (current !== pageNumber.value) pageNumber.value = current
 }
@@ -229,7 +361,7 @@ function updateCurrentFromScroll(): void {
 function goToPage(target: number): void {
   if (pageCount.value === 0) return
   const clamped = Math.min(Math.max(target, 1), pageCount.value)
-  if (mode.value === 'continuous') {
+  if (continuous.value) {
     pageNumber.value = clamped
     void nextTick(() => scrollToPage(clamped))
   } else {
@@ -241,18 +373,6 @@ function goRelative(delta: number): void {
   goToPage(pageNumber.value + delta)
 }
 
-function setMode(value: ReaderMode): void {
-  if (mode.value === value) return
-  mode.value = value
-  void nextTick(() => {
-    if (value === 'continuous') {
-      scrollToPage(pageNumber.value)
-    } else {
-      void renderWindow()
-    }
-  })
-}
-
 function setZoomMode(value: ZoomMode): void {
   zoomMode.value = value
 }
@@ -262,35 +382,66 @@ function setZoomPercent(percent: number): void {
   zoomMode.value = 'custom'
 }
 
-// ---------- 触摸与键盘 ----------
+// ---------- 触摸、键盘与点击翻页 ----------
 
 let touchStart: { x: number; y: number } | null = null
+let suppressClick = false
+let suppressClickTimer: number | null = null
 
 function onTouchStart(event: TouchEvent): void {
-  if (mode.value !== 'single') return
+  if (continuous.value) return
   const touch = event.touches[0]
   if (!touch) return
   touchStart = { x: touch.clientX, y: touch.clientY }
 }
 
 function onTouchEnd(event: TouchEvent): void {
-  if (mode.value !== 'single' || touchStart === null) return
+  if (continuous.value || touchStart === null) return
   const touch = event.changedTouches[0]
   const start = touchStart
   touchStart = null
   if (!touch) return
-  const deltaX = touch.clientX - start.x
-  const deltaY = touch.clientY - start.y
-  // 仅在水平方向明显滑动时翻页，避免与垂直滚动冲突
-  if (Math.abs(deltaX) < 60 || Math.abs(deltaX) < Math.abs(deltaY) * 1.5) return
-  goRelative(deltaX < 0 ? 1 : -1)
+  const delta = swipeTurnDelta(
+    mode.value,
+    touch.clientX - start.x,
+    touch.clientY - start.y,
+  )
+  if (delta === 0) return
+  suppressClick = true
+  if (suppressClickTimer !== null) window.clearTimeout(suppressClickTimer)
+  suppressClickTimer = window.setTimeout(() => {
+    suppressClick = false
+    suppressClickTimer = null
+  }, 400)
+  goRelative(delta)
 }
 
 function onKeydown(event: KeyboardEvent): void {
   const target = event.target
   if (target instanceof HTMLInputElement || target instanceof HTMLTextAreaElement) return
-  if (event.key === 'ArrowLeft') goRelative(-1)
-  else if (event.key === 'ArrowRight') goRelative(1)
+  const delta = keyTurnDelta(mode.value, event.key)
+  if (delta === 0) return
+  event.preventDefault()
+  goRelative(delta)
+}
+
+/** 点击左右热区翻页；连续模式跳到目标页起始位置。 */
+function onReaderClick(event: MouseEvent): void {
+  if (!clickToTurn.value || event.button !== 0) return
+  if (suppressClick) {
+    suppressClick = false
+    return
+  }
+  const container = scrollElement
+  if (!container) return
+  const rect = container.getBoundingClientRect()
+  if (rect.width <= 0) return
+  const delta = clickTurnDelta(
+    mode.value,
+    (event.clientX - rect.left) / rect.width,
+    reverseClick.value,
+  )
+  if (delta !== 0) goRelative(delta)
 }
 
 // ---------- 全屏 ----------
@@ -392,6 +543,10 @@ async function initialize(): Promise<void> {
   loading.value = true
   error.value = null
   progressLoadFailed.value = false
+  if (!(await loadReaderSettings())) {
+    loading.value = false
+    return
+  }
   const loadError = await load(fileId)
   if (loadError) {
     loading.value = false
@@ -429,7 +584,7 @@ async function initialize(): Promise<void> {
   })
   loading.value = false
   await nextTick()
-  if (mode.value === 'continuous') {
+  if (continuous.value) {
     scrollToPage(pageNumber.value)
   }
   void renderWindow()
@@ -452,6 +607,7 @@ onBeforeUnmount(() => {
   progressSync?.dispose()
   releaseAll()
   void destroy()
+  if (suppressClickTimer !== null) window.clearTimeout(suppressClickTimer)
   window.removeEventListener('keydown', onKeydown)
   document.removeEventListener('visibilitychange', onVisibilityChange)
   document.removeEventListener('fullscreenchange', onFullscreenChange)
@@ -475,10 +631,23 @@ onMounted(() => {
       漫画实际页数同步失败：{{ pageCountSyncError }}
       <template #append><v-btn variant="text" size="small" @click="syncPageCount">重试</v-btn></template>
     </v-alert>
+    <v-alert
+      v-if="settingsError"
+      type="warning"
+      variant="tonal"
+      closable
+      class="ma-2"
+      @click:close="settingsError = ''"
+    >
+      {{ settingsError }}
+    </v-alert>
     <ReaderToolbar
       :page-number="pageNumber"
       :page-count="pageCount"
       :mode="mode"
+      :continuous="continuous"
+      :click-to-turn="clickToTurn"
+      :reverse-click="reverseClick"
       :zoom-mode="zoomMode"
       :zoom-percent="Math.round(scale * 100)"
       :dark="dark"
@@ -489,9 +658,12 @@ onMounted(() => {
       @back="goBack"
       @go="goToPage"
       @update:mode="setMode"
+      @update:continuous="setContinuous"
+      @update:click-to-turn="setClickToTurn"
+      @update:reverse-click="setReverseClick"
       @update:zoom-mode="setZoomMode"
       @zoom-percent="setZoomPercent"
-      @update:dark="dark = $event"
+      @update:dark="setDark"
       @toggle-fullscreen="toggleFullscreen"
       @retry-progress="retryProgress"
       @reload-progress="reloadProgress"
@@ -512,41 +684,48 @@ onMounted(() => {
       <p class="text-body-2 mt-3">正在加载 PDF…</p>
     </div>
 
-    <!-- 单页模式：当前页独立居中，支持左右滑动翻页 -->
+    <!-- 不连续：一次一页，按模式响应滑动、键盘与点击翻页 -->
     <div
-      v-else-if="mode === 'single'"
+      v-else-if="!continuous"
       v-reader-size
       v-reader-scroll
       class="reader-scroll"
       @touchstart.passive="onTouchStart"
       @touchend="onTouchEnd"
+      @click="onReaderClick"
     >
       <div class="reader-single">
         <canvas :key="pageNumber" v-reader-canvas="{ pageNumber }" />
       </div>
     </div>
 
-    <!-- 连续滚动：所有页面按布局占位，只渲染当前页 ±1 -->
+    <!-- 连排：普通/日漫水平横排，滚动模式垂直纵排；只渲染当前页 ±1 -->
     <div
       v-else
       v-reader-size
       v-reader-scroll
       class="reader-scroll"
+      :class="{ 'reader-scroll--horizontal': horizontal }"
+      @click="onReaderClick"
     >
-      <div class="reader-pages" :style="{ height: `${totalHeight}px` }">
+      <div
+        class="reader-pages"
+        :class="{
+          'reader-pages--horizontal': horizontal,
+          'reader-pages--reverse': mode === 'manga',
+        }"
+        :style="{ '--reader-page-gap': `${pageGap(true)}px` }"
+      >
         <div
-          v-for="layout in pageLayouts"
-          :key="layout.pageNumber"
+          v-for="(pageSize, index) in pageSizes"
+          :key="index + 1"
           class="reader-page"
-          :style="{
-            top: `${layout.top}px`,
-            width: `${layout.width}px`,
-            height: `${layout.height}px`,
-          }"
+          :data-reader-page="index + 1"
+          :style="{ width: `${pageSize.width}px`, height: `${pageSize.height}px` }"
         >
           <canvas
-            v-if="windowPages.includes(layout.pageNumber)"
-            v-reader-canvas="{ pageNumber: layout.pageNumber }"
+            v-if="windowPages.includes(index + 1)"
+            v-reader-canvas="{ pageNumber: index + 1 }"
           />
         </div>
       </div>
@@ -586,6 +765,11 @@ onMounted(() => {
   -webkit-overflow-scrolling: touch;
 }
 
+.reader-scroll--horizontal {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+
 .reader-single {
   display: flex;
   min-height: 100%;
@@ -601,14 +785,32 @@ onMounted(() => {
 }
 
 .reader-pages {
-  position: relative;
+  --reader-page-gap: 0px;
+  box-sizing: border-box;
   width: 100%;
+  padding: var(--reader-page-gap) 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: var(--reader-page-gap);
+}
+
+.reader-pages--horizontal {
+  width: max-content;
+  min-width: 100%;
+  height: 100%;
+  padding: 0 var(--reader-page-gap);
+  flex-direction: row;
+  align-items: center;
+}
+
+/* 日漫连排：首页在右，滚动方向与普通模式相反 */
+.reader-pages--reverse {
+  flex-direction: row-reverse;
 }
 
 .reader-page {
-  position: absolute;
-  left: 50%;
-  transform: translateX(-50%);
+  flex: 0 0 auto;
   display: flex;
   justify-content: center;
 }

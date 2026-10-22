@@ -22,6 +22,7 @@ from src.database.repositories import (
     OperationTaskRepository,
     PermissionRepository,
     ReadingProgressRepository,
+    ReadingSettingRepository,
     ScanRecordRepository,
     SettingHistoryRepository,
     SettingRepository,
@@ -49,6 +50,7 @@ from src.service import (
     OptionFileService,
     PermissionService,
     ReadingProgressService,
+    ReadingSettingService,
     RepairService,
     ScanService,
     SettingsService,
@@ -120,6 +122,7 @@ class MangaBot:
         self.backup_repo = BackupRepository(self.database_manager)
         self.scan_record_repo = ScanRecordRepository(self.database_manager)
         self.reading_progress_repo = ReadingProgressRepository(self.database_manager)
+        self.reading_setting_repo = ReadingSettingRepository(self.database_manager)
         self.setting_repo = SettingRepository(self.database_manager)
         self.setting_history_repo = SettingHistoryRepository(self.database_manager)
         # WebSocket 事件总线：任务等业务线程发布，Web 连接订阅
@@ -293,6 +296,11 @@ class MangaBot:
             self.reading_progress_repo,
             self.manga_repo,
         )
+        # 阅读设置服务：设置页与阅读器工具栏共用，按管理员账户保存一份
+        self.reading_setting_service = ReadingSettingService(
+            self.reading_setting_repo,
+            self.audit_event_repo,
+        )
         self.web_auth_service = WebAuthService(
             self.web_admin_repo,
             self.web_session_repo,
@@ -439,6 +447,7 @@ class MangaBot:
                         repair_service=self.repair_service,
                         scan_service=self.scan_service,
                         reading_progress_service=self.reading_progress_service,
+                        reading_setting_service=self.reading_setting_service,
                         event_bus=self.event_bus,
                         download_progress_tracker=self.download_progress_tracker,
                         audit_query_service=self.audit_query_service,

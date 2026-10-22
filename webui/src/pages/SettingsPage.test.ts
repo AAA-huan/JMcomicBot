@@ -1,5 +1,5 @@
 import { flushPromises, mount } from '@vue/test-utils'
-import { expect, it, vi } from 'vitest'
+import { beforeEach, expect, it, vi } from 'vitest'
 import { createVuetify } from 'vuetify'
 
 vi.mock('@/api/settings', () => ({
@@ -8,6 +8,11 @@ vi.mock('@/api/settings', () => ({
   updateOptionFile: vi.fn(),
   updateSetting: vi.fn(),
 }))
+vi.mock('@/api/reader', () => ({
+  getReaderSettings: vi.fn(),
+  updateReaderSettings: vi.fn(),
+}))
+import { getReaderSettings, updateReaderSettings } from '@/api/reader'
 import {
   getOptionFile,
   listSettings,
@@ -15,7 +20,32 @@ import {
   updateSetting,
 } from '@/api/settings'
 import SettingsPage from '@/pages/SettingsPage.vue'
+import type { ReadingSettingUpdate, ReadingSettings } from '@/reader/types'
 import type { SettingView } from '@/types/api'
+
+const DEFAULT_READER_SETTINGS: ReadingSettings = {
+  reading_mode: 'normal',
+  continuous: false,
+  click_to_turn: false,
+  reverse_click: false,
+  dark_background: false,
+  updated_at: '2026-01-01T00:00:00Z',
+}
+
+function makeReaderSettings(
+  overrides: Partial<ReadingSettings> = {},
+): ReadingSettings {
+  return { ...DEFAULT_READER_SETTINGS, ...overrides }
+}
+
+beforeEach(() => {
+  vi.mocked(getReaderSettings).mockReset()
+  vi.mocked(getReaderSettings).mockResolvedValue(makeReaderSettings())
+  vi.mocked(updateReaderSettings).mockReset()
+  vi.mocked(updateReaderSettings).mockImplementation(
+    async (payload: ReadingSettingUpdate) => makeReaderSettings(payload),
+  )
+})
 
 function makeTokenView(overrides: Partial<SettingView> = {}): SettingView {
   return {
@@ -225,6 +255,164 @@ it('option.yml 保存失败显示错误信息', async () => {
   await flushPromises()
 
   expect(wrapper.text()).toContain('YAML 解析失败')
+  wrapper.unmount()
+  vi.unstubAllGlobals()
+})
+
+/** 阅读偏好卡片的四个开关，顺序与界面一致。 */
+function readerSwitches(wrapper: ReturnType<typeof mount>) {
+  const inputs = wrapper.findAll<HTMLInputElement>('input[type="checkbox"]')
+  expect(inputs).toHaveLength(4)
+  return inputs
+}
+
+it('阅读偏好加载后仅在有改动时允许保存五项设置', async () => {
+  vi.stubGlobal('visualViewport', undefined)
+  vi.mocked(listSettings).mockResolvedValue({ items: [] })
+  vi.mocked(getOptionFile).mockResolvedValue({ content: '' })
+  vi.mocked(getReaderSettings).mockResolvedValue(
+    makeReaderSettings({ reading_mode: 'scroll', dark_background: true }),
+  )
+  vi.mocked(updateReaderSettings).mockResolvedValue(
+    makeReaderSettings({
+      reading_mode: 'manga',
+      continuous: true,
+      click_to_turn: true,
+      reverse_click: true,
+      dark_background: true,
+    }),
+  )
+
+  const wrapper = mount(SettingsPage, {
+    attachTo: document.body,
+    global: { plugins: [createVuetify()] },
+  })
+  await flushPromises()
+
+  expect(wrapper.text()).toContain('阅读偏好')
+  expect(wrapper.text()).toContain('与阅读器工具栏共用同一份设置')
+  expect(wrapper.text()).toContain('上→下阅读')
+  // 未修改时保存按钮禁用
+  expect(findEnabledButtonByText('保存阅读偏好')).toBeUndefined()
+
+  await wrapper
+    .findAll('button')
+    .find((button) => button.text() === '日漫模式')!
+    .trigger('click')
+  await flushPromises()
+  expect(wrapper.text()).toContain('右→左阅读')
+
+  const switches = readerSwitches(wrapper)
+  await switches[0].setValue(true)
+  await switches[1].setValue(true)
+  await switches[2].setValue(true)
+  await flushPromises()
+
+  findEnabledButtonByText('保存阅读偏好').click()
+  await flushPromises()
+
+  expect(updateReaderSettings).toHaveBeenCalledExactlyOnceWith({
+    reading_mode: 'manga',
+    continuous: true,
+    click_to_turn: true,
+    reverse_click: true,
+    dark_background: true,
+  })
+  expect(wrapper.text()).toContain('阅读偏好已保存')
+  expect(wrapper.text()).toContain('无需重启')
+  // 保存成功后恢复干净状态，按钮再次禁用
+  expect(findEnabledButtonByText('保存阅读偏好')).toBeUndefined()
+  wrapper.unmount()
+  vi.unstubAllGlobals()
+})
+
+it('关闭点击翻页时自动关闭反转并提交两项', async () => {
+  vi.stubGlobal('visualViewport', undefined)
+  vi.mocked(listSettings).mockResolvedValue({ items: [] })
+  vi.mocked(getOptionFile).mockResolvedValue({ content: '' })
+  vi.mocked(getReaderSettings).mockResolvedValue(
+    makeReaderSettings({ click_to_turn: true, reverse_click: true }),
+  )
+
+  const wrapper = mount(SettingsPage, {
+    attachTo: document.body,
+    global: { plugins: [createVuetify()] },
+  })
+  await flushPromises()
+
+  const switches = readerSwitches(wrapper)
+  expect(switches[1].element.checked).toBe(true)
+  expect(switches[2].element.checked).toBe(true)
+
+  await switches[1].setValue(false)
+  await flushPromises()
+
+  expect(switches[2].element.checked).toBe(false)
+  expect(switches[2].element.disabled).toBe(true)
+
+  findEnabledButtonByText('保存阅读偏好').click()
+  await flushPromises()
+
+  expect(updateReaderSettings).toHaveBeenCalledExactlyOnceWith({
+    reading_mode: 'normal',
+    continuous: false,
+    click_to_turn: false,
+    reverse_click: false,
+    dark_background: false,
+  })
+  wrapper.unmount()
+  vi.unstubAllGlobals()
+})
+
+it('阅读偏好加载失败显示错误并可重试', async () => {
+  vi.stubGlobal('visualViewport', undefined)
+  vi.mocked(listSettings).mockResolvedValue({ items: [] })
+  vi.mocked(getOptionFile).mockResolvedValue({ content: '' })
+  vi.mocked(getReaderSettings).mockRejectedValueOnce(new Error('设置接口不可用'))
+
+  const wrapper = mount(SettingsPage, {
+    attachTo: document.body,
+    global: { plugins: [createVuetify()] },
+  })
+  await flushPromises()
+
+  expect(wrapper.text()).toContain('设置接口不可用')
+  expect(wrapper.text()).toContain('重试')
+
+  vi.mocked(getReaderSettings).mockResolvedValue(makeReaderSettings())
+  const retry = [...document.querySelectorAll<HTMLButtonElement>('button')].find(
+    (button) => button.textContent?.trim() === '重试',
+  )!
+  retry.click()
+  await flushPromises()
+
+  expect(getReaderSettings).toHaveBeenCalledTimes(2)
+  expect(wrapper.text()).not.toContain('设置接口不可用')
+  wrapper.unmount()
+  vi.unstubAllGlobals()
+})
+
+it('阅读偏好保存失败显示错误并保留未保存改动', async () => {
+  vi.stubGlobal('visualViewport', undefined)
+  vi.mocked(listSettings).mockResolvedValue({ items: [] })
+  vi.mocked(getOptionFile).mockResolvedValue({ content: '' })
+  vi.mocked(updateReaderSettings).mockRejectedValue(
+    new Error('阅读设置保存被拒绝'),
+  )
+
+  const wrapper = mount(SettingsPage, {
+    attachTo: document.body,
+    global: { plugins: [createVuetify()] },
+  })
+  await flushPromises()
+
+  await readerSwitches(wrapper)[3].setValue(true)
+  await flushPromises()
+  findEnabledButtonByText('保存阅读偏好').click()
+  await flushPromises()
+
+  expect(wrapper.text()).toContain('阅读设置保存被拒绝')
+  expect(findEnabledButtonByText('保存阅读偏好')).toBeDefined()
   wrapper.unmount()
   vi.unstubAllGlobals()
 })
