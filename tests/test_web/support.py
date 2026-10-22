@@ -15,6 +15,7 @@ from src.database.repositories import (
     BackupRepository,
     FavoriteRepository,
     JmFavoriteRepository,
+    MangaBlacklistRepository,
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
@@ -32,6 +33,7 @@ from src.permission.manager import PermissionManager
 from src.service import (
     DatabaseMaintenanceService,
     DownloadQueueService,
+    MangaBlacklistService,
     MangaService,
     OperationTaskService,
     OptionFileService,
@@ -159,6 +161,17 @@ def build_web_context(  # pylint: disable=too-many-locals
     )
     permission_manager = PermissionManager(PermissionRepository(db_manager))
     download_queue = FakeDownloadQueue(task_service)
+    blacklist_repo = MangaBlacklistRepository(db_manager)
+    delete_binding = bool((config_dict or {}).get("BLACKLIST_DELETE_BINDING", False))
+    manga_service_holder: Dict[str, MangaService] = {}
+    blacklist_service = MangaBlacklistService(
+        blacklist_repository=blacklist_repo,
+        manga_repository=manga_repo,
+        audit_repository=audit_repo,
+        task_service=task_service,
+        manga_service_provider=lambda: manga_service_holder["service"],
+        delete_binding=delete_binding,
+    )
 
     settings_service = SettingsService(
         SettingRepository(db_manager),
@@ -191,6 +204,19 @@ def build_web_context(  # pylint: disable=too-many-locals
     def request_restart(operation_context) -> None:
         restart_calls.append(operation_context)
 
+    manga_service = MangaService(
+        manga_repository=manga_repo,
+        tag_repository=tag_repo,
+        audit_repository=audit_repo,
+        operation_task_service=task_service,
+        download_root=str(download_root),
+        download_conflict_checker=download_queue.find_active_download,
+        send_conflict_checker=lambda _manga_id: False,
+        blacklist_service=blacklist_service,
+        blacklist_delete_binding=delete_binding,
+    )
+    manga_service_holder["service"] = manga_service
+
     dependencies = WebDependencies(
         auth_service=WebAuthService(
             WebAdminRepository(db_manager),
@@ -203,7 +229,9 @@ def build_web_context(  # pylint: disable=too-many-locals
                 parallelism=1,
             ),
         ),
-        manga_query_service=MangaQueryService(manga_repo, tag_repo),
+        manga_query_service=MangaQueryService(
+            manga_repo, tag_repo, blacklist_repository=blacklist_repo
+        ),
         task_query_service=TaskQueryService(operation_task_repo),
         system_service=SystemService(
             version="test-version",
@@ -217,16 +245,11 @@ def build_web_context(  # pylint: disable=too-many-locals
             restart_requester=request_restart,
             audit_repository=audit_repo,
         ),
-        manga_service=MangaService(
-            manga_repository=manga_repo,
-            tag_repository=tag_repo,
-            audit_repository=audit_repo,
-            operation_task_service=task_service,
-            download_root=str(download_root),
-            download_conflict_checker=download_queue.find_active_download,
-            send_conflict_checker=lambda _manga_id: False,
+        manga_service=manga_service,
+        manga_blacklist_service=blacklist_service,
+        download_service=DownloadQueueService(
+            download_queue, task_service, blacklist_service=blacklist_service
         ),
-        download_service=DownloadQueueService(download_queue, task_service),
         permission_service=PermissionService(
             permission_manager,
             audit_repo,

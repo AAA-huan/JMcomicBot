@@ -33,6 +33,23 @@ function makeTokenView(overrides: Partial<SettingView> = {}): SettingView {
   }
 }
 
+function makeBindingView(overrides: Partial<SettingView> = {}): SettingView {
+  return {
+    key: 'BLACKLIST_DELETE_BINDING',
+    title: '漫画黑名单与删除绑定',
+    value_type: 'bool',
+    group: '下载与存储',
+    editable: true,
+    sensitive: false,
+    effect: 'restart',
+    apply_target: '重启机器人',
+    value: false,
+    is_set: true,
+    restart_required: false,
+    ...overrides,
+  }
+}
+
 /** 查找文本匹配且未禁用的按钮（disabled 按钮不触发 click）。 */
 function findEnabledButtonByText(text: string): HTMLButtonElement {
   const buttons = document.querySelectorAll<HTMLButtonElement>('button')
@@ -80,6 +97,77 @@ it('敏感项明文显示与编辑回显，保存后标记待重启', async () =
 
   expect(updateSetting).toHaveBeenCalledWith('NAPCAT_TOKEN', 'new-secret')
   expect(wrapper.text()).toContain('待重启')
+  wrapper.unmount()
+  vi.unstubAllGlobals()
+})
+
+it('黑名单绑定开关展示说明并可切换为待重启', async () => {
+  vi.stubGlobal('visualViewport', undefined)
+  const binding = makeBindingView()
+  vi.mocked(listSettings).mockResolvedValueOnce({ items: [binding] })
+  vi.mocked(listSettings).mockResolvedValue({
+    items: [{ ...binding, value: true, restart_required: true }],
+  })
+  vi.mocked(updateSetting).mockResolvedValue({
+    ...binding,
+    value: true,
+    restart_required: true,
+  })
+  vi.mocked(getOptionFile).mockResolvedValue({ content: '' })
+  const wrapper = mount(SettingsPage, {
+    attachTo: document.body,
+    global: { plugins: [createVuetify()] },
+  })
+  await flushPromises()
+
+  expect(wrapper.text()).toContain('漫画黑名单与删除绑定')
+  expect(wrapper.text()).toContain('默认关闭')
+  expect(wrapper.text()).toContain('删除漫画时同步加入黑名单')
+  expect(wrapper.text()).toContain('需重启机器人生效')
+
+  await wrapper
+    .find('[aria-label="修改漫画黑名单与删除绑定"]')
+    .trigger('click')
+  await flushPromises()
+
+  const checkbox = document.querySelector<HTMLInputElement>(
+    '.v-dialog input[type="checkbox"]',
+  )!
+  expect(checkbox.checked).toBe(false)
+  checkbox.click()
+  await flushPromises()
+
+  findEnabledButtonByText('保存').click()
+  await flushPromises()
+
+  expect(updateSetting).toHaveBeenCalledWith('BLACKLIST_DELETE_BINDING', true)
+  expect(wrapper.text()).toContain('待重启')
+  wrapper.unmount()
+  vi.unstubAllGlobals()
+})
+
+it('启动项被环境变量覆盖时显示明确提示', async () => {
+  vi.stubGlobal('visualViewport', undefined)
+  const binding = makeBindingView({ overridden_by_env: true })
+  vi.mocked(listSettings).mockResolvedValue({ items: [binding] })
+  vi.mocked(getOptionFile).mockResolvedValue({ content: '' })
+  const wrapper = mount(SettingsPage, {
+    attachTo: document.body,
+    global: { plugins: [createVuetify()] },
+  })
+  await flushPromises()
+
+  expect(wrapper.text()).toContain('检测到同名环境变量')
+  expect(wrapper.text()).toContain('通过网页重启会清除该覆盖并以 .env 为准')
+
+  await wrapper
+    .find('[aria-label="修改漫画黑名单与删除绑定"]')
+    .trigger('click')
+  await flushPromises()
+
+  const dialog = document.querySelector('.v-dialog')
+  expect(dialog?.textContent).toContain('检测到同名环境变量')
+
   wrapper.unmount()
   vi.unstubAllGlobals()
 })

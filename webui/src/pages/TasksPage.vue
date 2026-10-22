@@ -35,6 +35,7 @@ const typeOptions = [
   { value: 'delete', title: '删除' },
   { value: 'backup', title: '备份' },
   { value: 'verify', title: '校验' },
+  { value: 'blacklist', title: '黑名单' },
 ]
 const statusOptions = [
   { value: '', title: '全部状态' },
@@ -73,9 +74,11 @@ const cancelQueuedLoading = ref(false)
 const selected = ref<string[]>([])
 const batchLoading = ref(false)
 
-/** 当前页可勾选任务：带漫画 ID 的任务 */
+/** 当前页可勾选任务：仅下载任务支持批量取消/重试 */
 const selectableTasks = computed(() =>
-  tasks.value.filter((task) => task.manga_id !== null && task.manga_id !== ''),
+  tasks.value.filter(
+    (task) => task.task_type === 'download' && task.manga_id !== null && task.manga_id !== '',
+  ),
 )
 const selectableIds = computed(() => selectableTasks.value.map((task) => task.id))
 const allSelectableSelected = computed(

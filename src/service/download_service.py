@@ -2,7 +2,12 @@
 
 from typing import List, Optional
 
-from src.service.contracts import DownloadNotifier, DownloadQueueGateway, TaskService
+from src.service.contracts import (
+    DownloadNotifier,
+    DownloadQueueGateway,
+    MangaBlacklistService,
+    TaskService,
+)
 from src.service.operation_context import OperationContext
 from src.service.results import (
     BatchTaskItem,
@@ -21,10 +26,14 @@ class DownloadQueueService:
     """提供与 QQ、Web 展示方式无关的下载队列操作。"""
 
     def __init__(
-        self, download_queue: DownloadQueueGateway, task_service: TaskService
+        self,
+        download_queue: DownloadQueueGateway,
+        task_service: TaskService,
+        blacklist_service: Optional[MangaBlacklistService] = None,
     ) -> None:
         self.download_queue = download_queue
         self.task_service = task_service
+        self.blacklist_service = blacklist_service
 
     def cancel(self, manga_ids: List[str]) -> DownloadCancellationResult:
         """取消指定漫画的排队任务，并返回实际取消的漫画 ID。"""
@@ -66,8 +75,18 @@ class DownloadQueueService:
             ValueError: 数量超限或 ID 不是数字时
         """
         normalized_ids = self._normalize_manga_ids(manga_ids)
+        # 黑名单优先于活动任务去重：被拉黑的 ID 即使从未下载也直接跳过
+        skipped_blacklisted = tuple(
+            manga_id
+            for manga_id in normalized_ids
+            if self.blacklist_service is not None
+            and self.blacklist_service.is_blacklisted(manga_id)
+        )
+        skipped_set = set(skipped_blacklisted)
         items: List[DownloadRequestItem] = []
         for manga_id in normalized_ids:
+            if manga_id in skipped_set:
+                continue
             # 数据库中的活动任务优先：即使内存队列因重启丢失，也不能重复建任务
             active_task = self.task_service.find_active_download(manga_id)
             if active_task is not None:
@@ -92,7 +111,9 @@ class DownloadQueueService:
             items.append(
                 self.download_queue.request_download(manga_id, context, notifier)
             )
-        return DownloadRequestResult(items=tuple(items))
+        return DownloadRequestResult(
+            items=tuple(items), skipped_blacklisted=skipped_blacklisted
+        )
 
     def cancel_task(self, task_id: str) -> TaskCancellationResult:
         """取消尚未开始的下载任务；重启后遗留的排队记录会被直接标记取消。"""

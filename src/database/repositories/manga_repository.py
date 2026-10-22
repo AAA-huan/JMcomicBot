@@ -14,6 +14,7 @@ import os  # pylint: disable=wrong-import-order  # 项目规范要求直接 impo
 from src.database.database import DatabaseManager
 from src.database.models import (
     Manga,
+    MangaBlacklist,
     MangaFavorite,
     MangaFile,
     MangaTag,
@@ -99,10 +100,18 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
 
     @staticmethod
     def _build_query(
-        search: Optional[str], status: Optional[str], tag: Optional[str]
+        search: Optional[str],
+        status: Optional[str],
+        tag: Optional[str],
+        blacklist_only: bool = False,
     ) -> Select[tuple[Manga]]:
         """构造仅使用固定字段的漫画筛选语句。"""
         statement = select(Manga)
+        if blacklist_only:
+            # 黑名单标签展示全部拉黑记录，包括绑定模式下已标记 deleted 的漫画
+            statement = statement.join(
+                MangaBlacklist, MangaBlacklist.manga_id == Manga.id
+            )
         if search:
             pattern = f"%{search}%"
             statement = statement.where(
@@ -116,7 +125,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             if status not in _VALID_MANGA_STATUSES:
                 raise ValueError(f"不支持的漫画状态: {status}")
             statement = statement.where(Manga.status == status)
-        else:
+        elif not blacklist_only:
             statement = statement.where(Manga.status != "deleted")
         if tag:
             normalized_tag = " ".join(tag.split()).casefold()
@@ -138,6 +147,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
         sort: str = "downloaded_at_desc",
         favorite_owner_id: Optional[str] = None,
         history_only: bool = False,
+        blacklist_only: bool = False,
     ) -> tuple[List[Manga], int]:
         """按白名单条件分页查询漫画并返回总数。"""
         # 漫画 ID 是数字字符串，排序必须按数值比较，避免 "101051" 排在 "2556" 之前；
@@ -162,7 +172,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
         }
         if sort not in sort_columns:
             raise ValueError(f"不支持的漫画排序方式: {sort}")
-        base_statement = self._build_query(search, status, tag)
+        base_statement = self._build_query(search, status, tag, blacklist_only)
         if history_only:
             base_statement = base_statement.where(last_read.is_not(None))
         if favorite_owner_id is not None:

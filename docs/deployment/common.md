@@ -45,7 +45,8 @@ NAPCAT_TOKEN=""
 | `WEBUI_HOST`、`WEBUI_PORT` | `127.0.0.1`、`7999`，本机 WebUI 地址 |
 | `GROUP_WHITELIST`、`PRIVATE_WHITELIST` | 允许响应的群 / 私聊；留空不限制 |
 | `GLOBAL_BLACKLIST` | 禁止响应的用户；优先于白名单 |
-| `DELETE_PERMISSION_USER` | QQ 删除权限用户，最多一个 |
+| `DELETE_PERMISSION_USER` | QQ 删除与拉黑权限用户，最多一个；拉黑权限与删除权限共用此名单 |
+| `BLACKLIST_DELETE_BINDING` | 默认 `false`；开启后拉黑与删除双向联动，修改后需重启 |
 | `LOW_MEMORY_MODE` | 默认 `false`；开启后会按配置清理漫画文件 |
 
 完整选项与默认值见项目根目录 `.env.example`。程序会创建配置的下载目录和数据库目录，通常无需手动 `mkdir` 或 `chmod`；运行账户需要对这些目录有写入权限。

@@ -9,6 +9,7 @@ from src.service.database_maintenance_service import (
     DatabaseMaintenanceService,
 )
 from src.service.download_service import DownloadQueueService
+from src.service.manga_blacklist_service import MangaBlacklistService
 from src.service.manga_service import MangaFileDownloadError, MangaService
 from src.service.operation_context import OperationContext
 from src.service.operation_task_service import OperationTaskService
@@ -26,8 +27,11 @@ from src.service.reading_progress_service import (
 from src.service.repair_service import RepairService
 from src.service.results import (
     BackupResult,
+    BlacklistBatchResult,
+    BlacklistOutcome,
     DownloadCancellationResult,
     DownloadRecoveryResult,
+    MangaBlacklistItem,
     MangaDeleteOutcome,
     MangaDeleteResult,
     TaskCancellationResult,
@@ -43,6 +47,8 @@ __all__ = [
     "BackupDownloadError",
     "BackupResult",
     "BackupView",
+    "BlacklistBatchResult",
+    "BlacklistOutcome",
     "CachedGroup",
     "CachedUser",
     "CleanupService",
@@ -52,6 +58,8 @@ __all__ = [
     "DownloadRecoveryResult",
     "DownloadQueueService",
     "DownloadService",
+    "MangaBlacklistItem",
+    "MangaBlacklistService",
     "MangaDeleteOutcome",
     "MangaDeleteResult",
     "MangaFileDownloadError",

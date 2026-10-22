@@ -306,3 +306,26 @@ class PermissionManager:
 
         self.logger.debug(f"用户 {user_id} 删除权限检查通过")
         return True
+
+    def check_blacklist_permission(self, user_id: str) -> bool:
+        """检查用户是否有漫画黑名单操作权限，复用删除权限名单。
+
+        规则与删除权限完全一致：全局黑名单优先拒绝，关联管理员 QQ 通过，
+        其余用户必须位于 delete_permission_user 名单中，名单为空则不可用。
+        """
+        if user_id in self.global_blacklist:
+            raise ValueError(f"用户 {user_id} 在全局黑名单中，拒绝访问")
+        if self.is_admin(user_id):
+            return True
+        if len(self.delete_permission_user) == 0:
+            error_msg = "黑名单功能不可用：未配置删除权限用户"
+            self.logger.warning(error_msg)
+            raise ValueError(error_msg)
+
+        if user_id not in self.delete_permission_user:
+            error_msg = f"用户 {user_id} 没有拉黑漫画的权限"
+            self.logger.warning(error_msg)
+            raise ValueError(error_msg)
+
+        self.logger.debug(f"用户 {user_id} 黑名单权限检查通过")
+        return True

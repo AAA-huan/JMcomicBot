@@ -50,7 +50,11 @@ def main() -> None:
 
         logger.info("优雅收尾完成，准备拉起新进程...")
         try:
-            restart_process(sys.executable, [sys.executable, *sys.argv])
+            restart_process(
+                sys.executable,
+                [sys.executable, *sys.argv],
+                env=bot.config_manager.build_restart_environment(),
+            )
         except OSError as restart_error:
             logger.error(f"重启进程失败: {restart_error}")
             print(f"重启进程失败: {restart_error}，请手动重新启动")

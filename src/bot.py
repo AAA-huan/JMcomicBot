@@ -16,6 +16,7 @@ from src.database.repositories import (
     BackupRepository,
     FavoriteRepository,
     JmFavoriteRepository,
+    MangaBlacklistRepository,
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
@@ -41,6 +42,7 @@ from src.service import (
     CleanupService,
     DatabaseMaintenanceService,
     DownloadQueueService,
+    MangaBlacklistService,
     MangaService,
     OperationContext,
     OperationTaskService,
@@ -104,6 +106,7 @@ class MangaBot:
             self.database_manager,
             download_root=str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]),
         )
+        self.manga_blacklist_repo = MangaBlacklistRepository(self.database_manager)
         self.task_log_repo = TaskLogRepository(self.database_manager)
         self.user_group_repo = UserGroupRepository(self.database_manager)
         self.permission_repo = PermissionRepository(self.database_manager)
@@ -234,8 +237,21 @@ class MangaBot:
                     "resumed_count": recovery_result.resumed_count,
                 },
             )
+        # 漫画黑名单先于删除服务构造；删除联动通过 provider 延迟取得 MangaService
+        self.manga_blacklist_service = MangaBlacklistService(
+            blacklist_repository=self.manga_blacklist_repo,
+            manga_repository=self.manga_repo,
+            audit_repository=self.audit_event_repo,
+            task_service=self.operation_task_service,
+            manga_service_provider=lambda: self.manga_service,
+            delete_binding=bool(
+                self.config_manager.config_dict["BLACKLIST_DELETE_BINDING"]
+            ),
+        )
         self.download_service = DownloadQueueService(
-            self.download_manager, self.operation_task_service
+            self.download_manager,
+            self.operation_task_service,
+            blacklist_service=self.manga_blacklist_service,
         )
         self.scan_service = ScanService(
             self.manga_repo,
@@ -267,6 +283,10 @@ class MangaBot:
             download_conflict_checker=self.download_manager.is_download_active,
             send_conflict_checker=self.message_manager.is_manga_sending,
             favorite_repository=self.favorite_repo,
+            blacklist_service=self.manga_blacklist_service,
+            blacklist_delete_binding=bool(
+                self.config_manager.config_dict["BLACKLIST_DELETE_BINDING"]
+            ),
         )
         # 阅读进度服务：WebUI 阅读器读写，文件存在性与页数补齐在服务层校验
         self.reading_progress_service = ReadingProgressService(
@@ -289,7 +309,10 @@ class MangaBot:
             self.web_admin_repo, self.permission_manager, self.audit_event_repo
         )
         self.manga_query_service = MangaQueryService(
-            self.manga_repo, self.tag_repo, self.favorite_repo
+            self.manga_repo,
+            self.tag_repo,
+            self.favorite_repo,
+            self.manga_blacklist_repo,
         )
         self.task_query_service = TaskQueryService(self.operation_task_repo)
         self.audit_query_service = AuditQueryService(self.audit_event_repo)
@@ -331,6 +354,7 @@ class MangaBot:
             send_status_provider=self.message_manager.get_send_queue_status,
             manga_repo=self.manga_repo,
             tag_repo=self.tag_repo,
+            blacklist_service=self.manga_blacklist_service,
         )
 
         # 注册立即生效配置的显式应用接口，WebUI 修改后由服务直接调用
@@ -406,6 +430,7 @@ class MangaBot:
                         task_query_service=self.task_query_service,
                         system_service=self.system_service,
                         manga_service=self.manga_service,
+                        manga_blacklist_service=self.manga_blacklist_service,
                         download_service=self.download_service,
                         permission_service=self.permission_service,
                         settings_service=self.settings_service,

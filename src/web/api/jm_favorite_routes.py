@@ -141,6 +141,7 @@ def create_jm_favorite_router(
             "items": [asdict(item) for item in result.items],
             "queued_count": result.queued_count,
             "duplicate_count": result.duplicate_count,
+            "skipped_blacklisted": list(result.skipped_blacklisted),
         }
 
     return router

@@ -18,6 +18,7 @@ export interface MangaFile {
 
 export interface Manga {
   is_favorite: boolean
+  is_blacklisted: boolean
   id: string
   title: string
   author: string
@@ -102,6 +103,7 @@ export type SettingValue = string | number | boolean | null
 
 export interface SettingView {
   restart_required?: boolean
+  overridden_by_env?: boolean
   key: string
   title: string
   value_type: string
@@ -136,6 +138,32 @@ export interface DownloadRequestResult {
   items: DownloadRequestItem[]
   queued_count: number
   duplicate_count: number
+  skipped_blacklisted: string[]
+}
+
+export interface MangaBlacklistItem {
+  manga_id: string
+  title: string | null
+  reason: string | null
+  requested_by: string | null
+  source: string
+  blacklisted_at: string
+  operation_task_id: string | null
+}
+
+export interface BlacklistOutcome {
+  manga_id: string
+  changed: boolean
+  status: 'blacklisted' | 'already_blacklisted' | 'unblacklisted' | 'not_blacklisted'
+  task_id: string | null
+  deleted: boolean
+  delete_error_code: string | null
+}
+
+export interface BlacklistBatchResult {
+  items: BlacklistOutcome[]
+  changed_count: number
+  unchanged_count: number
 }
 
 export interface DownloadChapterProgress {

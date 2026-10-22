@@ -46,6 +46,12 @@ _AUDIT_EVENT_NAMES: Dict[str, Dict[str, str]] = {
         "succeeded": "library.verify_completed",
         "failed": "library.verify_failed",
     },
+    "blacklist": {
+        "requested": "manga.blacklist_requested",
+        "succeeded": "manga.blacklisted",
+        "failed": "manga.blacklist_failed",
+        "cancelled": "manga.blacklist_cancelled",
+    },
 }
 
 
@@ -154,18 +160,25 @@ class OperationTaskService:
         task_id: str,
         metadata: Optional[Dict[str, Any]] = None,
         context: Optional[OperationContext] = None,
+        audit_event_type: Optional[str] = None,
+        stage: str = "completed",
     ) -> TaskResult:
-        """完成任务并记录成功审计。"""
-        task = self.task_repo.update_state(task_id, "succeeded", "completed", 100)
+        """完成任务并记录成功审计。
+
+        audit_event_type 用于同一任务类型下的语义区分（例如解除拉黑完成任务时
+        写入 manga.unblacklisted），缺省仍按 task_type 的完成事件映射。
+        """
+        task = self.task_repo.update_state(task_id, "succeeded", stage, 100)
         self.event_repo.append(
             task_id,
             f"{task.task_type}.completed",
-            "completed",
+            stage,
             progress=100,
             metadata=metadata,
         )
         self.audit_repo.record(
-            event_type=_audit_event_name(task.task_type, "succeeded"),
+            event_type=audit_event_type
+            or _audit_event_name(task.task_type, "succeeded"),
             source=task.source,
             result="succeeded",
             actor_user_id=(

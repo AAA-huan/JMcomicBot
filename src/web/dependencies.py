@@ -6,6 +6,7 @@ from src.download.progress import DownloadProgressTracker
 from src.service import (
     DatabaseMaintenanceService,
     DownloadService,
+    MangaBlacklistService,
     MangaService,
     PermissionService,
     ReadingProgressService,
@@ -37,6 +38,7 @@ class WebDependencies:  # pylint: disable=too-many-instance-attributes
     task_query_service: TaskQueryService
     system_service: SystemService
     manga_service: MangaService
+    manga_blacklist_service: MangaBlacklistService
     download_service: DownloadService
     permission_service: PermissionService
     settings_service: SettingsService

@@ -13,7 +13,7 @@ from src.database.repositories import (
 )
 from src.logging.logger_config import logger
 
-from .contracts import TaskService
+from .contracts import MangaBlacklistService, TaskService
 from .operation_context import OperationContext
 from .results import MangaDeleteOutcome, MangaDeleteResult
 
@@ -25,6 +25,7 @@ _MAX_TAG_COUNT = 50
 _MAX_TAG_LENGTH = 64
 
 ADMIN_FAVORITE_DELETE_MESSAGE = "不能删除：该漫画已被管理员收藏，请管理员先取消收藏"
+BLACKLIST_DELETE_REASON = "删除漫画时自动加入黑名单"
 
 # 删除任务的失败原因对用户展示的简短说明，不包含绝对路径或异常细节
 _DELETE_ERROR_MESSAGES = {
@@ -59,6 +60,8 @@ class MangaService:
         download_conflict_checker: Callable[[str], bool],
         send_conflict_checker: Callable[[str], bool],
         favorite_repository: Optional[FavoriteRepository] = None,
+        blacklist_service: Optional[MangaBlacklistService] = None,
+        blacklist_delete_binding: bool = False,
     ) -> None:
         self.favorite_repository = (
             favorite_repository
@@ -72,6 +75,8 @@ class MangaService:
         self.download_root = download_root
         self.download_conflict_checker = download_conflict_checker
         self.send_conflict_checker = send_conflict_checker
+        self.blacklist_service = blacklist_service
+        self.blacklist_delete_binding = blacklist_delete_binding
 
     def resolve_file_for_download(self, file_id: int) -> tuple[Path, str]:
         """解析可下载的 PDF 文件路径与建议文件名。
@@ -170,7 +175,7 @@ class MangaService:
         """统一执行单个或批量删除，返回每个漫画的结构化结果。
 
         删除流程：管理员收藏保护检查 → 冲突检查（下载/发送）→ 标记 deleting → 删除磁盘 PDF →
-        级联清理漫画、文件与标签记录。全部成功任务才 succeed，
+        绑定模式下写入漫画黑名单 → 级联清理漫画、文件与标签记录。全部成功任务才 succeed，
         任一失败则任务失败并保留成功/失败计数。
         """
         if not manga_ids:
@@ -182,7 +187,9 @@ class MangaService:
         )
         self.operation_task_service.start(task.id, "deleting")
 
-        outcomes = tuple(self._delete_one(manga_id) for manga_id in manga_ids)
+        outcomes = tuple(
+            self._delete_one(manga_id, operation_context) for manga_id in manga_ids
+        )
         result = MangaDeleteResult(task_id=task.id, outcomes=outcomes)
         if result.all_succeeded:
             self.operation_task_service.succeed(
@@ -212,7 +219,9 @@ class MangaService:
             )
         return result
 
-    def _delete_one(self, manga_id: str) -> MangaDeleteOutcome:
+    def _delete_one(
+        self, manga_id: str, context: OperationContext
+    ) -> MangaDeleteOutcome:
         """删除单个漫画，冲突与预期失败返回结构化结果而不抛出。"""
         if self.favorite_repository.has_admin_favorite(manga_id):
             logger.warning(f"漫画 {manga_id} {ADMIN_FAVORITE_DELETE_MESSAGE}")
@@ -245,6 +254,14 @@ class MangaService:
                 if pdf_path.exists():
                     self._remove_pdf(str(pdf_path))
                     deleted_count += 1
+            # 绑定模式在保留已删除元数据前写入黑名单，避免与拉黑触发的删除递归
+            if self.blacklist_delete_binding and self.blacklist_service is not None:
+                self.blacklist_service.add(
+                    manga_id,
+                    BLACKLIST_DELETE_REASON,
+                    context,
+                    cascade_delete=False,
+                )
             # 保留已删除漫画元数据供 WebUI 查询，关联文件、标签、收藏和进度一并清理
             self.manga_repository.mark_manga_deleted(manga_id)
             return MangaDeleteOutcome(manga_id, True, None, deleted_count)

@@ -9,6 +9,7 @@ from src.database.models import Manga, MangaFile, OperationTask
 from src.database.repositories import (
     AuditEventRepository,
     FavoriteRepository,
+    MangaBlacklistRepository,
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
@@ -111,6 +112,7 @@ class MangaResult:  # pylint: disable=too-many-instance-attributes
     tags: tuple[str, ...]
     files: tuple[MangaFileResult, ...]
     is_favorite: bool = False
+    is_blacklisted: bool = False
     remote_metadata: Optional[Dict[str, Any]] = None
 
 
@@ -142,6 +144,7 @@ class MangaQueryService:
         manga_repository: MangaRepository,
         tag_repository: MangaTagRepository,
         favorite_repository: Optional[FavoriteRepository] = None,
+        blacklist_repository: Optional[MangaBlacklistRepository] = None,
     ) -> None:
         self.manga_repository = manga_repository
         self.tag_repository = tag_repository
@@ -149,6 +152,11 @@ class MangaQueryService:
             favorite_repository
             if favorite_repository is not None
             else FavoriteRepository(manga_repository.db_manager)
+        )
+        self.blacklist_repository = (
+            blacklist_repository
+            if blacklist_repository is not None
+            else MangaBlacklistRepository(manga_repository.db_manager)
         )
 
     def _to_result(self, manga: Manga) -> MangaResult:
@@ -188,6 +196,7 @@ class MangaQueryService:
         favorite_only: bool = False,
         admin_id: int = 1,
         history_only: bool = False,
+        blacklist_only: bool = False,
     ) -> PageResult[MangaResult]:
         """按受控条件分页查询漫画。"""
         mangas, total = self.manga_repository.search(
@@ -199,13 +208,20 @@ class MangaQueryService:
             sort,
             favorite_owner_id=str(admin_id) if favorite_only else None,
             history_only=history_only,
+            blacklist_only=blacklist_only,
         )
+        manga_ids = [manga.id for manga in mangas]
         favorite_ids = self.favorite_repository.ids_for_mangas(
-            "web_admin", str(admin_id), [manga.id for manga in mangas]
+            "web_admin", str(admin_id), manga_ids
         )
+        blacklisted_ids = self.blacklist_repository.ids_for_mangas(manga_ids)
         return PageResult(
             items=tuple(
-                replace(self._to_result(manga), is_favorite=manga.id in favorite_ids)
+                replace(
+                    self._to_result(manga),
+                    is_favorite=manga.id in favorite_ids,
+                    is_blacklisted=manga.id in blacklisted_ids,
+                )
                 for manga in mangas
             ),
             page=page,
@@ -225,6 +241,7 @@ class MangaQueryService:
                 "web_admin", str(admin_id), manga_id
             )
             is not None,
+            is_blacklisted=self.blacklist_repository.exists(manga_id),
         )
 
 

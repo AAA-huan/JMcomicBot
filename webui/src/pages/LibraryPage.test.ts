@@ -8,13 +8,23 @@ vi.mock('@/api/mangas', () => ({
   listMangas: vi.fn(),
   deleteManga: vi.fn(),
   batchDeleteMangas: vi.fn(),
+  blacklistManga: vi.fn(),
+  unblacklistManga: vi.fn(),
+  batchBlacklistMangas: vi.fn(),
+  batchUnblacklistMangas: vi.fn(),
 }))
 vi.mock('@/api/favorites', () => ({ setFavorite: vi.fn() }))
 vi.mock('@/api/tasks', () => ({
   requestDownloads: vi.fn(),
 }))
 
-import { listMangas } from '@/api/mangas'
+import {
+  batchBlacklistMangas,
+  batchUnblacklistMangas,
+  blacklistManga,
+  listMangas,
+  unblacklistManga,
+} from '@/api/mangas'
 import { setFavorite } from '@/api/favorites'
 import { ApiError } from '@/api/client'
 import LibraryPage from '@/pages/LibraryPage.vue'
@@ -25,6 +35,7 @@ function mangaFixture(id: string, title: string): Manga {
     id,
     title,
     is_favorite: false,
+    is_blacklisted: false,
     author: '作者',
     description: null,
     chapter_count: 3,
@@ -72,6 +83,7 @@ async function mountPage(initialPath = '/library') {
 describe('LibraryPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    document.body.innerHTML = ''
   })
 
   it('渲染分页结果与总数', async () => {
@@ -238,4 +250,116 @@ describe('LibraryPage', () => {
     wrapper.unmount()
   })
 
+  it('黑名单筛选从 URL 恢复并通过 blacklist_only 查询', async () => {
+    vi.mocked(listMangas).mockResolvedValue({ items: [], page: 1, page_size: 20, total: 0, pages: 0 })
+
+    const { wrapper } = await mountPage('/library?collection=blacklist_only')
+
+    expect(listMangas).toHaveBeenCalledWith(
+      expect.objectContaining({ blacklist_only: true, favorite_only: undefined, history_only: undefined }),
+    )
+    expect(wrapper.text()).toContain('黑名单')
+    wrapper.unmount()
+  })
+
+  it('已拉黑状态优先展示并切换为解除拉黑操作', async () => {
+    const manga = { ...mangaFixture('100', '测试漫画'), is_blacklisted: true }
+    vi.mocked(listMangas).mockResolvedValue({ items: [manga], page: 1, page_size: 20, total: 1, pages: 1 })
+
+    const { wrapper } = await mountPage()
+
+    expect(wrapper.text()).toContain('已拉黑')
+    expect(wrapper.find('[aria-label="解除拉黑"]').attributes('aria-pressed')).toBe('true')
+    expect(wrapper.find('[aria-label="加入黑名单"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('单个拉黑经确认后调用 API 并刷新列表', async () => {
+    vi.mocked(listMangas).mockResolvedValue({
+      items: [mangaFixture('100', '测试漫画')], page: 1, page_size: 20, total: 1, pages: 1,
+    })
+    vi.mocked(blacklistManga).mockResolvedValue({
+      manga_id: '100', changed: true, status: 'blacklisted', task_id: 'task', deleted: false, delete_error_code: null,
+    })
+    const { wrapper } = await mountPage()
+
+    await wrapper.find('[aria-label="加入黑名单"]').trigger('click')
+    await flushPromises()
+    const confirm = Array.from(document.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim() === '确认拉黑')
+    expect(confirm).toBeTruthy()
+    confirm!.click()
+    await flushPromises()
+
+    expect(blacklistManga).toHaveBeenCalledWith('100')
+    expect(listMangas).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
+  })
+
+  it('批量拉黑选中项，批量解除仅提交已拉黑项', async () => {
+    const normal = mangaFixture('100', '正常漫画')
+    const blocked = { ...mangaFixture('200', '已拉黑漫画'), is_blacklisted: true }
+    vi.mocked(listMangas).mockResolvedValue({
+      items: [normal, blocked], page: 1, page_size: 20, total: 2, pages: 1,
+    })
+    vi.mocked(batchBlacklistMangas).mockResolvedValue({
+      items: [], changed_count: 2, unchanged_count: 0,
+    })
+    vi.mocked(batchUnblacklistMangas).mockResolvedValue({
+      items: [], changed_count: 1, unchanged_count: 0,
+    })
+    const { wrapper } = await mountPage()
+
+    await wrapper.find('[aria-label="选择 正常漫画"]').setValue(true)
+    await wrapper.find('[aria-label="选择 已拉黑漫画"]').setValue(true)
+    await flushPromises()
+
+    const batchBlacklist = wrapper.findAll('button').find((button) => button.text() === '批量拉黑')
+    expect(batchBlacklist).toBeTruthy()
+    await batchBlacklist!.trigger('click')
+    await flushPromises()
+    const confirmBatch = Array.from(document.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim() === '确认批量拉黑')
+    expect(confirmBatch).toBeTruthy()
+    confirmBatch!.click()
+    await flushPromises()
+    expect(batchBlacklistMangas).toHaveBeenCalledWith(['100', '200'])
+
+    await wrapper.find('[aria-label="选择 正常漫画"]').setValue(true)
+    await wrapper.find('[aria-label="选择 已拉黑漫画"]').setValue(true)
+    await flushPromises()
+    const batchUnblacklist = wrapper.findAll('button').find((button) => button.text() === '批量解除')
+    expect(batchUnblacklist?.attributes('disabled')).toBeUndefined()
+    await batchUnblacklist!.trigger('click')
+    await flushPromises()
+    const confirmUnblacklist = Array.from(document.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim() === '确认批量解除')
+    expect(confirmUnblacklist).toBeTruthy()
+    confirmUnblacklist!.click()
+    await flushPromises()
+    expect(batchUnblacklistMangas).toHaveBeenCalledWith(['200'])
+    wrapper.unmount()
+  })
+
+  it('单个解除拉黑经确认后调用 API', async () => {
+    const manga = { ...mangaFixture('100', '测试漫画'), is_blacklisted: true }
+    vi.mocked(listMangas).mockResolvedValue({
+      items: [manga], page: 1, page_size: 20, total: 1, pages: 1,
+    })
+    vi.mocked(unblacklistManga).mockResolvedValue({
+      manga_id: '100', changed: true, status: 'unblacklisted', task_id: 'task', deleted: false, delete_error_code: null,
+    })
+    const { wrapper } = await mountPage()
+
+    await wrapper.find('[aria-label="解除拉黑"]').trigger('click')
+    await flushPromises()
+    const confirm = Array.from(document.querySelectorAll('button'))
+      .find((button) => button.textContent?.trim() === '确认解除')
+    expect(confirm).toBeTruthy()
+    confirm!.click()
+    await flushPromises()
+
+    expect(unblacklistManga).toHaveBeenCalledWith('100')
+    wrapper.unmount()
+  })
 })
