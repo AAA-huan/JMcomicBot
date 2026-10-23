@@ -52,6 +52,7 @@ const EMPTY_READER_SETTINGS: ReadingSettings = {
   click_to_turn: false,
   reverse_click: false,
   dark_background: false,
+  prefetch_pages: 1,
   updated_at: null,
 }
 const readerForm = ref<ReadingSettings>({ ...EMPTY_READER_SETTINGS })

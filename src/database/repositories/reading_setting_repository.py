@@ -39,6 +39,7 @@ class ReadingSettingRepository(BaseRepository):
         click_to_turn: bool,
         reverse_click: bool,
         dark_background: bool,
+        prefetch_pages: int,
     ) -> ReadingSetting:
         """插入或整体更新阅读设置，返回已保存记录。"""
         with self._get_session() as session:
@@ -51,6 +52,7 @@ class ReadingSettingRepository(BaseRepository):
             setting.click_to_turn = click_to_turn
             setting.reverse_click = reverse_click
             setting.dark_background = dark_background
+            setting.prefetch_pages = prefetch_pages
             setting.updated_at = utc_now()
             session.commit()
             session.refresh(setting)

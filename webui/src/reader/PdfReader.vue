@@ -1,11 +1,13 @@
 <script setup lang="ts">
 /**
- * PDF 在线阅读器：单页/连排滚动、缩放、跳页、全屏、阅读设置与进度同步。
+ * 漫画在线阅读器：单页/连排滚动、缩放、跳页、全屏、阅读设置与进度同步。
  *
- * 渲染只覆盖当前页 ±1，离开窗口释放 Canvas；缩放/翻页取消过期渲染任务。
- * 阅读模式、连续显示、点击翻页与深色背景统一保存在后端，工具栏改动即时
- * 同步并在失败时回滚。进度 1 秒防抖写入，页面隐藏/离开时 keepalive 立即
- * 刷新；失败明确提示「进度未同步」并可重试，不阻塞阅读。
+ * 首次打开直接请求当前进度页：图片型 PDF 使用 <img> 按窗口懒加载，
+ * 完全不经过 PDF.js；非图片型 PDF 回退到 PDF.js + Canvas。连排滚动位置
+ * 由页面尺寸缓存的 offset 二分查找，不再逐页 getBoundingClientRect。
+ * 阅读模式、连续显示、点击翻页、深色背景与预加载页数统一保存在后端，
+ * 工具栏改动即时同步并在失败时回滚。进度 1 秒防抖写入，页面隐藏/离开时
+ * keepalive 立即刷新；失败明确提示「进度未同步」并可重试，不阻塞阅读。
  */
 
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch, type Directive } from 'vue'
@@ -14,13 +16,22 @@ import { onBeforeRouteLeave, useRoute, useRouter } from 'vue-router'
 import { ApiError, errorMessage } from '@/api/client'
 import { fileDownloadUrl, getReadingProgress, updateFilePageCount } from '@/api/files'
 import { getReaderSettings, updateReaderSettings } from '@/api/reader'
+import type { ReadingProgress } from '@/types/api'
 import ReaderToolbar from './ReaderToolbar.vue'
+import {
+  buildPageLayout,
+  findPageIndexAt,
+  positionAlongContent,
+  scrollPositionForPage,
+} from './layout'
+import { loadPageImageSize, pageImageUrl, probePageImage } from './pageImage'
 import {
   createProgressSync,
   type ProgressSync,
   type ProgressSyncState,
 } from './progressSync'
 import {
+  RENDER_WINDOW_RADIUS,
   clickTurnDelta,
   computeFitScale,
   isHorizontalScroll,
@@ -52,11 +63,13 @@ const loading = ref(true)
 const error = ref<ReaderError | null>(null)
 const pageNumber = ref(1)
 const pageCount = ref(0)
+const imageMode = ref(false)
 const mode = ref<ReaderMode>('normal')
 const continuous = ref(false)
 const clickToTurn = ref(false)
 const reverseClick = ref(false)
 const dark = ref(false)
+const prefetchPages = ref(RENDER_WINDOW_RADIUS)
 const settingsError = ref('')
 const zoomMode = ref<ZoomMode>('fit-width')
 const customScale = ref(1)
@@ -64,14 +77,17 @@ const fullscreen = ref(false)
 const progressState = ref<ProgressSyncState>('synced')
 const progressLoadFailed = ref(false)
 const pageCountSyncError = ref('')
-const baseSizes = ref<PageBaseSize[]>([])
+// 图片型路径初始只有首页/当前页尺寸，其余页为 null，占位使用已知尺寸
+const baseSizes = ref<Array<PageBaseSize | null>>([])
 const containerWidth = ref(0)
 const containerHeight = ref(0)
 
 const PAGE_PADDING = 16
+const FALLBACK_PAGE_SIZE: PageBaseSize = { width: 600, height: 800 }
 
 const downloadUrl = computed(() => fileDownloadUrl(fileId))
 const horizontal = computed(() => isHorizontalScroll(mode.value))
+const mangaDirection = computed(() => mode.value === 'manga')
 
 // ---------- 阅读设置 ----------
 
@@ -82,6 +98,7 @@ function applyReaderSettings(settings: ReadingSettings): void {
   clickToTurn.value = settings.click_to_turn
   reverseClick.value = settings.reverse_click
   dark.value = settings.dark_background
+  prefetchPages.value = settings.prefetch_pages
 }
 
 /** 启动时加载后端设置；401 时返回 false，由调用方中止初始化。 */
@@ -186,19 +203,45 @@ function setDark(value: boolean): void {
   })
 }
 
-// ---------- 缩放 ----------
+function setPrefetchPages(value: number): void {
+  if (prefetchPages.value === value) return
+  const previous = prefetchPages.value
+  prefetchPages.value = value
+  alignCurrentPage()
+  void persistReaderSettings({ prefetch_pages: value }, () => {
+    prefetchPages.value = previous
+    alignCurrentPage()
+  })
+}
+
+// 预加载页数变化会改变渲染窗口；连排时保持当前页位置不跳动
+watch(prefetchPages, () => {
+  alignCurrentPage()
+})
+
+// ---------- 缩放与页面尺寸 ----------
+
+/** 已知页面尺寸；全部未知时使用固定占位值。 */
+const placeholderSize = computed<PageBaseSize>(() => {
+  const known = baseSizes.value.find(
+    (size): size is PageBaseSize => size !== null,
+  )
+  return known ?? FALLBACK_PAGE_SIZE
+})
+
+/** 单页/占位使用的基准尺寸。 */
+function baseSizeOf(target: number): PageBaseSize {
+  return baseSizes.value[target - 1] ?? placeholderSize.value
+}
 
 /** 适应计算的目标页面尺寸：单页用当前页，连排用最大页保证不溢出。 */
 const fitBase = computed<PageBaseSize | null>(() => {
-  const sizes = baseSizes.value
-  if (sizes.length === 0) return null
-  if (!continuous.value) {
-    const current = sizes[pageNumber.value - 1]
-    return current ?? null
-  }
+  if (pageCount.value === 0) return null
+  if (!continuous.value) return baseSizeOf(pageNumber.value)
   let width = 0
   let height = 0
-  for (const size of sizes) {
+  for (let page = 1; page <= pageCount.value; page += 1) {
+    const size = baseSizeOf(page)
     width = Math.max(width, size.width)
     height = Math.max(height, size.height)
   }
@@ -214,23 +257,57 @@ const scale = computed(() => {
   return computeFitScale(base, availableWidth, availableHeight, zoomMode.value)
 })
 
-/** 连排占位尺寸，未进入渲染窗口的页面仍保留布局高度/宽度。 */
-const pageSizes = computed<PageBaseSize[]>(() =>
-  baseSizes.value.map((size) => ({
-    width: size.width * scale.value,
-    height: size.height * scale.value,
-  })),
+/** 连排占位尺寸，未加载真实尺寸的页面仍保留布局高度/宽度。 */
+const pageSizes = computed<PageBaseSize[]>(() => {
+  const sizes: PageBaseSize[] = []
+  for (let page = 1; page <= pageCount.value; page += 1) {
+    const base = baseSizeOf(page)
+    sizes.push({
+      width: base.width * scale.value,
+      height: base.height * scale.value,
+    })
+  }
+  return sizes
+})
+
+/** 每页沿滚动方向的起始偏移；页面尺寸或缩放变化时整体重算一次。 */
+const pageLayout = computed(() =>
+  buildPageLayout(pageSizes.value, horizontal.value, pageGap(continuous.value)),
 )
+const pageOffsets = computed(() => pageLayout.value.offsets)
 
 const windowPages = computed(() =>
   continuous.value
-    ? windowPagesFor(pageNumber.value, pageCount.value)
+    ? windowPagesFor(pageNumber.value, pageCount.value, prefetchPages.value)
     : [pageNumber.value],
 )
+
+/** 某页图片的显示样式：使用缩放后的占位尺寸，浏览器只负责解码。 */
+function pageStyle(target: number): Record<string, string> {
+  const size = pageSizes.value[target - 1]
+  if (!size) return {}
+  return { width: `${size.width}px`, height: `${size.height}px` }
+}
+
+/** <img> 加载完成后记录真实尺寸，驱动占位与 offset 自动更新。 */
+function onPageLoad(target: number, event: Event): void {
+  const image = event.target
+  if (!(image instanceof HTMLImageElement)) return
+  const width = image.naturalWidth
+  const height = image.naturalHeight
+  if (width <= 0 || height <= 0) return
+  const current = baseSizes.value[target - 1]
+  if (current?.width === width && current.height === height) return
+  const updated = baseSizes.value.slice()
+  updated[target - 1] = { width, height }
+  baseSizes.value = updated
+}
 
 // ---------- 渲染 ----------
 
 async function renderWindow(): Promise<void> {
+  // 图片型路径完全由 windowPages + v-if 管理 <img> 挂载
+  if (imageMode.value) return
   if (!doc.value || baseSizes.value.length === 0) return
   try {
     await syncWindow(windowPages.value, scale.value)
@@ -240,7 +317,7 @@ async function renderWindow(): Promise<void> {
 }
 
 watch(
-  [windowPages, scale],
+  [windowPages, scale, imageMode],
   () => {
     void renderWindow()
   },
@@ -298,15 +375,6 @@ const vReaderScroll: Directive<HTMLElement> = {
   },
 }
 
-/** 在连排容器内查找指定页的占位元素。 */
-function pageElement(target: number): HTMLElement | null {
-  return (
-    scrollElement?.querySelector<HTMLElement>(
-      `[data-reader-page="${target}"]`,
-    ) ?? null
-  )
-}
-
 /** 取消待执行的横排自动居中，避免与主动跳页冲突。 */
 function cancelHorizontalSnap(): void {
   if (snapTimer === null) return
@@ -317,30 +385,32 @@ function cancelHorizontalSnap(): void {
 /**
  * 连排模式：把目标页对齐到滚动容器。
  *
- * 普通/日漫横排把页面居中，保证停止滑动或点击后当前页完整落在视口中央；
- * 滚动模式保持原有行为，把目标页顶部对齐到容器起始位置。
+ * 普通/日漫横排把页面居中；滚动模式把目标页顶部对齐到容器起始位置。
+ * 位置全部由缓存的 pageLayout 计算，不读取页面元素的位置。
  */
 function scrollToPage(target: number, behavior: 'auto' | 'smooth' = 'auto'): void {
   cancelHorizontalSnap()
   const container = scrollElement
-  const element = pageElement(target)
-  if (!container || !element) return
+  const index = target - 1
+  if (!container || index < 0 || index >= pageOffsets.value.length) return
   if (horizontal.value) {
-    const centeredLeft =
-      element.offsetLeft +
-      element.offsetWidth / 2 -
-      container.clientWidth / 2
-    const maxLeft = Math.max(container.scrollWidth - container.clientWidth, 0)
-    container.scrollTo({
-      left: Math.min(Math.max(centeredLeft, 0), maxLeft),
-      behavior,
-    })
+    const left = scrollPositionForPage(
+      pageLayout.value,
+      index,
+      container.clientWidth,
+      mangaDirection.value,
+      true,
+    )
+    container.scrollTo({ left, behavior })
   } else {
-    const gap = pageGap(true)
-    container.scrollTo({
-      top: Math.max(element.offsetTop - gap, 0),
-      behavior,
-    })
+    const top = scrollPositionForPage(
+      pageLayout.value,
+      index,
+      container.clientHeight,
+      false,
+      false,
+    )
+    container.scrollTo({ top, behavior })
   }
 }
 
@@ -367,40 +437,34 @@ function onScroll(): void {
   })
 }
 
-/** 连排模式：取视口中心所在的页面为当前页。 */
+/**
+ * 连排模式：取视口中心所在的页面为当前页。
+ *
+ * 只读取容器滚动位置与尺寸，对缓存的 pageOffsets 二分查找，复杂度
+ * O(log n)，滚动过程中不触发页面元素 reflow。
+ */
 function updateCurrentFromScroll(): void {
   const container = scrollElement
   if (!container || !continuous.value) return
-  const containerRect = container.getBoundingClientRect()
-  const centerX = containerRect.left + container.clientWidth / 2
-  const centerY = containerRect.top + container.clientHeight / 2
-  let current = pageNumber.value
-  let nearestDistance = Number.POSITIVE_INFINITY
-  for (const element of container.querySelectorAll<HTMLElement>(
-    '[data-reader-page]',
-  )) {
-    const page = Number(element.dataset.readerPage)
-    if (!Number.isInteger(page)) continue
-    const rect = element.getBoundingClientRect()
-    const inside = horizontal.value
-      ? centerX >= rect.left && centerX <= rect.right
-      : centerY >= rect.top && centerY <= rect.bottom
-    if (inside) {
-      current = page
-      break
-    }
-    const pageCenter = horizontal.value
-      ? rect.left + rect.width / 2
-      : rect.top + rect.height / 2
-    const distance = Math.abs(
-      (horizontal.value ? centerX : centerY) - pageCenter,
-    )
-    if (distance < nearestDistance) {
-      nearestDistance = distance
-      current = page
-    }
+  const layout = pageLayout.value
+  if (layout.offsets.length === 0) return
+  const viewportLength = horizontal.value
+    ? container.clientWidth
+    : container.clientHeight
+  if (viewportLength <= 0) return
+  const scrollOffset = horizontal.value
+    ? container.scrollLeft
+    : container.scrollTop
+  const position = positionAlongContent(
+    layout,
+    scrollOffset,
+    viewportLength,
+    mangaDirection.value,
+  )
+  const index = findPageIndexAt(layout, position)
+  if (index >= 0 && index + 1 !== pageNumber.value) {
+    pageNumber.value = index + 1
   }
-  if (current !== pageNumber.value) pageNumber.value = current
 }
 
 function goToPage(target: number): void {
@@ -526,29 +590,39 @@ function retryProgress(): void {
   void progressSync?.retry()
 }
 
-/** 读取服务端进度并跳转；读取失败明确提示而不是假装从头开始。 */
-async function applyProgress(): Promise<void> {
-  const totalPages = pageCount.value
-  let target = 1
+/** 读取服务端进度；401 跳转登录，其他失败明确标记但不阻塞阅读。 */
+async function fetchProgress(): Promise<ReadingProgress | null> {
   try {
     const progress = await getReadingProgress(fileId)
-    if (progress.page_number > totalPages) {
-      // 数据库进度超过实际页数（文件被替换等）时回到最后一页
-      target = totalPages
-    } else if (progress.page_number >= 1) {
-      target = progress.page_number
-    }
     progressLoadFailed.value = false
+    return progress
   } catch (progressError) {
     if (progressError instanceof ApiError && progressError.status === 401) {
       redirectToLogin()
-      return
+      return null
     }
     // 读取失败不阻塞阅读，但明确标记，可重试；期间新进度仍会写入
     progressLoadFailed.value = true
-    return
+    return null
+  }
+}
+
+/** 把已读取的进度应用到当前页码；页数变化时夹紧到有效范围。 */
+function applyProgress(progress: ReadingProgress | null): void {
+  if (!progress) return
+  const totalPages = pageCount.value
+  let target = 1
+  if (progress.page_number > totalPages) {
+    // 数据库进度超过实际页数（文件被替换等）时回到最后一页
+    target = totalPages
+  } else if (progress.page_number >= 1) {
+    target = progress.page_number
   }
   goToPage(target)
+}
+
+async function reloadProgress(): Promise<void> {
+  applyProgress(await fetchProgress())
 }
 
 /** 页数在 PDF 加载后立即同步，失败时显示具体错误并允许重试。 */
@@ -559,10 +633,6 @@ async function syncPageCount(): Promise<void> {
   } catch (syncError) {
     pageCountSyncError.value = errorMessage(syncError)
   }
-}
-
-async function reloadProgress(): Promise<void> {
-  await applyProgress()
 }
 
 // ---------- 初始化与销毁 ----------
@@ -584,14 +654,49 @@ async function loadBaseSizes(totalPages: number): Promise<PageBaseSize[]> {
   return sizes
 }
 
-async function initialize(): Promise<void> {
-  loading.value = true
-  error.value = null
-  progressLoadFailed.value = false
-  if (!(await loadReaderSettings())) {
-    loading.value = false
-    return
+function startProgressSync(): void {
+  // 进度服务在恢复页码之后创建：首次恢复不触发写回
+  progressSync = createProgressSync({
+    fileId,
+    getPage: () => pageNumber.value,
+    getPageCount: () => pageCount.value,
+    onStateChange: (state) => {
+      progressState.value = state
+    },
+  })
+}
+
+/** 图片型路径：只用 <img> 渲染，不加载 PDF.js，也不使用渲染窗口。 */
+async function initializeImageMode(
+  progress: ReadingProgress,
+  probeSize: PageBaseSize,
+): Promise<void> {
+  imageMode.value = true
+  pageCount.value = progress.page_count
+  const sizes: Array<PageBaseSize | null> = Array.from(
+    { length: pageCount.value },
+    () => null,
+  )
+  const target = Math.min(Math.max(progress.page_number, 1), pageCount.value)
+  sizes[target - 1] = probeSize
+  if (target !== 1) {
+    // 首页尺寸作为其余未知页的占位基准；失败时退回当前页尺寸
+    const firstSize = await loadPageImageSize(fileId, 1)
+    if (firstSize) sizes[0] = firstSize
   }
+  baseSizes.value = sizes
+  pageNumber.value = target
+  startProgressSync()
+  loading.value = false
+  await nextTick()
+  if (continuous.value) {
+    scrollToPage(pageNumber.value)
+  }
+}
+
+/** PDF.js 回退路径：非图片型 PDF 保留原有 Canvas 渲染与全量尺寸读取。 */
+async function initializePdfMode(progress: ReadingProgress | null): Promise<void> {
+  imageMode.value = false
   const loadError = await load(fileId)
   if (loadError) {
     loading.value = false
@@ -617,22 +722,46 @@ async function initialize(): Promise<void> {
     error.value = mapPdfError(layoutError)
     return
   }
-  // 进度服务在恢复页码之后创建：首次恢复不触发写回
-  await applyProgress()
-  progressSync = createProgressSync({
-    fileId,
-    getPage: () => pageNumber.value,
-    getPageCount: () => pageCount.value,
-    onStateChange: (state) => {
-      progressState.value = state
-    },
-  })
+  applyProgress(progress)
+  startProgressSync()
   loading.value = false
   await nextTick()
   if (continuous.value) {
     scrollToPage(pageNumber.value)
   }
   void renderWindow()
+}
+
+async function initialize(): Promise<void> {
+  loading.value = true
+  error.value = null
+  progressLoadFailed.value = false
+  imageMode.value = false
+  pageCount.value = 0
+  baseSizes.value = []
+  if (!(await loadReaderSettings())) {
+    loading.value = false
+    return
+  }
+
+  // 首次页请求即探测：200 进入图片型路径，404/415 回退 PDF.js
+  const progress = await fetchProgress()
+  const probePage = progress?.page_number ?? 1
+  try {
+    const probe = await probePageImage(fileId, probePage)
+    if (probe.kind === 'image' && progress && progress.page_count > 0) {
+      await initializeImageMode(progress, probe.size)
+      return
+    }
+  } catch (probeError) {
+    if (probeError instanceof ApiError && probeError.status === 401) {
+      redirectToLogin()
+      loading.value = false
+      return
+    }
+    // 探测失败不直接报错：回退 PDF.js，由其给出统一的中文错误提示
+  }
+  await initializePdfMode(progress)
 }
 
 function goBack(): void {
@@ -695,6 +824,7 @@ onMounted(() => {
       :continuous="continuous"
       :click-to-turn="clickToTurn"
       :reverse-click="reverseClick"
+      :prefetch-pages="prefetchPages"
       :zoom-mode="zoomMode"
       :zoom-percent="Math.round(scale * 100)"
       :dark="dark"
@@ -709,6 +839,7 @@ onMounted(() => {
       @update:continuous="setContinuous"
       @update:click-to-turn="setClickToTurn"
       @update:reverse-click="setReverseClick"
+      @update:prefetch-pages="setPrefetchPages"
       @update:zoom-mode="setZoomMode"
       @zoom-percent="setZoomPercent"
       @update:dark="setDark"
@@ -729,7 +860,7 @@ onMounted(() => {
 
     <div v-else-if="loading" class="reader-status">
       <v-progress-circular indeterminate color="primary" size="48" />
-      <p class="text-body-2 mt-3">正在加载 PDF…</p>
+      <p class="text-body-2 mt-3">正在加载漫画…</p>
     </div>
 
     <!-- 不连续：一次一页，按模式响应滑动、键盘与点击翻页 -->
@@ -743,11 +874,20 @@ onMounted(() => {
       @click="onReaderClick"
     >
       <div class="reader-single">
-        <canvas :key="pageNumber" v-reader-canvas="{ pageNumber }" />
+        <img
+          v-if="imageMode"
+          :key="`image-${pageNumber}`"
+          :src="pageImageUrl(fileId, pageNumber)"
+          :style="pageStyle(pageNumber)"
+          class="reader-page-image"
+          :alt="`第 ${pageNumber} 页`"
+          @load="onPageLoad(pageNumber, $event)"
+        >
+        <canvas v-else :key="pageNumber" v-reader-canvas="{ pageNumber }" />
       </div>
     </div>
 
-    <!-- 连排：普通/日漫水平横排，滚动模式垂直纵排；只渲染当前页 ±1 -->
+    <!-- 连排：图片型按预加载窗口挂载 <img>；PDF.js 回退路径挂载 Canvas -->
     <div
       v-else
       v-reader-size
@@ -760,7 +900,7 @@ onMounted(() => {
         class="reader-pages"
         :class="{
           'reader-pages--horizontal': horizontal,
-          'reader-pages--reverse': mode === 'manga',
+          'reader-pages--reverse': mangaDirection,
         }"
         :style="{ '--reader-page-gap': `${pageGap(true)}px` }"
       >
@@ -771,8 +911,15 @@ onMounted(() => {
           :data-reader-page="index + 1"
           :style="{ width: `${pageSize.width}px`, height: `${pageSize.height}px` }"
         >
+          <img
+            v-if="imageMode && windowPages.includes(index + 1)"
+            :src="pageImageUrl(fileId, index + 1)"
+            class="reader-page-image"
+            :alt="`第 ${index + 1} 页`"
+            @load="onPageLoad(index + 1, $event)"
+          >
           <canvas
-            v-if="windowPages.includes(index + 1)"
+            v-else-if="!imageMode && windowPages.includes(index + 1)"
             v-reader-canvas="{ pageNumber: index + 1 }"
           />
         </div>
@@ -832,6 +979,14 @@ onMounted(() => {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
 }
 
+.reader-single .reader-page-image {
+  margin: auto;
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: contain;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+
 .reader-pages {
   --reader-page-gap: 0px;
   box-sizing: border-box;
@@ -863,8 +1018,15 @@ onMounted(() => {
   justify-content: center;
 }
 
-.reader-page canvas {
+.reader-page canvas,
+.reader-page .reader-page-image {
   max-width: 100%;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+
+.reader-page .reader-page-image {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
 }
 </style>

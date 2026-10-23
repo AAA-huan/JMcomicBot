@@ -8,6 +8,7 @@ from src.service import (
     DownloadService,
     MangaBlacklistService,
     MangaService,
+    PageImageService,
     PermissionService,
     ReadingProgressService,
     ReadingSettingService,
@@ -49,6 +50,7 @@ class WebDependencies:  # pylint: disable=too-many-instance-attributes
     scan_service: ScanService
     reading_progress_service: ReadingProgressService
     reading_setting_service: ReadingSettingService
+    page_image_service: PageImageService
     event_bus: WebEventBus
     download_progress_tracker: DownloadProgressTracker
     audit_query_service: AuditQueryService

@@ -13,7 +13,7 @@ from src.database.migrations import upgrade_schema
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 LEGACY_REVISION = "0007_unique_relative_file_path"
-HEAD_REVISION = "0029_add_manga_status_favorited"
+HEAD_REVISION = "0030_add_reading_setting_prefetch_pages"
 
 
 def _engine_for(tmp_path: Path) -> Engine:
