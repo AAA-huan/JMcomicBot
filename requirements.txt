@@ -20,6 +20,7 @@ pyyaml>=6.0             # option.yml 网页编辑校验与下载器配置解析
 
 # WebUI 后端与认证依赖（生产必需）
 fastapi>=0.118.0        # Web API 框架
+python-multipart>=0.0.32 # 数据导入 zip 的 multipart 上传解析
 uvicorn>=0.37.0         # ASGI 服务端
 websockets>=15.0        # Uvicorn WebSocket 服务端实现，事件推送必需
 argon2-cffi>=25.1.0     # 管理员密码 Argon2 哈希

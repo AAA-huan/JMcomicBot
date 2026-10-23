@@ -5,10 +5,19 @@ import { createVuetify } from 'vuetify'
 vi.mock('@/api/maintenance', () => ({
   scanLibrary: vi.fn(), repairLibrary: vi.fn(), verifyLibrary: vi.fn(),
   listBackups: vi.fn(), createBackup: vi.fn(),
+  exportData: vi.fn(), validateDataImport: vi.fn(), applyDataImport: vi.fn(),
 }))
 vi.mock('@/api/eventStream', () => ({ useEventSubscription: vi.fn() }))
 
-import { listBackups, repairLibrary, scanLibrary, verifyLibrary } from '@/api/maintenance'
+import {
+  applyDataImport,
+  exportData,
+  listBackups,
+  repairLibrary,
+  scanLibrary,
+  validateDataImport,
+  verifyLibrary,
+} from '@/api/maintenance'
 import MaintenancePage from './MaintenancePage.vue'
 
 describe('维护页参数', () => {
@@ -56,6 +65,115 @@ describe('维护页参数', () => {
     await flushPromises()
     expect(verifyLibrary).toHaveBeenCalledWith(null)
     expect(wrapper.text()).not.toContain('请输入 1 到 100 个漫画 ID')
+    wrapper.unmount()
+  })
+})
+
+describe('维护页数据迁移', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(listBackups).mockResolvedValue({ items: [], total: 0, pages: 0, page: 1, page_size: 10 })
+  })
+
+  it('导出数据触发浏览器下载并提示文件名', async () => {
+    vi.mocked(exportData).mockResolvedValue({
+      blob: new Blob(['zip']),
+      filename: 'data-export-20261023-120000-schema0027_reading_setting.zip',
+    })
+    const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
+    const wrapper = mount(MaintenancePage, { global: { plugins: [createVuetify()] } })
+
+    await wrapper.findAll('button').find((button) => button.text().includes('导出数据'))!.trigger('click')
+    await flushPromises()
+
+    expect(exportData).toHaveBeenCalledTimes(1)
+    expect(click).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('数据已导出：data-export-20261023-120000-schema0027_reading_setting.zip')
+    click.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('选择 zip 后校验并展示 schema、表行数与路径差异', async () => {
+    vi.mocked(validateDataImport).mockResolvedValue({
+      format_version: 1,
+      schema_revision: '0026_manga_blacklist',
+      exported_at: '2026-10-23T12:00:00Z',
+      db_filename: 'main-20261023-120000.db',
+      db_sha256: 'a'.repeat(64),
+      table_counts: { manga: 12, manga_favorite: 3 },
+      export_env: { db_path: './data', manga_download_path: './downloads' },
+      current_schema_revision: '0027_reading_setting',
+      path_warnings: ['导出环境下载目录为 ./downloads，当前为 ./other-downloads，请确保 PDF 已拷贝到当前目录或调整配置'],
+    })
+    const wrapper = mount(MaintenancePage, {
+      attachTo: document.body,
+      global: { plugins: [createVuetify()] },
+    })
+    const file = new File(['zip'], 'data.zip', { type: 'application/zip' })
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(validateDataImport).toHaveBeenCalledWith(file)
+    expect(wrapper.text()).toContain('导出 schema：0026_manga_blacklist')
+    expect(wrapper.text()).toContain('当前 schema：0027_reading_setting')
+    expect(wrapper.text()).toContain('漫画')
+    expect(wrapper.text()).toContain('12')
+    expect(wrapper.text()).toContain('请确保 PDF 已拷贝到当前目录')
+    wrapper.unmount()
+  })
+
+  it('二次确认后使用同一文件执行导入并提示重启', async () => {
+    vi.mocked(validateDataImport).mockResolvedValue({
+      format_version: 1,
+      schema_revision: '0027_reading_setting',
+      exported_at: '2026-10-23T12:00:00Z',
+      db_filename: 'main-20261023-120000.db',
+      db_sha256: 'a'.repeat(64),
+      table_counts: { manga: 1 },
+      export_env: { db_path: './data', manga_download_path: './downloads' },
+      current_schema_revision: '0027_reading_setting',
+      path_warnings: [],
+    })
+    vi.mocked(applyDataImport).mockResolvedValue({ restart: true })
+    const wrapper = mount(MaintenancePage, {
+      attachTo: document.body,
+      global: { plugins: [createVuetify()] },
+    })
+    const file = new File(['zip'], 'data.zip', { type: 'application/zip' })
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+    await input.trigger('change')
+    await flushPromises()
+
+    await wrapper.findAll('button').find((button) => button.text().includes('确认导入'))!.trigger('click')
+    await flushPromises()
+    expect(document.body.textContent).toContain('确认导入全部数据？')
+    const confirmButton = Array.from(document.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('确认导入并重启'),
+    )
+    expect(confirmButton).toBeTruthy()
+    confirmButton!.click()
+    await flushPromises()
+
+    expect(applyDataImport).toHaveBeenCalledWith(file)
+    expect(wrapper.text()).toContain('数据库导入完成，服务正在重启')
+    wrapper.unmount()
+  })
+
+  it('校验失败的 zip 展示错误且不保留待导入文件', async () => {
+    vi.mocked(validateDataImport).mockRejectedValue(new Error('结构错误'))
+    const wrapper = mount(MaintenancePage, { global: { plugins: [createVuetify()] } })
+    const file = new File(['zip'], 'data.zip', { type: 'application/zip' })
+    const input = wrapper.find('input[type="file"]')
+    Object.defineProperty(input.element, 'files', { value: [file], configurable: true })
+    await input.trigger('change')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('网络请求失败：结构错误')
+    expect(wrapper.find('button').exists()).toBe(true)
+    expect(wrapper.text()).not.toContain('确认导入')
     wrapper.unmount()
   })
 })

@@ -2,6 +2,7 @@
 
 from src.service.cleanup_service import CleanupService
 from src.service.contracts import DownloadNotifier, DownloadService, TaskService
+from src.service.data_migration_service import DataImportError, DataMigrationService
 from src.service.database_maintenance_service import (
     BackupConflictError,
     BackupDownloadError,
@@ -30,8 +31,10 @@ from src.service.results import (
     BackupResult,
     BlacklistBatchResult,
     BlacklistOutcome,
+    DataExportResult,
     DownloadCancellationResult,
     DownloadRecoveryResult,
+    ImportPreview,
     MangaBlacklistItem,
     MangaDeleteOutcome,
     MangaDeleteResult,
@@ -53,11 +56,15 @@ __all__ = [
     "CachedGroup",
     "CachedUser",
     "CleanupService",
+    "DataExportResult",
+    "DataImportError",
+    "DataMigrationService",
     "DatabaseMaintenanceService",
     "DownloadCancellationResult",
     "DownloadNotifier",
     "DownloadRecoveryResult",
     "DownloadQueueService",
+    "ImportPreview",
     "DownloadService",
     "MangaBlacklistItem",
     "MangaBlacklistService",

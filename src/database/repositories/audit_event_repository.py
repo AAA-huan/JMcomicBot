@@ -28,6 +28,8 @@ _LONG_RETENTION_PREFIXES = (
     "setting.changed",
     "bot.shutdown_",
     "web.login_",
+    "data.exported",
+    "data.imported",
     "migrat",
 )
 
@@ -39,6 +41,7 @@ _AUDIT_METADATA_KEYS = {
     "changed_fields",
     "cleaned_count",
     "corrupted_count",
+    "db_filename",
     "delete_error_code",
     "delete_skipped",
     "delete_succeeded",
@@ -46,6 +49,7 @@ _AUDIT_METADATA_KEYS = {
     "duration_ms",
     "failed_count",
     "file_count",
+    "file_size_bytes",
     "missing_count",
     "new_count",
     "page_count",
@@ -53,6 +57,7 @@ _AUDIT_METADATA_KEYS = {
     "recovered_count",
     "resumed_count",
     "retry_count",
+    "schema_revision",
     "scope",
     "updated_count",
 }

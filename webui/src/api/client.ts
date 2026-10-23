@@ -50,6 +50,48 @@ export interface RequestOptions {
   query?: Record<string, string | number | boolean | null | undefined>
 }
 
+/** 从 Content-Disposition 中提取附件文件名。 */
+function filenameFromDisposition(value: string | null): string | null {
+  if (!value) return null
+  const encoded = /filename\*=UTF-8''([^;]+)/i.exec(value)
+  if (encoded) return decodeURIComponent(encoded[1])
+  const quoted = /filename="([^"]+)"/i.exec(value)
+  if (quoted) return quoted[1]
+  const plain = /filename=([^;]+)/i.exec(value)
+  return plain ? plain[1].trim() : null
+}
+
+/** 把失败响应转换为带稳定错误码的 ApiError。 */
+async function parseErrorResponse(response: Response): Promise<ApiError> {
+  const text = await response.text()
+  let payload: unknown = null
+  if (text) {
+    try {
+      payload = JSON.parse(text)
+    } catch {
+      payload = null
+    }
+  }
+  const errorPayload = (payload ?? {}) as {
+    code?: string
+    message?: string
+    details?: unknown
+  }
+  return new ApiError(
+    response.status,
+    errorPayload.code ?? 'REQUEST_FAILED',
+    errorPayload.message ?? '请求失败，请稍后重试',
+    errorPayload.details ?? null,
+  )
+}
+
+function handleUnauthorized(path: string, error: ApiError): void {
+  // 会话过期统一跳转登录；登录/状态接口的 401 由页面自行处理
+  if (error.status === 401 && path !== '/auth/login' && path !== '/auth/status') {
+    unauthorizedHandler?.()
+  }
+}
+
 export async function apiRequest<T>(path: string, options: RequestOptions = {}): Promise<T> {
   const method = options.method ?? 'GET'
   const url = new URL(`${API_BASE}${path}`, window.location.origin)
@@ -76,36 +118,73 @@ export async function apiRequest<T>(path: string, options: RequestOptions = {}):
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   })
 
-  const text = await response.text()
-  let payload: unknown = null
-  if (text) {
-    try {
-      payload = JSON.parse(text)
-    } catch {
-      payload = null
-    }
-  }
-
   if (!response.ok) {
-    const errorPayload = (payload ?? {}) as {
-      code?: string
-      message?: string
-      details?: unknown
-    }
-    const error = new ApiError(
-      response.status,
-      errorPayload.code ?? 'REQUEST_FAILED',
-      errorPayload.message ?? '请求失败，请稍后重试',
-      errorPayload.details ?? null,
-    )
-    // 会话过期统一跳转登录；登录/状态接口的 401 由页面自行处理
-    if (response.status === 401 && path !== '/auth/login' && path !== '/auth/status') {
-      unauthorizedHandler?.()
-    }
+    const error = await parseErrorResponse(response)
+    handleUnauthorized(path, error)
     throw error
   }
 
-  return payload as T
+  const text = await response.text()
+  if (!text) return null as T
+  try {
+    return JSON.parse(text) as T
+  } catch {
+    return null as T
+  }
+}
+
+/** 上传 multipart 表单，浏览器自动设置 boundary，统一携带 CSRF 头。 */
+export async function apiUpload<T>(path: string, formData: FormData): Promise<T> {
+  const url = new URL(`${API_BASE}${path}`, window.location.origin)
+  const headers: Record<string, string> = { Accept: 'application/json' }
+  const token = readCookie(CSRF_COOKIE)
+  if (token) headers[CSRF_HEADER] = token
+
+  const response = await fetch(url.toString(), {
+    method: 'POST',
+    headers,
+    credentials: 'same-origin',
+    body: formData,
+  })
+  if (!response.ok) {
+    const error = await parseErrorResponse(response)
+    handleUnauthorized(path, error)
+    throw error
+  }
+  const text = await response.text()
+  return (text ? JSON.parse(text) : null) as T
+}
+
+export interface DownloadedFile {
+  blob: Blob
+  filename: string | null
+}
+
+/** 以流式请求下载二进制文件，并解析服务端建议的文件名。 */
+export async function apiDownload(
+  path: string,
+  method: 'GET' | 'POST' = 'GET',
+): Promise<DownloadedFile> {
+  const url = new URL(`${API_BASE}${path}`, window.location.origin)
+  const headers: Record<string, string> = { Accept: 'application/octet-stream' }
+  if (!SAFE_METHODS.has(method)) {
+    const token = readCookie(CSRF_COOKIE)
+    if (token) headers[CSRF_HEADER] = token
+  }
+  const response = await fetch(url.toString(), {
+    method,
+    headers,
+    credentials: 'same-origin',
+  })
+  if (!response.ok) {
+    const error = await parseErrorResponse(response)
+    handleUnauthorized(path, error)
+    throw error
+  }
+  return {
+    blob: await response.blob(),
+    filename: filenameFromDisposition(response.headers.get('content-disposition')),
+  }
 }
 
 /** 把任意异常转换为适合界面展示的中文提示。 */
