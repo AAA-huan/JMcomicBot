@@ -183,6 +183,65 @@ test('连续滚动模式可用且不横向滚动、渲染窗口受限', async ({
   expect(overflow).toBeLessThanOrEqual(0)
 })
 
+test('连续横排停止滚动后自动把当前页居中', async ({ page }) => {
+  await login(page)
+  await openReader(page)
+
+  await page.getByRole('button', { name: '阅读设置' }).click()
+  const continuousResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes('/reader/settings') &&
+      response.request().method() === 'PUT',
+  )
+  await page
+    .locator('.v-overlay--active')
+    .getByText('连续翻页', { exact: true })
+    .click()
+  await continuousResponse
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.reader-pages--horizontal')).toBeVisible()
+  await page.waitForTimeout(300)
+
+  const pageCount = await page.locator('[data-reader-page]').count()
+  expect(pageCount).toBeGreaterThanOrEqual(2)
+
+  // 滚动到第二页中心附近后停下，触发滚动结束防抖
+  await page.locator('.reader-scroll').evaluate((element) => {
+    const secondPage = element.querySelector<HTMLElement>(
+      '[data-reader-page="2"]',
+    )
+    if (!secondPage) throw new Error('缺少第二页')
+    const centered =
+      secondPage.offsetLeft +
+      secondPage.offsetWidth / 2 -
+      element.clientWidth / 2
+    element.scrollLeft = Math.max(centered + 40, 0)
+    element.dispatchEvent(new Event('scroll'))
+  })
+  await page.waitForTimeout(700)
+
+  const centered = await page.locator('.reader-scroll').evaluate((element) => {
+    const containerRect = element.getBoundingClientRect()
+    const center = containerRect.left + element.clientWidth / 2
+    const pages = Array.from(
+      element.querySelectorAll<HTMLElement>('[data-reader-page]'),
+    )
+    const current = pages.find((candidate) => {
+      const rect = candidate.getBoundingClientRect()
+      return rect.left <= center && rect.right >= center
+    })
+    if (!current) throw new Error('视口中心未落在任何页面内')
+    const rect = current.getBoundingClientRect()
+    return {
+      page: Number(current.dataset.readerPage),
+      delta: Math.abs(rect.left + rect.width / 2 - center),
+    }
+  })
+
+  expect(centered.page).toBe(2)
+  expect(centered.delta).toBeLessThan(2)
+})
+
 test('设置页保存的阅读偏好会在阅读器生效，工具栏修改后回写并重启保持', async ({ page }, testInfo) => {
   await login(page)
   await resetReaderSettings(page)
@@ -284,6 +343,53 @@ test('设置页保存的阅读偏好会在阅读器生效，工具栏修改后�
   await resetReaderSettings(page)
 })
 
+test('全屏下仍能打开阅读设置并退出全屏', async ({ page }, testInfo) => {
+  await login(page)
+  await openReader(page)
+  const isMobile = testInfo.project.name.startsWith('mobile')
+
+  if (isMobile) {
+    await page.getByRole('button', { name: '阅读设置' }).click()
+    await clickMenuItem(page, '进入全屏')
+  } else {
+    await page.getByRole('button', { name: '进入全屏' }).click()
+  }
+  await expect
+    .poll(() => page.evaluate(() => document.fullscreenElement !== null))
+    .toBe(true)
+
+  // 全屏下菜单必须挂到阅读器根节点内，否则弹层会留在全屏元素之外
+  await page.getByRole('button', { name: '阅读设置' }).click()
+  await expect(
+    page.locator('.v-overlay--active').getByText('深色背景', { exact: true }),
+  ).toBeVisible()
+
+  const darkResponse = page.waitForResponse(
+    (response) =>
+      response.url().includes('/reader/settings') &&
+      response.request().method() === 'PUT',
+  )
+  await page
+    .locator('.v-overlay--active')
+    .getByText('深色背景', { exact: true })
+    .click()
+  await darkResponse
+  await expect(page.locator('.reader-root--dark')).toBeVisible()
+  await page.keyboard.press('Escape')
+  await expect(page.locator('.v-overlay--active')).toHaveCount(0)
+
+  if (isMobile) {
+    await page.getByRole('button', { name: '阅读设置' }).click()
+    await clickMenuItem(page, '退出全屏')
+  } else {
+    await page.getByRole('button', { name: '退出全屏' }).click()
+  }
+  await expect
+    .poll(() => page.evaluate(() => document.fullscreenElement === null))
+    .toBe(true)
+  await resetReaderSettings(page)
+})
+
 test('损坏 PDF 显示明确的中文错误界面', async ({ page }) => {
   await login(page)
   await page.goto('/library/900004')
@@ -309,13 +415,13 @@ test('移动端单页模式左右滑动翻页', async ({ page }, testInfo) => {
     const startTouch = new Touch({
       identifier: 1,
       target: element,
-      clientX: 60,
+      clientX: 300,
       clientY: 240,
     })
     const endTouch = new Touch({
       identifier: 2,
       target: element,
-      clientX: 300,
+      clientX: 60,
       clientY: 245,
     })
     element.dispatchEvent(

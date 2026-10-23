@@ -121,7 +121,7 @@ async function persistReaderSettings(
   }
 }
 
-/** 布局或滚动轴变化后，把当前页重新对齐到容器起始位置。 */
+/** 布局或滚动轴变化后，把当前页重新对齐到连排容器。 */
 function alignCurrentPage(): void {
   if (!continuous.value) return
   void nextTick(() => scrollToPage(pageNumber.value))
@@ -129,6 +129,7 @@ function alignCurrentPage(): void {
 
 function setMode(value: ReaderMode): void {
   if (mode.value === value) return
+  cancelHorizontalSnap()
   const previous = mode.value
   mode.value = value
   alignCurrentPage()
@@ -140,6 +141,7 @@ function setMode(value: ReaderMode): void {
 
 function setContinuous(value: boolean): void {
   if (continuous.value === value) return
+  cancelHorizontalSnap()
   continuous.value = value
   alignCurrentPage()
   void persistReaderSettings({ continuous: value }, () => {
@@ -278,8 +280,12 @@ const vReaderSize: Directive<HTMLElement> = {
 
 // ---------- 翻页与滚动 ----------
 
+/** 连续横排滚动停止后，等待短暂时间再居中当前页。 */
+const HORIZONTAL_SNAP_DELAY = 160
+
 let scrollElement: HTMLElement | null = null
 let scrollRaf: number | null = null
+let snapTimer: number | null = null
 
 const vReaderScroll: Directive<HTMLElement> = {
   mounted(element) {
@@ -301,20 +307,59 @@ function pageElement(target: number): HTMLElement | null {
   )
 }
 
-/** 连排模式：把目标页对齐到滚动容器起始位置。 */
+/** 取消待执行的横排自动居中，避免与主动跳页冲突。 */
+function cancelHorizontalSnap(): void {
+  if (snapTimer === null) return
+  window.clearTimeout(snapTimer)
+  snapTimer = null
+}
+
+/**
+ * 连排模式：把目标页对齐到滚动容器。
+ *
+ * 普通/日漫横排把页面居中，保证停止滑动或点击后当前页完整落在视口中央；
+ * 滚动模式保持原有行为，把目标页顶部对齐到容器起始位置。
+ */
 function scrollToPage(target: number, behavior: 'auto' | 'smooth' = 'auto'): void {
+  cancelHorizontalSnap()
   const container = scrollElement
   const element = pageElement(target)
   if (!container || !element) return
-  const gap = pageGap(true)
   if (horizontal.value) {
-    container.scrollTo({ left: Math.max(element.offsetLeft - gap, 0), behavior })
+    const centeredLeft =
+      element.offsetLeft +
+      element.offsetWidth / 2 -
+      container.clientWidth / 2
+    const maxLeft = Math.max(container.scrollWidth - container.clientWidth, 0)
+    container.scrollTo({
+      left: Math.min(Math.max(centeredLeft, 0), maxLeft),
+      behavior,
+    })
   } else {
-    container.scrollTo({ top: Math.max(element.offsetTop - gap, 0), behavior })
+    const gap = pageGap(true)
+    container.scrollTo({
+      top: Math.max(element.offsetTop - gap, 0),
+      behavior,
+    })
   }
 }
 
+/** 用户停止横排滚动后，把视口中心所在的页面扶正到中央。 */
+function centerCurrentPage(): void {
+  if (!continuous.value || !horizontal.value) return
+  updateCurrentFromScroll()
+  scrollToPage(pageNumber.value, 'smooth')
+}
+
 function onScroll(): void {
+  // 每次滚动事件都重置防抖计时，等用户真正停下后再自动居中
+  if (continuous.value && horizontal.value) {
+    cancelHorizontalSnap()
+    snapTimer = window.setTimeout(() => {
+      snapTimer = null
+      centerCurrentPage()
+    }, HORIZONTAL_SNAP_DELAY)
+  }
   if (scrollRaf !== null) return
   scrollRaf = window.requestAnimationFrame(() => {
     scrollRaf = null
@@ -425,7 +470,7 @@ function onKeydown(event: KeyboardEvent): void {
   goRelative(delta)
 }
 
-/** 点击左右热区翻页；连续模式跳到目标页起始位置。 */
+/** 点击左右热区翻页；连续模式跳到目标页并居中。 */
 function onReaderClick(event: MouseEvent): void {
   if (!clickToTurn.value || event.button !== 0) return
   if (suppressClick) {
@@ -607,6 +652,8 @@ onBeforeUnmount(() => {
   progressSync?.dispose()
   releaseAll()
   void destroy()
+  cancelHorizontalSnap()
+  if (scrollRaf !== null) window.cancelAnimationFrame(scrollRaf)
   if (suppressClickTimer !== null) window.clearTimeout(suppressClickTimer)
   window.removeEventListener('keydown', onKeydown)
   document.removeEventListener('visibilitychange', onVisibilityChange)
@@ -655,6 +702,7 @@ onMounted(() => {
       :progress-state="progressState"
       :progress-load-failed="progressLoadFailed"
       :disabled="loading || error !== null"
+      :menu-attach="readerRoot ?? undefined"
       @back="goBack"
       @go="goToPage"
       @update:mode="setMode"
