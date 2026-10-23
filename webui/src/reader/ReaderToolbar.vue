@@ -21,6 +21,8 @@ const props = defineProps<{
   progressState: ProgressSyncState
   progressLoadFailed?: boolean
   disabled?: boolean
+  /** 菜单挂载点；全屏时挂到阅读器根节点，避免弹层被留在全屏元素之外。 */
+  menuAttach?: HTMLElement | string
 }>()
 
 const emit = defineEmits<{
@@ -188,7 +190,7 @@ function zoomLabel(): string {
 
     <!-- 桌面端直接展示缩放、模式与设置入口 -->
     <template v-if="!mobile">
-      <v-menu location="bottom end">
+      <v-menu :attach="menuAttach" location="bottom end">
         <template #activator="{ props: menuProps }">
           <v-btn
             v-bind="menuProps"
@@ -211,7 +213,7 @@ function zoomLabel(): string {
         </v-list>
       </v-menu>
 
-      <v-menu v-model="modeMenuOpen" location="bottom end">
+      <v-menu v-model="modeMenuOpen" :attach="menuAttach" location="bottom end">
         <template #activator="{ props: menuProps }">
           <v-btn
             v-bind="menuProps"
@@ -234,7 +236,7 @@ function zoomLabel(): string {
         </v-list>
       </v-menu>
 
-      <v-menu v-model="settingsMenuOpen" location="bottom end">
+      <v-menu v-model="settingsMenuOpen" :attach="menuAttach" location="bottom end">
         <template #activator="{ props: menuProps }">
           <v-btn
             v-bind="menuProps"
@@ -295,7 +297,12 @@ function zoomLabel(): string {
     </template>
 
     <!-- 移动端收纳进菜单，避免 360px 宽度溢出 -->
-    <v-menu v-else v-model="menuOpen" location="bottom end">
+    <v-menu
+      v-else
+      v-model="menuOpen"
+      :attach="menuAttach"
+      location="bottom end"
+    >
       <template #activator="{ props: menuProps }">
         <v-btn
           v-bind="menuProps"
@@ -305,16 +312,6 @@ function zoomLabel(): string {
         />
       </template>
       <v-list density="comfortable" min-width="260">
-        <v-list-subheader>缩放</v-list-subheader>
-        <v-list-item title="适应宽度" @click="selectZoom('fit-width')" />
-        <v-list-item title="适应页面" @click="selectZoom('fit-page')" />
-        <v-list-item
-          v-for="percent in ZOOM_PERCENT_OPTIONS"
-          :key="percent"
-          :title="`${percent}%`"
-          @click="selectPercent(percent)"
-        />
-        <v-divider class="my-1" />
         <v-list-subheader>阅读模式</v-list-subheader>
         <v-list-item
           v-for="option in MODE_OPTIONS"
@@ -325,7 +322,7 @@ function zoomLabel(): string {
           @click="selectMode(option.value)"
         />
         <v-divider class="my-1" />
-        <v-list-subheader>显示方式</v-list-subheader>
+        <v-list-subheader>阅读设置</v-list-subheader>
         <div class="px-4 pb-2">
           <v-switch
             :model-value="continuous"
@@ -361,6 +358,10 @@ function zoomLabel(): string {
             @update:model-value="emit('update:dark', Boolean($event))"
           />
         </div>
+        <v-divider class="my-1" />
+        <v-list-subheader>缩放</v-list-subheader>
+        <v-list-item title="适应宽度" @click="selectZoom('fit-width')" />
+        <v-list-item title="适应页面" @click="selectZoom('fit-page')" />
         <v-divider class="my-1" />
         <v-list-item
           :title="fullscreen ? '退出全屏' : '进入全屏'"

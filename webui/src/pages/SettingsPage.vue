@@ -15,8 +15,8 @@ import {
 } from '@/utils/labels'
 
 const READING_MODE_OPTIONS = [
-  { value: 'normal', title: '普通模式', description: '左→右阅读，右滑 / ArrowRight 翻下页' },
-  { value: 'manga', title: '日漫模式', description: '右→左阅读，左滑 / ArrowLeft 翻下页' },
+  { value: 'normal', title: '普通模式', description: '左→右阅读，左滑 / ArrowRight 翻下页' },
+  { value: 'manga', title: '日漫模式', description: '右→左阅读，右滑 / ArrowLeft 翻下页' },
   { value: 'scroll', title: '滚动模式', description: '上→下阅读，下滑 / ArrowDown 翻下页' },
 ] as const
 

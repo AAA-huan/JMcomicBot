@@ -279,17 +279,71 @@ describe('翻页方向', () => {
     wrapper.unmount()
   })
 
-  it('连续模式点击翻页并滚动对齐目标页', async () => {
+  it('连续模式点击翻页并把目标页居中', async () => {
     const wrapper = await mountReader({
       continuous: true,
       click_to_turn: true,
+    })
+    const scroll = wrapper.find('.reader-scroll').element as HTMLElement
+    Object.defineProperty(scroll, 'clientWidth', {
+      configurable: true,
+      value: 300,
+    })
+    Object.defineProperty(scroll, 'scrollWidth', {
+      configurable: true,
+      value: 1200,
+    })
+    const pageTwo = wrapper.find('[data-reader-page="2"]').element as HTMLElement
+    Object.defineProperty(pageTwo, 'offsetLeft', {
+      configurable: true,
+      value: 500,
+    })
+    Object.defineProperty(pageTwo, 'offsetWidth', {
+      configurable: true,
+      value: 200,
     })
     const scrollTo = HTMLElement.prototype.scrollTo as ReturnType<typeof vi.fn>
     scrollTo.mockClear()
 
     await clickAt(wrapper, 270)
     expect(currentPage()).toBe(2)
-    expect(scrollTo).toHaveBeenCalled()
+    // 页中心 500 + 100，减去视口中心 150
+    expect(scrollTo).toHaveBeenCalledWith({ left: 450, behavior: 'auto' })
+    wrapper.unmount()
+  })
+
+  it('连续横排停止滚动后自动把当前页居中', async () => {
+    const wrapper = await mountReader({
+      continuous: true,
+      reading_mode: 'normal',
+    })
+    const scroll = wrapper.find('.reader-scroll').element as HTMLElement
+    Object.defineProperty(scroll, 'clientWidth', {
+      configurable: true,
+      value: 300,
+    })
+    Object.defineProperty(scroll, 'scrollWidth', {
+      configurable: true,
+      value: 1200,
+    })
+    scroll.scrollLeft = 100
+    const firstPage = wrapper.find('[data-reader-page="1"]').element as HTMLElement
+    Object.defineProperty(firstPage, 'offsetLeft', {
+      configurable: true,
+      value: 0,
+    })
+    Object.defineProperty(firstPage, 'offsetWidth', {
+      configurable: true,
+      value: 200,
+    })
+    const scrollTo = HTMLElement.prototype.scrollTo as ReturnType<typeof vi.fn>
+    scrollTo.mockClear()
+
+    scroll.dispatchEvent(new Event('scroll'))
+    await new Promise((resolve) => setTimeout(resolve, 220))
+
+    expect(currentPage()).toBe(1)
+    expect(scrollTo).toHaveBeenCalledWith({ left: 0, behavior: 'smooth' })
     wrapper.unmount()
   })
 })

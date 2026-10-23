@@ -74,8 +74,9 @@ export function swipeTurnDelta(
   ) {
     return 0
   }
-  if (mode === 'manga') return deltaX < 0 ? 1 : -1
-  return deltaX > 0 ? 1 : -1
+  // 普通模式左滑翻下页，日漫模式右滑翻下页
+  if (mode === 'manga') return deltaX > 0 ? 1 : -1
+  return deltaX < 0 ? 1 : -1
 }
 
 /** 根据模式把键盘方向键映射为翻页方向。 */
