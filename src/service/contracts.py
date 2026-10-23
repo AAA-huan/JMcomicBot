@@ -182,7 +182,7 @@ class DataMigrationService(Protocol):
     def export_data(
         self, context: Optional[OperationContext] = None
     ) -> DataExportResult:
-        """生成包含整库备份与一致性记录的 zip。"""
+        """生成包含整库快照与一致性记录的 zip。"""
         raise NotImplementedError
 
     def validate_import(self, zip_source: bytes | Path) -> ImportPreview:

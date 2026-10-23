@@ -1,8 +1,8 @@
-/** 维护操作接口：扫描、修复、备份与数据迁移。 */
+/** 维护操作接口：扫描、修复与数据迁移。 */
 
 import { apiDownload, apiRequest, apiUpload } from './client'
 import type { DownloadedFile } from './client'
-import type { BackupRecord, PageResult, ScanResultView, VerifyResult } from '@/types/api'
+import type { ScanResultView, VerifyResult } from '@/types/api'
 
 export interface ScanOptions {
   dry_run: boolean
@@ -16,6 +16,8 @@ export interface RepairResult {
   dry_run: boolean
   orphan_manga_ids: string[]
   orphan_tag_names: string[]
+  processed_manga_ids: string[]
+  removed_tag_names: string[]
 }
 
 export function scanLibrary(options: ScanOptions): Promise<ScanResultView> {
@@ -28,31 +30,6 @@ export function repairLibrary(dryRun: boolean): Promise<RepairResult> {
 
 export function verifyLibrary(mangaIds: string[] | null): Promise<VerifyResult> {
   return apiRequest('/maintenance/verify', { method: 'POST', body: { manga_ids: mangaIds } })
-}
-
-export interface BackupListQuery {
-  page?: number
-  page_size?: number
-  status?: string
-}
-
-export function listBackups(
-  query: BackupListQuery = {},
-): Promise<PageResult<BackupRecord>> {
-  return apiRequest<PageResult<BackupRecord>>('/maintenance/backups', {
-    query: { ...query },
-  })
-}
-
-export interface CreatedBackup {
-  task_id: string
-  backup_id: number
-  filename: string
-  file_size_bytes: number
-}
-
-export function createBackup(): Promise<CreatedBackup> {
-  return apiRequest<CreatedBackup>('/maintenance/backups', { method: 'POST' })
 }
 
 export interface ImportPreview {

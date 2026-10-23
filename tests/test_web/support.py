@@ -12,7 +12,6 @@ from src.download.progress import DownloadProgressTracker
 from src.database.models import utc_now
 from src.database.repositories import (
     AuditEventRepository,
-    BackupRepository,
     FavoriteRepository,
     JmFavoriteRepository,
     MangaBlacklistRepository,
@@ -32,7 +31,6 @@ from src.database.repositories import (
 )
 from src.permission.manager import PermissionManager
 from src.service import (
-    DatabaseMaintenanceService,
     DataMigrationService,
     DownloadQueueService,
     MangaBlacklistService,
@@ -141,7 +139,6 @@ class WebTestContext:
 def build_web_context(  # pylint: disable=too-many-locals
     db_manager: DatabaseManager,
     download_root: Path,
-    backup_dir: Path,
     config_dict: Optional[Dict[str, object]] = None,
 ) -> WebTestContext:
     """构造完整 WebDependencies，并保留替身调用记录供断言。"""
@@ -263,12 +260,6 @@ def build_web_context(  # pylint: disable=too-many-locals
             option_file_path=str(download_root / "option.yml"),
             audit_repository=audit_repo,
         ),
-        database_maintenance_service=DatabaseMaintenanceService(
-            db_manager,
-            task_service,
-            BackupRepository(db_manager),
-            backup_dir=str(backup_dir),
-        ),
         data_migration_service=DataMigrationService(
             db_manager,
             audit_repo,
@@ -326,7 +317,7 @@ def create_client_for(
 ) -> Tuple[TestClient, WebTestContext]:
     """基于临时目录构造测试客户端与可观测上下文。"""
     root = Path(db_manager.db_dir).parent
-    context = build_web_context(db_manager, root, root / "backups")
+    context = build_web_context(db_manager, root)
     return create_test_client(context.dependencies, host), context
 
 

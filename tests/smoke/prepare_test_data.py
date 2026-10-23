@@ -1,23 +1,22 @@
 """开发与冒烟测试数据准备脚本
 
-向配置的数据库、下载目录与备份目录写入测试数据，便于迁移冒烟与 WebUI 页面验证：
+向配置的数据库与下载目录写入测试数据，便于迁移冒烟与 WebUI 页面验证：
 
 - 生成多本漫画的最小合法 PDF（标题/作者/章节数/页数多样）；
 - 走真实扫描流程入库（scan 任务、scan_record、审计）；
 - 写入准确的页数与作者元数据，并为部分漫画写入标签；
 - 删除 2 本生成的 PDF 后执行真实校验（产生 missing 状态与 verify 任务）；
 - 写入成功/失败/取消/排队四种状态的下载任务；
-- 写入阅读进度（不同更新时间）；
-- 创建一致性备份并生成一条 deleted 状态演示记录。
+- 写入阅读进度（不同更新时间）。
 
-仅用于开发与冒烟测试：脚本只新增数据，不删除既有漫画/任务/备份记录；
+仅用于开发与冒烟测试：脚本只新增数据，不删除既有漫画/任务记录；
 为制造缺失状态而删除的文件仅限本脚本本次生成的 PDF。
 注意：扫描按真实逻辑执行，数据库中存在但磁盘缺失的既有漫画会被标记 missing。
 
 用法:
     uv run python tests/smoke/prepare_test_data.py
     uv run python tests/smoke/prepare_test_data.py --mangas 20 --start-id 910001
-    uv run python tests/smoke/prepare_test_data.py --download-path /tmp/dl --db-path /tmp/db --no-backups
+    uv run python tests/smoke/prepare_test_data.py --download-path /tmp/dl --db-path /tmp/db
 """
 
 from dataclasses import dataclass
@@ -29,7 +28,6 @@ import argparse
 import os
 import random
 import sys
-import time
 
 # 该文件是手动执行的冒烟数据准备脚本，不参与 pytest 收集
 __test__ = False
@@ -57,11 +55,9 @@ if PROJECT_ROOT not in sys.path:
 
 from src.config.manager import ConfigManager
 from src.database.database import DatabaseManager
-from src.database.migrations import get_schema_revision
 from src.database.models import utc_now
 from src.database.repositories import (
     AuditEventRepository,
-    BackupRepository,
     MangaRepository,
     MangaTagRepository,
     OperationTaskRepository,
@@ -71,7 +67,6 @@ from src.database.repositories import (
 )
 from src.logging.logger_config import logger
 from src.service import (
-    DatabaseMaintenanceService,
     OperationContext,
     OperationTaskService,
     VerifyResult,
@@ -129,10 +124,6 @@ def parse_args() -> argparse.Namespace:
         "--download-path", default=None, help="下载目录，缺省使用 MANGA_DOWNLOAD_PATH"
     )
     parser.add_argument("--db-path", default=None, help="数据库目录，缺省使用 DB_PATH")
-    parser.add_argument(
-        "--backup-path", default=None, help="备份目录，缺省使用 BACKUP_PATH"
-    )
-    parser.add_argument("--no-backups", action="store_true", help="跳过备份数据创建")
     args = parser.parse_args()
     if not 4 <= args.mangas <= 200:
         parser.error("--mangas 必须在 4 到 200 之间（需要覆盖多状态任务）")
@@ -351,42 +342,6 @@ def _write_reading_progress(
     return written
 
 
-def _wait_for_next_filename_second(backup_repo: BackupRepository) -> None:
-    """等待越过最近一次备份的秒级时间戳，避免同秒文件名冲突。"""
-    latest = backup_repo.list(page_size=1)[0]
-    while (utc_now() - latest.created_at) < timedelta(seconds=1):
-        time.sleep(0.1)
-
-
-def _create_backups(
-    db_manager: DatabaseManager,
-    task_service: OperationTaskService,
-    backup_repo: BackupRepository,
-    backup_path: Path,
-    context: OperationContext,
-    start_id: int,
-) -> int:
-    """创建 2 份真实备份并生成一条 deleted 状态演示记录。"""
-    maintenance = DatabaseMaintenanceService(
-        db_manager, task_service, backup_repo, backup_dir=str(backup_path)
-    )
-    maintenance.create_backup(context=context)
-    # 文件名精确到秒，等待跨秒后再创建第二份，避免相对路径唯一约束冲突
-    _wait_for_next_filename_second(backup_repo)
-    maintenance.create_backup(context=context)
-
-    demo_name = f"main-demo-deleted-{start_id}-{int(time.time())}.db"
-    schema_version = get_schema_revision(db_manager.engine)
-    demo = backup_repo.create(
-        filename=demo_name,
-        relative_path=demo_name,
-        schema_version=schema_version,
-        status="ready",
-    )
-    backup_repo.mark_deleted(demo.id)
-    return 3
-
-
 def _print_summary(
     download_path: Path,
     db_path: Path,
@@ -394,7 +349,6 @@ def _print_summary(
     deleted: List[GeneratedManga],
     verify_result: VerifyResult,
     reading_count: int,
-    backup_count: int,
 ) -> None:
     """输出本次准备的数据摘要。"""
     lines = [
@@ -411,7 +365,7 @@ def _print_summary(
         f"路径异常 {verify_result.invalid_path_count}、"
         f"错误 {verify_result.error_count}",
         "  下载任务: 成功/失败/取消/中断 各 1 个",
-        f"  阅读进度: {reading_count} 条，备份记录: {backup_count} 条",
+        f"  阅读进度: {reading_count} 条",
         "提示：扫描按真实逻辑执行，数据库中存在但磁盘缺失的既有漫画会被标记 missing。",
     ]
     for line in lines:
@@ -428,7 +382,6 @@ def main() -> None:
         args.download_path or str(config.get("MANGA_DOWNLOAD_PATH"))
     ).resolve()
     db_path = Path(args.db_path or str(config.get("DB_PATH"))).resolve()
-    backup_path = Path(args.backup_path or str(config.get("BACKUP_PATH"))).resolve()
 
     download_path.mkdir(parents=True, exist_ok=True)
     db_manager = DatabaseManager(db_path=str(db_path))
@@ -438,7 +391,6 @@ def main() -> None:
         tag_repo = MangaTagRepository(db_manager)
         scan_record_repo = ScanRecordRepository(db_manager)
         progress_repo = ReadingProgressRepository(db_manager)
-        backup_repo = BackupRepository(db_manager)
         task_service = OperationTaskService(
             OperationTaskRepository(db_manager),
             TaskEventRepository(db_manager),
@@ -458,16 +410,6 @@ def main() -> None:
         )
         _create_history_tasks(task_service, generated, context)
         reading_count = _write_reading_progress(progress_repo, repo, generated)
-        backup_count = 0
-        if not args.no_backups:
-            backup_count = _create_backups(
-                db_manager,
-                task_service,
-                backup_repo,
-                backup_path,
-                context,
-                args.start_id,
-            )
         _print_summary(
             download_path,
             db_path,
@@ -475,7 +417,6 @@ def main() -> None:
             deleted,
             verify_result,
             reading_count,
-            backup_count,
         )
     finally:
         db_manager.close()

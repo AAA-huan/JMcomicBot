@@ -17,7 +17,7 @@ from tests.test_web.support import (
 def _make_client(db_manager: DatabaseManager) -> TestClient:
     """构造阅读设置接口测试客户端。"""
     root = Path(db_manager.db_dir).parent
-    context = build_web_context(db_manager, root, root / "backups")
+    context = build_web_context(db_manager, root)
     return create_test_client(context.dependencies)
 
 

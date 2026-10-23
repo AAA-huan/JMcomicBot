@@ -24,9 +24,7 @@ def _make_client(
 ) -> tuple[TestClient, object]:
     """构造黑名单接口测试客户端与可观测上下文。"""
     root = Path(db_manager.db_dir).parent
-    context = build_web_context(
-        db_manager, root, root / "backups", config_dict=config_dict
-    )
+    context = build_web_context(db_manager, root, config_dict=config_dict)
     return create_test_client(context.dependencies), context
 
 

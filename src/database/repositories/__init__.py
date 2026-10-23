@@ -1,7 +1,6 @@
 """仓储层统一导出，便于外部以 from src.database.repositories import ... 方式引用"""
 
 from .audit_event_repository import AuditEventRepository
-from .backup_repository import BackupRepository
 from .favorite_repository import FavoriteRepository
 from .jm_favorite_repository import JmFavoriteRepository
 from .manga_blacklist_repository import MangaBlacklistRepository
@@ -30,7 +29,6 @@ from .web_auth_repository import (
 
 __all__ = [
     "AuditEventRepository",
-    "BackupRepository",
     "FavoriteRepository",
     "JmFavoriteRepository",
     "MangaBlacklistRepository",

@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from src.download.progress import DownloadProgressTracker
 from src.service import (
     DataMigrationService,
-    DatabaseMaintenanceService,
     DownloadService,
     MangaBlacklistService,
     MangaService,
@@ -45,7 +44,6 @@ class WebDependencies:  # pylint: disable=too-many-instance-attributes
     permission_service: PermissionService
     settings_service: SettingsService
     option_file_service: OptionFileService
-    database_maintenance_service: DatabaseMaintenanceService
     data_migration_service: DataMigrationService
     repair_service: RepairService
     scan_service: ScanService

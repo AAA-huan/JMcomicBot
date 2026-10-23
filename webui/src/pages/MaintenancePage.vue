@@ -1,14 +1,11 @@
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue'
-import { useDisplay } from 'vuetify'
+import { reactive, ref } from 'vue'
 
 import { errorMessage } from '@/api/client'
 import { useEventSubscription } from '@/api/eventStream'
 import {
   applyDataImport,
-  createBackup,
   exportData,
-  listBackups,
   repairLibrary,
   scanLibrary,
   validateDataImport,
@@ -16,17 +13,9 @@ import {
 } from '@/api/maintenance'
 import type { ImportPreview, RepairResult } from '@/api/maintenance'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
-import EmptyState from '@/components/EmptyState.vue'
-import type { BackupRecord, OperationTask, ScanResultView, VerifyResult } from '@/types/api'
-import { formatBytes, formatDateTime, parseMangaIds } from '@/utils/format'
-import {
-  BACKUP_STATUS_COLORS,
-  BACKUP_STATUS_LABELS,
-  colorOf,
-  labelOf,
-} from '@/utils/labels'
-
-const { mobile } = useDisplay()
+import IdScrollWindow from '@/components/IdScrollWindow.vue'
+import type { OperationTask, ScanResultView, VerifyResult } from '@/types/api'
+import { formatDateTime, parseMangaIds } from '@/utils/format'
 
 const TABLE_LABELS: Record<string, string> = {
   manga: '漫画',
@@ -39,7 +28,6 @@ const TABLE_LABELS: Record<string, string> = {
   audit_event: '审计事件',
 }
 
-const error = ref('')
 const actionError = ref('')
 const actionNotice = ref('')
 
@@ -82,22 +70,6 @@ async function runVerify(): Promise<void> {
 
 const repairDialog = ref(false)
 const repairLoading = ref(false)
-const repairedCount = ref<number | null>(null)
-
-const backups = ref<BackupRecord[]>([])
-const backupTotal = ref(0)
-const backupPages = ref(0)
-const backupPage = ref(1)
-const backupsLoading = ref(false)
-
-const createBackupDialog = ref(false)
-const createBackupLoading = ref(false)
-
-const backupPageSize = 10
-
-function downloadUrl(backupId: number): string {
-  return `/api/v1/maintenance/backups/${backupId}/download`
-}
 
 async function runScan(): Promise<void> {
   actionError.value = ''
@@ -119,51 +91,12 @@ async function confirmRepair(): Promise<void> {
   try {
     const result = await repairLibrary(repairPreview.value)
     repairResult.value = result
-    repairedCount.value = result.dry_run ? null : result.cleaned_count
     repairDialog.value = false
   } catch (err) {
     actionError.value = errorMessage(err)
     repairDialog.value = false
   } finally {
     repairLoading.value = false
-  }
-}
-
-async function loadBackups(): Promise<void> {
-  backupsLoading.value = true
-  error.value = ''
-  try {
-    const result = await listBackups({
-      page: backupPage.value,
-      page_size: backupPageSize,
-    })
-    backups.value = result.items
-    backupTotal.value = result.total
-    backupPages.value = result.pages
-  } catch (err) {
-    error.value = errorMessage(err)
-  } finally {
-    backupsLoading.value = false
-  }
-}
-
-async function confirmCreateBackup(): Promise<void> {
-  actionError.value = ''
-  actionNotice.value = ''
-  createBackupLoading.value = true
-  try {
-    const result = await createBackup()
-    actionNotice.value = `备份已创建：${result.filename}（${formatBytes(
-      result.file_size_bytes,
-    )}）`
-    createBackupDialog.value = false
-    backupPage.value = 1
-    await loadBackups()
-  } catch (err) {
-    actionError.value = errorMessage(err)
-    createBackupDialog.value = false
-  } finally {
-    createBackupLoading.value = false
   }
 }
 
@@ -250,20 +183,10 @@ async function confirmImport(): Promise<void> {
     importLoading.value = false
   }
 }
-
-onMounted(() => {
-  void loadBackups()
-})
 </script>
 
 <template>
   <div>
-    <v-alert v-if="error" type="error" variant="tonal" density="comfortable" class="mb-4">
-      {{ error }}
-      <template #append>
-        <v-btn size="small" variant="text" @click="loadBackups">重试</v-btn>
-      </template>
-    </v-alert>
     <v-alert
       v-if="actionError"
       type="error"
@@ -359,16 +282,20 @@ onMounted(() => {
           </div>
           <v-alert v-if="repairResult?.dry_run" type="info" variant="tonal" class="mt-3">
             预览完成，未写入数据库。待标记缺失漫画：{{ repairResult.orphan_manga_ids.length }}，孤儿标签：{{ repairResult.orphan_tag_names.length }}。
-            <p v-if="repairResult.orphan_manga_ids.length">漫画 ID：{{ repairResult.orphan_manga_ids.join('、') }}</p>
-            <p v-if="repairResult.orphan_tag_names.length">标签：{{ repairResult.orphan_tag_names.join('、') }}</p>
           </v-alert>
+          <template v-if="repairResult?.dry_run">
+            <IdScrollWindow title="待标记缺失" :items="repairResult.orphan_manga_ids" />
+            <IdScrollWindow title="待清理标签" :items="repairResult.orphan_tag_names" />
+          </template>
           <v-expand-transition>
             <v-sheet
-              v-if="repairedCount !== null"
+              v-if="repairResult && !repairResult.dry_run"
               class="mt-3 pa-3 rounded"
               color="surface-variant"
             >
-              <div class="text-body-2">已清理 {{ repairedCount }} 条孤儿记录</div>
+              <div class="text-body-2">已清理 {{ repairResult.cleaned_count }} 条孤儿记录</div>
+              <IdScrollWindow title="已标记缺失" :items="repairResult.processed_manga_ids" />
+              <IdScrollWindow title="已清理标签" :items="repairResult.removed_tag_names" />
             </v-sheet>
           </v-expand-transition>
         </v-card>
@@ -486,121 +413,6 @@ onMounted(() => {
       </v-alert>
     </v-card>
 
-    <v-card class="mt-4">
-      <v-card-title class="text-subtitle-1">
-        数据库备份
-        <span class="text-caption text-medium-emphasis ml-2">共 {{ backupTotal }} 个</span>
-      </v-card-title>
-      <v-card-subtitle class="text-wrap">
-        使用 SQLite 一致性备份生成，记录校验和与创建时间。
-      </v-card-subtitle>
-      <v-card-actions class="flex-wrap">
-        <v-spacer />
-        <v-btn
-          color="primary"
-          prepend-icon="mdi-database-plus-outline"
-          @click="createBackupDialog = true"
-        >
-          创建备份
-        </v-btn>
-        <v-btn icon="mdi-refresh" variant="text" aria-label="刷新" @click="loadBackups" />
-      </v-card-actions>
-      <v-divider />
-      <v-progress-linear v-if="backupsLoading" indeterminate />
-
-      <EmptyState
-        v-if="!backupsLoading && backups.length === 0"
-        icon="mdi-database-outline"
-        title="还没有备份"
-        description="创建备份后可在此查看文件大小与状态。"
-      />
-
-      <template v-else-if="!mobile">
-        <v-table>
-          <thead>
-            <tr>
-              <th>文件名</th>
-              <th class="text-no-wrap">大小</th>
-              <th>状态</th>
-              <th class="text-no-wrap">结构版本</th>
-              <th class="text-no-wrap">创建时间</th>
-              <th class="text-no-wrap">操作</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr v-for="backup in backups" :key="backup.id">
-              <td class="text-wrap">{{ backup.filename }}</td>
-              <td class="text-no-wrap">{{ formatBytes(backup.file_size_bytes) }}</td>
-              <td>
-                <v-chip
-                  size="small"
-                  variant="tonal"
-                  :color="colorOf(BACKUP_STATUS_COLORS, backup.status)"
-                >
-                  {{ labelOf(BACKUP_STATUS_LABELS, backup.status) }}
-                </v-chip>
-              </td>
-              <td class="text-no-wrap">{{ backup.schema_version }}</td>
-              <td class="text-no-wrap">{{ formatDateTime(backup.created_at) }}</td>
-              <td class="text-no-wrap">
-                <v-btn
-                  v-if="backup.status === 'ready'"
-                  icon="mdi-download"
-                  size="small"
-                  variant="text"
-                  :href="downloadUrl(backup.id)"
-                  aria-label="下载备份"
-                />
-              </td>
-            </tr>
-          </tbody>
-        </v-table>
-      </template>
-
-      <v-list v-else lines="two">
-        <v-list-item v-for="backup in backups" :key="backup.id">
-          <v-list-item-title class="text-wrap">{{ backup.filename }}</v-list-item-title>
-          <v-list-item-subtitle>
-            {{ formatBytes(backup.file_size_bytes) }} · {{ formatDateTime(backup.created_at) }}
-          </v-list-item-subtitle>
-          <template #append>
-            <div class="d-flex align-center ga-1">
-              <v-chip
-                size="small"
-                variant="tonal"
-                :color="colorOf(BACKUP_STATUS_COLORS, backup.status)"
-              >
-                {{ labelOf(BACKUP_STATUS_LABELS, backup.status) }}
-              </v-chip>
-              <v-btn
-                v-if="backup.status === 'ready'"
-                icon="mdi-download"
-                size="small"
-                variant="text"
-                :href="downloadUrl(backup.id)"
-                aria-label="下载备份"
-              />
-            </div>
-          </template>
-        </v-list-item>
-      </v-list>
-
-      <v-divider v-if="backupPages > 1" />
-      <div v-if="backupPages > 1" class="d-flex justify-center pa-2">
-        <v-pagination
-          :model-value="backupPage"
-          :length="backupPages"
-          :total-visible="5"
-          @update:model-value="
-            (value: number) => {
-              backupPage = value
-              void loadBackups()
-            }
-          "
-        />
-      </div>
-    </v-card>
-
     <ConfirmDialog
       v-model="repairDialog"
       title="确认修复资料库？"
@@ -609,16 +421,6 @@ onMounted(() => {
       confirm-color="warning"
       :loading="repairLoading"
       @confirm="confirmRepair"
-    />
-
-    <ConfirmDialog
-      v-model="createBackupDialog"
-      title="创建数据库备份？"
-      text="将使用 SQLite 一致性备份接口导出当前数据库快照，可能短暂占用少量磁盘空间。"
-      confirm-text="创建备份"
-      confirm-color="primary"
-      :loading="createBackupLoading"
-      @confirm="confirmCreateBackup"
     />
 
     <ConfirmDialog

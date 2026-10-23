@@ -26,9 +26,7 @@ def _make_client(
 ) -> tuple[TestClient, object]:
     """构造写接口测试客户端与可观测上下文。"""
     root = Path(db_manager.db_dir).parent
-    context = build_web_context(
-        db_manager, root, root / "backups", config_dict=config_dict
-    )
+    context = build_web_context(db_manager, root, config_dict=config_dict)
     return create_test_client(context.dependencies), context
 
 
@@ -392,8 +390,8 @@ def test_batch_cancel_and_retry_endpoints(db_manager) -> None:
     assert retry_body["requeued_count"] == 1
 
 
-def test_maintenance_scan_repair_and_backup(db_manager) -> None:
-    """扫描、修复与备份接口应完成对应操作且不暴露绝对路径。"""
+def test_maintenance_scan_and_repair(db_manager) -> None:
+    """扫描与修复接口应完成对应操作并返回已处理条目。"""
     root = Path(db_manager.db_dir).parent
     (root / "123456-扫描测试(2章).pdf").write_bytes(b"%PDF")
     MangaRepository(db_manager, download_root=str(root)).upsert(
@@ -407,21 +405,15 @@ def test_maintenance_scan_repair_and_backup(db_manager) -> None:
 
         scan = client.post("/api/v1/maintenance/scan", headers=headers)
         repair = client.post("/api/v1/maintenance/repair", headers=headers)
-        backup = client.post("/api/v1/maintenance/backups", headers=headers)
-        backups = client.get("/api/v1/maintenance/backups")
 
     assert scan.status_code == 200
     assert scan.json()["new_count"] == 1
     assert scan.json()["scanned_files"] == 1
     assert repair.status_code == 200
     assert repair.json()["cleaned_count"] >= 1
-    assert backup.status_code == 201
-    assert backup.json()["filename"].startswith("main-")
-    assert "path" not in backup.json()
-    assert backups.status_code == 200
-    assert backups.json()["total"] == 1
-    assert "relative_path" not in backups.text
-    assert "sha256" in backups.text
+    assert repair.json()["processed_manga_ids"] == ["999999"]
+    assert repair.json()["removed_tag_names"] == []
+    assert repair.json()["orphan_manga_ids"] == []
 
     audit_events = AuditEventRepository(db_manager).list()
     scan_events = [

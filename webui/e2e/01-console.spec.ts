@@ -80,24 +80,6 @@ test('任务管理页展示历史状态并启用批量重试（不触发真实�
   ).toBeEnabled()
 })
 
-test('备份下载触发附件下载', async ({ page }) => {
-  await login(page)
-  await page.goto('/maintenance')
-  const readyBackup = page
-    .locator('tr, .v-list-item')
-    .filter({ hasText: '就绪' })
-    .first()
-  const downloadLink = readyBackup.getByRole('link', { name: '下载备份' })
-  await expect(downloadLink).toBeVisible()
-
-  const [download] = await Promise.all([
-    page.waitForEvent('download'),
-    downloadLink.click(),
-  ])
-
-  expect(download.suggestedFilename()).toMatch(/^main-\d{8}-\d{6}-.*\.db$/)
-})
-
 test('侧边栏/抽屉可直达权限、配置、维护并在页面间跳转', async ({ page }, testInfo) => {
   await login(page)
   const isMobile = testInfo.project.name.startsWith('mobile')
