@@ -2,6 +2,7 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { createMemoryHistory, createRouter } from 'vue-router'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { createVuetify } from 'vuetify'
+import { VSelect } from 'vuetify/components'
 
 vi.mock('@/api/jmFavorites', () => ({
   getJmAccount: vi.fn(), getJmImport: vi.fn(), listJmFavorites: vi.fn(), listJmImports: vi.fn(),
@@ -18,17 +19,17 @@ import JmFavoritesPage from './JmFavoritesPage.vue'
 const account = { connected: true, username: 'user', total: 2, expires_at: '2026-10-04T12:00:00', folders: [{ id: '0', name: '全部收藏' }, { id: '7', name: '精选' }] }
 const job: JmImport = { id: 'job', username: 'user', folder_ids: ['0'], status: 'running', pages_done: 0, imported_count: 0, duplicate_count: 0, local_count: 0, error_message: null, created_at: '', updated_at: '' }
 
-async function mountPage() {
+async function mountPage(initialPath = '/jm-favorites') {
   const router = createRouter({ history: createMemoryHistory(), routes: [
     { path: '/jm-favorites', component: JmFavoritesPage },
     { path: '/library/:id?', component: { template: '<div>漫画库</div>' } },
     { path: '/tasks', component: { template: '<div>任务</div>' } },
   ] })
-  await router.push('/jm-favorites')
+  await router.push(initialPath)
   await router.isReady()
   const wrapper = mount(JmFavoritesPage, { global: { plugins: [router, createVuetify()] } })
   await flushPromises()
-  return wrapper
+  return { wrapper, router }
 }
 
 describe('JM 收藏导入页', () => {
@@ -51,7 +52,7 @@ describe('JM 收藏导入页', () => {
   afterEach(() => { vi.useRealTimers() })
 
   it('未登录 JM 仍可查看历史导入，只有未下载漫画可选择下载', async () => {
-    const wrapper = await mountPage()
+    const { wrapper } = await mountPage()
     expect(wrapper.text()).toContain('未下载漫画')
     expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(1)
     await wrapper.find('input[type="checkbox"]').setValue(true)
@@ -63,7 +64,7 @@ describe('JM 收藏导入页', () => {
   })
 
   it('登录后显示收藏夹，退出后清空密码且保留已导入列表', async () => {
-    const wrapper = await mountPage()
+    const { wrapper } = await mountPage()
     await wrapper.find('input[autocomplete="off"]').setValue('user')
     await wrapper.find('input[type="password"]').setValue('secret')
     await wrapper.find('form').trigger('submit')
@@ -83,7 +84,7 @@ describe('JM 收藏导入页', () => {
     vi.useFakeTimers()
     vi.mocked(getJmAccount).mockResolvedValue(account)
     vi.mocked(getJmImport).mockResolvedValue({ ...job, status: 'failed', pages_done: 1, imported_count: 1, error_message: '第二页读取失败，已完成页保留' })
-    const wrapper = await mountPage()
+    const { wrapper } = await mountPage()
     await wrapper.find('[data-testid="jm-import"]').trigger('click')
     await flushPromises()
     expect(startJmImport).toHaveBeenCalledWith(['0'])
@@ -100,7 +101,7 @@ describe('JM 收藏导入页', () => {
 
   it('登录错误展示且不保留输入的密码', async () => {
     vi.mocked(loginJmAccount).mockRejectedValue(new Error('连接失败'))
-    const wrapper = await mountPage()
+    const { wrapper } = await mountPage()
     await wrapper.find('input[autocomplete="off"]').setValue('user')
     await wrapper.find('input[type="password"]').setValue('secret')
     await wrapper.find('form').trigger('submit')
@@ -114,11 +115,36 @@ describe('JM 收藏导入页', () => {
     vi.useFakeTimers()
     vi.mocked(listJmImports).mockResolvedValue({ items: [job] })
     vi.mocked(getJmImport).mockResolvedValue({ ...job, pages_done: 2 })
-    const wrapper = await mountPage()
+    const { wrapper } = await mountPage()
     await vi.advanceTimersByTimeAsync(1500)
     await flushPromises()
     expect(wrapper.text()).toContain('已处理 2 页')
     expect(requestJmDownloads).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('分页大小从 URL 恢复，切换后重置页码并同步 URL', async () => {
+    vi.mocked(listJmFavorites).mockResolvedValue({
+      items: [], total: 120, page: 2, page_size: 50, pages: 3,
+    })
+    const { wrapper, router } = await mountPage('/jm-favorites?page=2&page_size=50')
+
+    expect(listJmFavorites).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 2, page_size: 50 }),
+    )
+    const pageSizeSelect = wrapper
+      .findAllComponents(VSelect)
+      .find((select) => select.props('label') === '每页')!
+    await pageSizeSelect.vm.$emit('update:modelValue', 100)
+    await flushPromises()
+
+    expect(listJmFavorites).toHaveBeenLastCalledWith(
+      expect.objectContaining({ page: 1, page_size: 100 }),
+    )
+    await vi.waitFor(() => {
+      expect(router.currentRoute.value.query).toMatchObject({ page_size: '100' })
+    })
+    expect(router.currentRoute.value.query.page).toBeUndefined()
     wrapper.unmount()
   })
 })

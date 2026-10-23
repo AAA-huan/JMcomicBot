@@ -1,5 +1,7 @@
 <script setup lang="ts">
 import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { useDisplay } from 'vuetify'
 
 import { errorMessage } from '@/api/client'
 import {
@@ -8,9 +10,14 @@ import {
 } from '@/api/jmFavorites'
 import type { JmAccount, JmFavorite, JmImport } from '@/api/jmFavorites'
 import EmptyState from '@/components/EmptyState.vue'
+import PaginationBar from '@/components/PaginationBar.vue'
 import { copyText } from '@/utils/clipboard'
 import { formatDateTime } from '@/utils/format'
 
+const route = useRoute()
+const router = useRouter()
+const { mobile } = useDisplay()
+const pageSizeOptions = [20, 50, 100]
 const account = ref<JmAccount>({ connected: false })
 const username = ref('')
 const password = ref('')
@@ -21,6 +28,7 @@ const selected = ref<string[]>([])
 const page = ref(1)
 const pages = ref(0)
 const total = ref(0)
+const pageSize = ref(20)
 const search = ref<string | null>('')
 const downloadStatus = ref('')
 const loading = ref(false)
@@ -77,18 +85,59 @@ async function refreshAccount(): Promise<void> {
   account.value = await getJmAccount()
 }
 
+/** 从 URL 恢复页码和每页数量，刷新页面后保持当前分页视图。 */
+function readQuery(): void {
+  const query = route.query
+  const pageValue = Number.parseInt(
+    typeof query.page === 'string' ? query.page : '1',
+    10,
+  )
+  page.value = Number.isFinite(pageValue) && pageValue > 0 ? pageValue : 1
+  const size = Number.parseInt(
+    typeof query.page_size === 'string' ? query.page_size : '20',
+    10,
+  )
+  pageSize.value = pageSizeOptions.includes(size) ? size : 20
+}
+
+/** 把分页参数写回 URL，空值不保留。 */
+function updateQuery(patch: Record<string, string | number | undefined>): void {
+  const query: Record<string, string> = {}
+  for (const [key, value] of Object.entries({ ...route.query, ...patch })) {
+    if (value === undefined || value === null || value === '') continue
+    query[key] = String(value)
+  }
+  void router.push({ query })
+}
+
+/** 翻页并同步 URL，随后加载对应页数据。 */
+function changePage(value: number): void {
+  page.value = value
+  updateQuery({ page: value > 1 ? value : undefined })
+  void loadFavorites()
+}
+
+/** 切换每页数量时回到第一页，同步 URL 后重新加载。 */
+function changePageSize(value: number): void {
+  pageSize.value = value
+  page.value = 1
+  updateQuery({ page_size: value, page: undefined })
+  void loadFavorites()
+}
+
 async function loadFavorites(): Promise<void> {
   const request = ++listRequest
   loading.value = true
   selected.value = []
   try {
-    const result = await listJmFavorites({ page: page.value, page_size: 20, search: (search.value ?? '').trim(), download_status: downloadStatus.value })
+    const result = await listJmFavorites({ page: page.value, page_size: pageSize.value, search: (search.value ?? '').trim(), download_status: downloadStatus.value })
     if (disposed || request !== listRequest) return
     items.value = result.items
     total.value = result.total
     pages.value = result.pages
     if (page.value > Math.max(result.pages, 1)) {
       page.value = Math.max(result.pages, 1)
+      updateQuery({ page: page.value > 1 ? page.value : undefined })
       await loadFavorites()
     }
   } catch (err) {
@@ -100,6 +149,7 @@ async function loadFavorites(): Promise<void> {
 
 async function initialize(): Promise<void> {
   error.value = ''
+  readQuery()
   try {
     await Promise.all([
       refreshAccount(), loadFavorites(),
@@ -197,6 +247,7 @@ async function copySelectedIds(): Promise<void> {
 
 function applyFilters(): void {
   page.value = 1
+  updateQuery({ page: undefined })
   void loadFavorites()
 }
 
@@ -261,12 +312,14 @@ onBeforeUnmount(() => { disposed = true; if (timer !== undefined) clearTimeout(t
           <v-col cols="12" md="3" class="d-flex align-center"><v-btn variant="tonal" :disabled="loading" @click="applyFilters">查询</v-btn></v-col>
         </v-row>
         <div class="d-flex align-center flex-wrap ga-2 mt-4">
-          <v-btn variant="tonal" :disabled="selectableIds.length === 0" @click="toggleSelectAll">
-            {{ allSelectableSelected ? '取消全选' : '全选' }}
-          </v-btn>
-          <v-btn color="primary" :loading="downloading" :disabled="selectedIds.length === 0 || selectedIds.length > 100" data-testid="jm-download" @click="download">下载所选（{{ selectedIds.length }}）</v-btn>
-          <v-btn variant="tonal" prepend-icon="mdi-content-copy" :disabled="selectedIds.length === 0" @click="copySelectedIds">复制 ID</v-btn>
-          <span class="text-caption text-medium-emphasis">每次最多 100 本，下载后自动关联管理员收藏。</span>
+          <div class="action-scroll" :class="{ 'action-scroll--block': mobile }">
+            <v-btn variant="tonal" :disabled="selectableIds.length === 0" @click="toggleSelectAll">
+              {{ allSelectableSelected ? '取消全选' : '全选' }}
+            </v-btn>
+            <v-btn color="primary" :loading="downloading" :disabled="selectedIds.length === 0 || selectedIds.length > 100" data-testid="jm-download" @click="download">下载所选（{{ selectedIds.length }}）</v-btn>
+            <v-btn variant="tonal" prepend-icon="mdi-content-copy" :disabled="selectedIds.length === 0" @click="copySelectedIds">复制 ID</v-btn>
+            <span class="text-caption text-medium-emphasis">每次最多 100 本，下载后自动关联管理员收藏。</span>
+          </div>
           <v-spacer />
           <v-btn variant="text" to="/tasks">查看任务管理</v-btn>
         </div>
@@ -284,7 +337,15 @@ onBeforeUnmount(() => { disposed = true; if (timer !== undefined) clearTimeout(t
           </template>
         </v-list-item>
       </v-list>
-      <v-pagination v-if="pages > 1" v-model="page" :length="pages" :total-visible="5" :disabled="loading" @update:model-value="loadFavorites" />
+      <PaginationBar
+        :page="page"
+        :pages="pages"
+        :page-size="pageSize"
+        :page-size-options="pageSizeOptions"
+        :loading="loading"
+        @update:page="changePage"
+        @update:page-size="changePageSize"
+      />
     </v-card>
   </div>
 </template>

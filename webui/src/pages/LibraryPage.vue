@@ -17,6 +17,7 @@ import {
 import { requestDownloads } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import PaginationBar from '@/components/PaginationBar.vue'
 import { useCoverPreview } from '@/stores/coverPreview'
 import type { Manga } from '@/types/api'
 import { copyText } from '@/utils/clipboard'
@@ -601,57 +602,59 @@ watch(
           <template v-if="selectedCount > 0">，已选 {{ selectedCount }} 条</template>
         </span>
         <v-spacer />
-        <v-btn
-          variant="tonal"
-          :disabled="mangas.length === 0"
-          @click="toggleSelectAll"
-        >
-          {{ allSelectableSelected ? '取消全选' : '全选' }}
-        </v-btn>
-        <v-btn
-          variant="tonal"
-          prepend-icon="mdi-download"
-          :disabled="selectedCount === 0"
-          @click="requestDownloadIds(selected)"
-        >
-          下载选中
-        </v-btn>
-        <v-btn
-          variant="tonal"
-          prepend-icon="mdi-content-copy"
-          :disabled="selectedCount === 0"
-          @click="copySelectedIds"
-        >
-          复制 ID
-        </v-btn>
-        <v-btn
-          variant="tonal"
-          color="error"
-          prepend-icon="mdi-delete-sweep"
-          :disabled="selectedCount === 0"
-          @click="batchDeleteDialog = true"
-        >
-          批量删除
-        </v-btn>
-        <v-btn
-          variant="tonal"
-          color="warning"
-          prepend-icon="mdi-lock"
-          :disabled="selectedCount === 0"
-          @click="openBatchBlacklist('add')"
-        >
-          批量拉黑
-        </v-btn>
-        <v-btn
-          variant="tonal"
-          color="warning"
-          prepend-icon="mdi-lock-off"
-          :disabled="!hasSelectedBlacklisted"
-          @click="openBatchBlacklist('remove')"
-        >
-          批量解除
-        </v-btn>
-        <v-btn icon="mdi-refresh" variant="text" aria-label="刷新" @click="load" />
+        <div class="action-scroll" :class="{ 'action-scroll--block': mobile }">
+          <v-btn
+            variant="tonal"
+            :disabled="mangas.length === 0"
+            @click="toggleSelectAll"
+          >
+            {{ allSelectableSelected ? '取消全选' : '全选' }}
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            prepend-icon="mdi-download"
+            :disabled="selectedCount === 0"
+            @click="requestDownloadIds(selected)"
+          >
+            下载选中
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            prepend-icon="mdi-content-copy"
+            :disabled="selectedCount === 0"
+            @click="copySelectedIds"
+          >
+            复制 ID
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            color="error"
+            prepend-icon="mdi-delete-sweep"
+            :disabled="selectedCount === 0"
+            @click="batchDeleteDialog = true"
+          >
+            批量删除
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            color="warning"
+            prepend-icon="mdi-lock"
+            :disabled="selectedCount === 0"
+            @click="openBatchBlacklist('add')"
+          >
+            批量拉黑
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            color="warning"
+            prepend-icon="mdi-lock-off"
+            :disabled="!hasSelectedBlacklisted"
+            @click="openBatchBlacklist('remove')"
+          >
+            批量解除
+          </v-btn>
+          <v-btn icon="mdi-refresh" variant="text" aria-label="刷新" @click="load" />
+        </div>
       </v-card-actions>
     </v-card>
 
@@ -886,25 +889,15 @@ watch(
       </template>
 
       <v-divider v-if="pages > 1" />
-      <div class="d-flex flex-wrap align-center justify-center pa-2">
-        <v-pagination
-          v-if="pages > 1"
-          :model-value="filters.page"
-          :length="pages"
-          :total-visible="5"
-          @update:model-value="updateQuery({ page: $event })"
-        />
-        <v-select
-          :model-value="filters.pageSize"
-          :items="pageSizeOptions"
-          label="每页"
-          hide-details
-          density="compact"
-          class="mt-2"
-          style="max-width: 120px"
-          @update:model-value="updateQuery({ page_size: $event, page: 1 })"
-        />
-      </div>
+      <PaginationBar
+        :page="filters.page"
+        :pages="pages"
+        :page-size="filters.pageSize"
+        :page-size-options="pageSizeOptions"
+        :loading="loading"
+        @update:page="updateQuery({ page: $event })"
+        @update:page-size="updateQuery({ page_size: $event, page: 1 })"
+      />
     </v-card>
 
     <ConfirmDialog
