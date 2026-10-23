@@ -50,10 +50,6 @@ body {
   min-width: 0;
 }
 
-.action-scroll--block {
-  width: 100%;
-}
-
 .action-scroll--mobile {
   flex-wrap: nowrap;
   overflow-x: auto;

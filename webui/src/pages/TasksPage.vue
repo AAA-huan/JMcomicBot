@@ -455,7 +455,7 @@ watch(
           <template v-if="selected.length > 0">，已选 {{ selected.length }} 条</template>
         </span>
         <v-spacer />
-        <div class="action-scroll" :class="{ 'action-scroll--block': mobile }">
+        <div class="action-scroll" :class="{ 'action-scroll--mobile': mobile }">
           <v-btn
             variant="tonal"
             :disabled="selectableIds.length === 0"

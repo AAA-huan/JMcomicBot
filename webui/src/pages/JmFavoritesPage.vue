@@ -342,7 +342,7 @@ onBeforeUnmount(() => { disposed = true; if (timer !== undefined) clearTimeout(t
           <v-col cols="12" md="3" class="d-flex align-center"><v-btn variant="tonal" :disabled="loading" @click="applyFilters">查询</v-btn></v-col>
         </v-row>
         <div class="d-flex align-center flex-wrap ga-2 mt-4">
-          <div class="action-scroll" :class="{ 'action-scroll--block': mobile }">
+          <div class="action-scroll" :class="{ 'action-scroll--mobile': mobile }">
             <v-btn variant="tonal" :disabled="selectableIds.length === 0" @click="toggleSelectAll">
               {{ allSelectableSelected ? '取消全选' : '全选' }}
             </v-btn>
