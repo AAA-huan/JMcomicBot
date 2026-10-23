@@ -16,7 +16,7 @@ from tests.test_web.support import (
 def _make_client(db_manager) -> tuple[TestClient, Path]:
     """构造测试客户端与临时下载根目录。"""
     root = Path(db_manager.db_dir).parent
-    context = build_web_context(db_manager, root, root / "backups")
+    context = build_web_context(db_manager, root)
     return create_test_client(context.dependencies), root
 
 

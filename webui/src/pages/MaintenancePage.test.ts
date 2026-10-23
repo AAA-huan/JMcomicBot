@@ -4,7 +4,6 @@ import { createVuetify } from 'vuetify'
 
 vi.mock('@/api/maintenance', () => ({
   scanLibrary: vi.fn(), repairLibrary: vi.fn(), verifyLibrary: vi.fn(),
-  listBackups: vi.fn(), createBackup: vi.fn(),
   exportData: vi.fn(), validateDataImport: vi.fn(), applyDataImport: vi.fn(),
 }))
 vi.mock('@/api/eventStream', () => ({ useEventSubscription: vi.fn() }))
@@ -12,7 +11,6 @@ vi.mock('@/api/eventStream', () => ({ useEventSubscription: vi.fn() }))
 import {
   applyDataImport,
   exportData,
-  listBackups,
   repairLibrary,
   scanLibrary,
   validateDataImport,
@@ -23,7 +21,6 @@ import MaintenancePage from './MaintenancePage.vue'
 describe('维护页参数', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(listBackups).mockResolvedValue({ items: [], total: 0, pages: 0, page: 1, page_size: 10 })
   })
 
   it('扫描时传递预览及联网补全选项', async () => {
@@ -47,14 +44,52 @@ describe('维护页参数', () => {
   })
 
   it('修复预览展示差异，不执行正式修复', async () => {
-    vi.mocked(repairLibrary).mockResolvedValue({ dry_run: true, cleaned_count: 0, orphan_manga_ids: ['100'], orphan_tag_names: ['孤儿标签'] })
+    vi.mocked(repairLibrary).mockResolvedValue({
+      dry_run: true,
+      cleaned_count: 0,
+      orphan_manga_ids: ['100'],
+      orphan_tag_names: ['孤儿标签'],
+      processed_manga_ids: [],
+      removed_tag_names: [],
+    })
     const wrapper = mount(MaintenancePage, { global: { plugins: [createVuetify()] } })
     await wrapper.findAll('input[type="checkbox"]')[4].setValue(true)
     await wrapper.findAll('button').find((button) => button.text().includes('预览修复差异'))!.trigger('click')
     await flushPromises()
     expect(repairLibrary).toHaveBeenCalledWith(true)
-    expect(wrapper.text()).toContain('漫画 ID：100')
-    expect(wrapper.text()).toContain('标签：孤儿标签')
+    expect(wrapper.text()).toContain('待标记缺失（1）')
+    expect(wrapper.text()).toContain('待清理标签（1）')
+    expect(wrapper.text()).toContain('100')
+    expect(wrapper.text()).toContain('孤儿标签')
+    expect(wrapper.text()).not.toContain('已标记缺失')
+    wrapper.unmount()
+  })
+
+  it('正式修复展示实际处理结果', async () => {
+    vi.mocked(repairLibrary).mockResolvedValue({
+      dry_run: false,
+      cleaned_count: 2,
+      orphan_manga_ids: [],
+      orphan_tag_names: [],
+      processed_manga_ids: ['200', '201'],
+      removed_tag_names: ['废弃标签'],
+    })
+    const wrapper = mount(MaintenancePage, { global: { plugins: [createVuetify()] } })
+    await wrapper.findAll('button').find((button) => button.text().includes('开始修复'))!.trigger('click')
+    await flushPromises()
+    const confirmButton = Array.from(document.querySelectorAll('button')).find((button) =>
+      button.textContent?.includes('确认修复'),
+    )
+    expect(confirmButton).toBeTruthy()
+    confirmButton!.click()
+    await flushPromises()
+    expect(repairLibrary).toHaveBeenCalledWith(false)
+    expect(wrapper.text()).toContain('已清理 2 条孤儿记录')
+    expect(wrapper.text()).toContain('已标记缺失（2）')
+    expect(wrapper.text()).toContain('已清理标签（1）')
+    expect(wrapper.text()).toContain('200')
+    expect(wrapper.text()).toContain('废弃标签')
+    expect(wrapper.text()).not.toContain('待标记缺失')
     wrapper.unmount()
   })
 
@@ -72,13 +107,12 @@ describe('维护页参数', () => {
 describe('维护页数据迁移', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    vi.mocked(listBackups).mockResolvedValue({ items: [], total: 0, pages: 0, page: 1, page_size: 10 })
   })
 
   it('导出数据触发浏览器下载并提示文件名', async () => {
     vi.mocked(exportData).mockResolvedValue({
       blob: new Blob(['zip']),
-      filename: 'data-export-20261023-120000-schema0027_reading_setting.zip',
+      filename: 'data-export-20261023-120000-schema0028_drop_backup_record.zip',
     })
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     const wrapper = mount(MaintenancePage, { global: { plugins: [createVuetify()] } })
@@ -88,7 +122,7 @@ describe('维护页数据迁移', () => {
 
     expect(exportData).toHaveBeenCalledTimes(1)
     expect(click).toHaveBeenCalledTimes(1)
-    expect(wrapper.text()).toContain('数据已导出：data-export-20261023-120000-schema0027_reading_setting.zip')
+    expect(wrapper.text()).toContain('数据已导出：data-export-20261023-120000-schema0028_drop_backup_record.zip')
     click.mockRestore()
     wrapper.unmount()
   })
@@ -102,7 +136,7 @@ describe('维护页数据迁移', () => {
       db_sha256: 'a'.repeat(64),
       table_counts: { manga: 12, manga_favorite: 3 },
       export_env: { db_path: './data', manga_download_path: './downloads' },
-      current_schema_revision: '0027_reading_setting',
+      current_schema_revision: '0028_drop_backup_record',
       path_warnings: ['导出环境下载目录为 ./downloads，当前为 ./other-downloads，请确保 PDF 已拷贝到当前目录或调整配置'],
     })
     const wrapper = mount(MaintenancePage, {
@@ -117,7 +151,7 @@ describe('维护页数据迁移', () => {
 
     expect(validateDataImport).toHaveBeenCalledWith(file)
     expect(wrapper.text()).toContain('导出 schema：0026_manga_blacklist')
-    expect(wrapper.text()).toContain('当前 schema：0027_reading_setting')
+    expect(wrapper.text()).toContain('当前 schema：0028_drop_backup_record')
     expect(wrapper.text()).toContain('漫画')
     expect(wrapper.text()).toContain('12')
     expect(wrapper.text()).toContain('请确保 PDF 已拷贝到当前目录')
@@ -127,13 +161,13 @@ describe('维护页数据迁移', () => {
   it('二次确认后使用同一文件执行导入并提示重启', async () => {
     vi.mocked(validateDataImport).mockResolvedValue({
       format_version: 1,
-      schema_revision: '0027_reading_setting',
+      schema_revision: '0028_drop_backup_record',
       exported_at: '2026-10-23T12:00:00Z',
       db_filename: 'main-20261023-120000.db',
       db_sha256: 'a'.repeat(64),
       table_counts: { manga: 1 },
       export_env: { db_path: './data', manga_download_path: './downloads' },
-      current_schema_revision: '0027_reading_setting',
+      current_schema_revision: '0028_drop_backup_record',
       path_warnings: [],
     })
     vi.mocked(applyDataImport).mockResolvedValue({ restart: true })

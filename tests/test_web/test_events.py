@@ -22,7 +22,7 @@ def _make_event_client(
 ) -> tuple[TestClient, WebTestContext]:
     """构造使用高频状态采样的测试客户端。"""
     root = Path(db_manager.db_dir).parent
-    context = build_web_context(db_manager, root, root / "backups")
+    context = build_web_context(db_manager, root)
     client = create_test_client(context.dependencies, status_interval_seconds=0.05)
     return client, context
 

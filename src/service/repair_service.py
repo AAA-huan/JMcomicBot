@@ -21,6 +21,15 @@ class RepairDiff:
     orphan_tag_names: tuple[str, ...]
 
 
+@dataclass(frozen=True)
+class RepairResult:
+    """修复执行结果，记录已处理的孤儿漫画与标签。"""
+
+    cleaned_count: int
+    processed_manga_ids: list[str]
+    removed_tag_names: list[str]
+
+
 class RepairService:
     """基于磁盘扫描差异执行孤儿清理的修复服务。
 
@@ -52,24 +61,26 @@ class RepairService:
             orphan_tag_names=tuple(self.tag_repo.list_orphan_tags()),
         )
 
-    def repair(self, context: Optional[OperationContext] = None) -> int:
-        """执行孤儿清理，返回处理的孤儿数量。"""
+    def repair(self, context: Optional[OperationContext] = None) -> RepairResult:
+        """执行孤儿清理，返回清理数量与实际处理的孤儿项。"""
         operation_context = context or OperationContext.system()
         task = self.operation_task_service.create("repair", operation_context)
         self.operation_task_service.start(task.id, "repairing")
         try:
             diff = self.preview()
-            for manga_id in diff.orphan_manga_ids:
+            processed_manga_ids = list(diff.orphan_manga_ids)
+            removed_tag_names = list(diff.orphan_tag_names)
+            for manga_id in processed_manga_ids:
                 self.manga_repo.mark_manga_missing(manga_id)
             cleaned_tags = self.tag_repo.delete_orphan_tags()
-            cleaned_count = len(diff.orphan_manga_ids) + cleaned_tags
+            cleaned_count = len(processed_manga_ids) + cleaned_tags
             # 正式统计落表：missing_count 为标记缺失的漫画数，
             # repaired_count 为清理条目总数（孤儿漫画 + 孤儿标签）
             self.scan_record_repo.create(
                 task_id=task.id,
                 task_type="repair",
                 path_label=DOWNLOAD_PATH_LABEL,
-                missing_count=len(diff.orphan_manga_ids),
+                missing_count=len(processed_manga_ids),
                 repaired_count=cleaned_count,
             )
             self.operation_task_service.succeed(
@@ -77,7 +88,11 @@ class RepairService:
                 metadata={"cleaned_count": cleaned_count},
                 context=operation_context,
             )
-            return cleaned_count
+            return RepairResult(
+                cleaned_count=cleaned_count,
+                processed_manga_ids=processed_manga_ids,
+                removed_tag_names=removed_tag_names,
+            )
         except Exception as error:
             self.operation_task_service.fail(
                 task.id,

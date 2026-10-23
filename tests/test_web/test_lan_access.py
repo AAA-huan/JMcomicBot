@@ -14,7 +14,7 @@ LAN_HOST = "172.23.7.69:7999"
 def _make_lan_client(db_manager) -> TestClient:
     """构造绑定 0.0.0.0、Host 头为局域网地址的测试客户端。"""
     root = Path(db_manager.db_dir).parent
-    context = build_web_context(db_manager, root, root / "backups")
+    context = build_web_context(db_manager, root)
     return create_test_client(
         context.dependencies,
         web_host="0.0.0.0",
@@ -75,7 +75,7 @@ def test_lan_mode_websocket_origin_rules(db_manager) -> None:
 def test_default_mode_still_rejects_lan_host(db_manager) -> None:
     """未启用局域网绑定时，外部 Host 仍被拒绝（默认保持本机安全）。"""
     root = Path(db_manager.db_dir).parent
-    context = build_web_context(db_manager, root, root / "backups")
+    context = build_web_context(db_manager, root)
     with create_test_client(context.dependencies, host_header=LAN_HOST) as client:
         response = client.get("/api/v1/auth/status")
 

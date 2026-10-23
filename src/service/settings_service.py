@@ -192,17 +192,6 @@ SETTING_DEFINITIONS: Tuple[SettingDefinition, ...] = (
         apply_target="重启机器人",
     ),
     SettingDefinition(
-        key="BACKUP_PATH",
-        title="数据库备份目录",
-        value_type="str",
-        default="./data/backups",
-        group="路径",
-        editable=True,
-        sensitive=False,
-        effect=EFFECT_RESTART,
-        apply_target="重启机器人",
-    ),
-    SettingDefinition(
         key="WEBUI_ENABLED",
         title="启用 WebUI",
         value_type="bool",

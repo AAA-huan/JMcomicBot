@@ -529,48 +529,6 @@ class ScanRecord(Base):
     )
 
 
-class BackupRecord(Base):
-    """数据库备份记录，长期保留行，文件删除后仅标记 deleted。"""
-
-    __tablename__ = "backup_record"
-    __table_args__ = (
-        CheckConstraint(
-            "status IN ('creating', 'ready', 'failed', 'deleted')",
-            name="ck_backup_record_status",
-        ),
-        UniqueConstraint("relative_path", name="uq_backup_record_relative_path"),
-        Index("ix_backup_record_status_created", "status", "created_at"),
-        Index("ix_backup_record_created", "created_at", "id"),
-    )
-
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    filename: Mapped[str] = mapped_column(String(512), nullable=False, comment="文件名")
-    relative_path: Mapped[str] = mapped_column(
-        String(1024), nullable=False, comment="相对 BACKUP_PATH 的路径"
-    )
-    file_size_bytes: Mapped[int] = mapped_column(
-        Integer, nullable=False, default=0, comment="文件字节数"
-    )
-    sha256: Mapped[Optional[str]] = mapped_column(
-        String(64), nullable=True, comment="文件SHA-256"
-    )
-    schema_version: Mapped[str] = mapped_column(
-        String(64), nullable=False, comment="备份时 schema 版本"
-    )
-    status: Mapped[str] = mapped_column(
-        String(32), nullable=False, comment="creating/ready/failed/deleted"
-    )
-    created_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utc_now, comment="创建时间"
-    )
-    updated_at: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=utc_now, comment="更新时间"
-    )
-    deleted_at: Mapped[Optional[datetime]] = mapped_column(
-        DateTime, nullable=True, comment="文件删除时间"
-    )
-
-
 class AuditEvent(Base):
     """重要操作审计事件，不保存原始消息或秘密信息。"""
 

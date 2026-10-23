@@ -23,18 +23,6 @@ class TaskResult:  # pylint: disable=too-many-instance-attributes
 
 
 @dataclass(frozen=True)
-class BackupResult:
-    """一致性数据库备份结果。"""
-
-    task_id: str
-    path: Path
-    file_count: int
-    backup_id: int
-    filename: str
-    file_size_bytes: int
-
-
-@dataclass(frozen=True)
 class DataExportResult:
     """漫画数据库导出结果，路径指向待流式下载的临时 zip。"""
 

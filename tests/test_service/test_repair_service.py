@@ -66,9 +66,11 @@ def test_repair_marks_orphan_manga_and_deletes_orphan_tags(
     )
     _prepare_orphans(db_manager, manga_repo, tag_repo, tmp_path)
 
-    cleaned = repair_service.repair()
+    result = repair_service.repair()
 
-    assert cleaned == 2  # 1 个孤儿漫画 + 1 个孤儿标签
+    assert result.cleaned_count == 2  # 1 个孤儿漫画 + 1 个孤儿标签
+    assert result.processed_manga_ids == ["350261"]
+    assert result.removed_tag_names == ["纯爱"]
     assert manga_repo.get("350260").status == "downloaded"
     assert manga_repo.get("350261").status == "missing_file"
     assert tag_repo.list_all_tags() == []

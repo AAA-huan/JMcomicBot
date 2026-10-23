@@ -116,18 +116,6 @@ export interface SettingView {
   is_set: boolean
 }
 
-export interface BackupRecord {
-  id: number
-  filename: string
-  file_size_bytes: number
-  sha256: string | null
-  schema_version: string
-  status: string
-  created_at: string
-  updated_at: string
-  deleted_at: string | null
-}
-
 export interface DownloadRequestItem {
   manga_id: string
   status: 'queued' | 'duplicate'

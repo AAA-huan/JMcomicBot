@@ -2,6 +2,9 @@
 
 from typing import List, Tuple
 
+# 分页消息发送间隔（秒）：避免连续发送分页消息过快，最后一页不等待
+QUERY_PAGE_SEND_INTERVAL = 0.325
+
 
 def parse_batch_params(params: str) -> Tuple[List[str], bool]:
     """

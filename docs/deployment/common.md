@@ -41,7 +41,6 @@ NAPCAT_TOKEN=""
 |---|---|
 | `MANGA_DOWNLOAD_PATH` | `./downloads`，漫画 PDF 保存目录 |
 | `DB_PATH` | `./data`，数据库目录，内含 `main.db` |
-| `BACKUP_PATH` | `./data/backups`，数据库备份目录 |
 | `WEBUI_HOST`、`WEBUI_PORT` | `127.0.0.1`、`7999`，本机 WebUI 地址 |
 | `GROUP_WHITELIST`、`PRIVATE_WHITELIST` | 允许响应的群 / 私聊；留空不限制 |
 | `GLOBAL_BLACKLIST` | 禁止响应的用户；优先于白名单 |

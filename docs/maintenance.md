@@ -4,7 +4,6 @@
 
 | 脚本 | 用途 | 参数 |
 |---|---|---|
-| `backup_database.py` | 创建数据库一致性备份 | 无业务参数 |
 | `scan_mangas.py` | 登记本地 PDF，按需补全详情和页数 | `--dry-run`、`--enrich`、`--read-pages`、`--check-chapters` |
 | `repair_mangas.py` | 标记缺失漫画，清理无关联的孤儿标签 | `--dry-run` |
 | `verify_mangas.py` | 校验登记文件的路径、存在性与摘要 | `--id <漫画ID>`，可重复 |
@@ -12,21 +11,11 @@
 
 ## 配置与运行方式
 
-- 脚本读取项目 `.env`：`MANGA_DOWNLOAD_PATH` 默认 `./downloads`，`DB_PATH` 默认 `./data`（内含 `main.db`），`BACKUP_PATH` 默认 `./data/backups`。确认使用与机器人相同的配置，避免维护另一份数据库。
+- 脚本读取项目 `.env`：`MANGA_DOWNLOAD_PATH` 默认 `./downloads`，`DB_PATH` 默认 `./data`（内含 `main.db`）。确认使用与机器人相同的配置，避免维护另一份数据库。
 - 普通部署命令使用 `uv run --no-dev`，无需激活虚拟环境或重新运行 pip。若按平台指南固定使用 uv 托管 Python 3.12，可将本文命令前缀换成 `uv run --no-dev --managed-python --python 3.12`，Android/proot 建议使用这个前缀。
 - `--enrich` 读取项目根目录的 `option.yml`，配置缺失或无效会报错。其他维护操作不需要用它查询站点；机器人下载仍需要该文件。
 - 脚本会初始化数据库并执行必要迁移；有旧库需要升级时，生成 `main.db.pre-migration.bak`。因此 `--dry-run` 表示不执行本次扫描或修复的业务写入，不保证首次初始化和迁移完全不写磁盘。
-- 扫描、修复、校验和备份也可在 WebUI「维护」页执行，二者共用服务；管理员重置由命令行执行。
-
-## 备份数据库
-
-```bash
-uv run --no-dev python scripts/backup_database.py
-```
-
-使用 SQLite backup API 生成一致性备份，保存到 `BACKUP_PATH` 并登记备份记录与任务审计。文件名包含时间和数据库迁移版本；迁移前的 `.pre-migration.bak` 不属于这里的备份记录。
-
-备份仅包含数据库，漫画 PDF 与 `.env`、`option.yml` 需另行保管。操作失败会打印原因并以非零状态退出。
+- 扫描、修复与校验也可在 WebUI「维护」页执行，二者共用服务；管理员重置由命令行执行。数据导出与导入仅在 WebUI「维护」页提供。
 
 ## 扫描漫画并补全信息
 
@@ -106,15 +95,14 @@ uv run --no-dev python scripts/reset_web_admin.py --yes
 当前 `CleanupService` 的默认行为：
 
 - 任务记录保留 180 天，审计事件保留 365 天。
-- 数据库备份最多保留最近 10 份、总计 512 MiB；始终保留最新一份，超限时从最旧文件开始清理。
-- 被清理的备份文件记录标记为 `deleted`；迁移前备份不参与这一保留清理。
+- 迁移前的 `main.db.pre-migration.bak` 与导入前的 `main.db.pre-import-*.bak` 不参与自动清理，需要时请手动删除。
 
 清理由机器人常规维护流程触发。当前 `.env` 和 WebUI 没有提供这些保留参数的配置入口。
 
 ## 常见问题
 
 - **`option.yml` 缺失**：联网扫描和漫画下载需要它，首次部署从 `option_example.yml` 复制；仅本地扫描不需要联网客户端。
-- **数据库尚不存在**：脚本会初始化数据库。已有数据库不需要删除，先核对 `DB_PATH`；备份可用上面的备份脚本创建。
+- **数据库尚不存在**：脚本会初始化数据库。已有数据库不需要删除，先核对 `DB_PATH`；需要备份时可在 WebUI「维护」页导出数据，或停止机器人后手动复制数据库目录。
 - **扫描后页面没更新**：刷新 WebUI，确认机器人和脚本读取同一个 `.env`、下载目录与数据库。
 - **站点数量与本地数量不同**：可能是站点新增章节或本地仅有部分内容，查看扫描差异；不会用在线数值覆盖本地实际值。
 - **提示重复 PDF**：按结果列出的候选整理文件后重扫。扫描不会猜测哪个文件应覆盖现有漫画。

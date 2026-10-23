@@ -12,7 +12,7 @@ from tests.test_web.support import (
 def test_download_progress_requires_login(db_manager) -> None:
     """未登录访问进度接口应返回 401。"""
     root = Path(db_manager.db_dir).parent
-    context = build_web_context(db_manager, root, root / "backups")
+    context = build_web_context(db_manager, root)
     client = create_test_client(context.dependencies)
 
     with client:
@@ -25,7 +25,7 @@ def test_download_progress_requires_login(db_manager) -> None:
 def test_download_progress_returns_active_snapshot(db_manager) -> None:
     """登录后应返回当前下载快照；无任务时 active 为空。"""
     root = Path(db_manager.db_dir).parent
-    context = build_web_context(db_manager, root, root / "backups")
+    context = build_web_context(db_manager, root)
     client = create_test_client(context.dependencies)
     tracker = context.dependencies.download_progress_tracker
 
