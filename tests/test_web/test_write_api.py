@@ -18,6 +18,8 @@ from tests.test_web.support import (
     create_test_client,
     csrf_headers,
     setup_and_login,
+    wait_for_active_downloads,
+    wait_for_queued_downloads,
 )
 
 
@@ -110,7 +112,7 @@ def test_manga_delete_conflict_and_batch_delete(db_manager) -> None:
     _add_manga(db_manager, root, "200")
     _add_manga(db_manager, root, "300")
 
-    client, _context = _make_client(db_manager)
+    client, context = _make_client(db_manager)
     with client:
         setup_and_login(client)
         headers = csrf_headers(client)
@@ -119,6 +121,7 @@ def test_manga_delete_conflict_and_batch_delete(db_manager) -> None:
             json={"manga_ids": ["200"]},
             headers=headers,
         )
+        wait_for_queued_downloads(context.download_queue, ["200"])
         conflict = client.delete("/api/v1/mangas/200", headers=headers)
         batch = client.post(
             "/api/v1/mangas/batch-delete",
@@ -152,7 +155,8 @@ def test_download_request_dedup_and_validation(db_manager) -> None:
             json={"manga_ids": ["101", "101", "102"]},
             headers=headers,
         )
-        duplicated = client.post(
+        # 后台入队尚未完成时再次提交，也不得重复创建任务
+        repeated_early = client.post(
             "/api/v1/tasks/downloads",
             json={"manga_ids": ["101"]},
             headers=headers,
@@ -167,10 +171,24 @@ def test_download_request_dedup_and_validation(db_manager) -> None:
             json={"manga_ids": [str(100000 + i) for i in range(101)]},
             headers=headers,
         )
+        wait_for_active_downloads(db_manager, ["101", "102"])
+        duplicated = client.post(
+            "/api/v1/tasks/downloads",
+            json={"manga_ids": ["101"]},
+            headers=headers,
+        )
 
     assert created.status_code == 202
     assert [item["manga_id"] for item in created.json()["items"]] == ["101", "102"]
     assert created.json()["queued_count"] == 2
+    assert [item["status"] for item in created.json()["items"]] == [
+        "accepted",
+        "accepted",
+    ]
+    assert repeated_early.status_code == 202
+    assert repeated_early.json()["queued_count"] in (0, 1)
+    active_tasks = wait_for_active_downloads(db_manager, ["101", "102"])
+    assert len(active_tasks) == 2
     assert duplicated.status_code == 202
     assert duplicated.json()["items"][0]["status"] == "duplicate"
     assert duplicated.json()["items"][0]["task_id"] is not None
@@ -180,9 +198,34 @@ def test_download_request_dedup_and_validation(db_manager) -> None:
     assert over_limit.json()["code"] == "VALIDATION_ERROR"
 
 
+def test_download_queue_pause_and_resume_endpoints(db_manager) -> None:
+    """暂停/恢复接口幂等，队列状态包含 paused 字段。"""
+    client, context = _make_client(db_manager)
+    with client:
+        setup_and_login(client)
+        headers = csrf_headers(client)
+
+        paused = client.post("/api/v1/tasks/pause", headers=headers)
+        paused_again = client.post("/api/v1/tasks/pause", headers=headers)
+        status_paused = client.get("/api/v1/queues/download")
+
+        resumed = client.post("/api/v1/tasks/resume", headers=headers)
+        resumed_again = client.post("/api/v1/tasks/resume", headers=headers)
+        status_resumed = client.get("/api/v1/queues/download")
+
+    assert paused.status_code == 200
+    assert paused.json() == {"paused": True, "changed": True}
+    assert paused_again.json() == {"paused": True, "changed": False}
+    assert status_paused.json()["paused"] is True
+    assert resumed.json() == {"paused": False, "changed": True}
+    assert resumed_again.json() == {"paused": False, "changed": False}
+    assert status_resumed.json()["paused"] is False
+    assert context.download_queue.paused is False
+
+
 def test_task_cancel_endpoints(db_manager) -> None:
     """单个取消与全部取消应区分状态，并拒绝已开始任务。"""
-    client, _context = _make_client(db_manager)
+    client, context = _make_client(db_manager)
     with client:
         setup_and_login(client)
         headers = csrf_headers(client)
@@ -191,6 +234,7 @@ def test_task_cancel_endpoints(db_manager) -> None:
             json={"manga_ids": ["101", "102"]},
             headers=headers,
         )
+        wait_for_queued_downloads(context.download_queue, ["101", "102"])
         tasks = {
             task.manga_id: task for task in OperationTaskRepository(db_manager).list()
         }

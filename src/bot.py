@@ -202,6 +202,7 @@ class MangaBot:
             send_conflict_checker=self.message_manager.is_manga_sending,
             favorite_repository=self.favorite_repo,
             progress_tracker=self.download_progress_tracker,
+            settings_service=self.settings_service,
         )
         # 启动续传：运行中任务已在上方标记中断，这里复用原记录转回排队；
         # 排队任务直接装入内存队列，避免重启后旧记录永久占位

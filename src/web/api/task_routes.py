@@ -3,16 +3,52 @@
 from dataclasses import asdict
 from typing import Annotated, Callable, List, Optional
 
+import threading
+
 from fastapi import APIRouter, Depends, Query, Request, status
 from pydantic import BaseModel, Field
 
+from src.logging.logger_config import logger
 from src.service.download_service import DOWNLOAD_REQUEST_LIMIT
+from src.service.operation_context import OperationContext
 from src.service.web_auth_service import AuthenticatedSession
 from src.web.api.common import build_operation_context
 from src.web.dependencies import WebDependencies
 from src.web.errors import ApiError
 
 AuthenticateCallable = Callable[..., AuthenticatedSession]
+
+
+def _publish_queue_status(dependencies: WebDependencies) -> None:
+    """立即推送队列状态，避免前端等待下一次周期采样。"""
+    snapshot = dependencies.system_service.get_status()
+    dependencies.event_bus.publish(
+        "queue.updated",
+        {"download": snapshot.download_queue, "send": snapshot.send_queue},
+    )
+
+
+def _enqueue_pending_in_background(
+    dependencies: WebDependencies,
+    pending_ids: List[str],
+    context: OperationContext,
+) -> None:
+    """后台把预检通过的漫画逐个入队，完成后推送最新队列状态。"""
+    try:
+        result = dependencies.download_service.enqueue_pending(
+            pending_ids, context, None
+        )
+        logger.info(
+            f"后台批量入队完成：入队 {result.queued_count} 个，"
+            f"重复 {result.duplicate_count} 个"
+        )
+    # 后台线程边界必须记录异常，否则用户只会看到任务没有出现
+    # pylint: disable-next=broad-exception-caught
+    except Exception as error:
+        logger.error(f"后台批量入队下载任务失败: {error}")
+    finally:
+        _publish_queue_status(dependencies)
+
 
 # 单次下载请求的漫画数量上限，与下载服务保持单一来源（消除两处漂移）
 # DownloadRequest.max_length 直接引用 download_service.DOWNLOAD_REQUEST_LIMIT
@@ -70,19 +106,54 @@ def create_task_router(
         request: Request,
         authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
     ) -> dict[str, object]:
-        """请求下载单个或多个漫画；重复请求返回既有任务而不是重复建立。"""
+        """接收批量下载请求，立即返回并在后台逐个入队。
+
+        预检阶段只做一次批量活动任务查询；返回后由后台线程创建任务，
+        WebSocket 的 task.updated / queue.updated 会驱动任务列表实时刷新。
+        """
         context = build_operation_context(request, authenticated)
         try:
-            result = dependencies.download_service.request(
-                list(body.manga_ids), context, None
-            )
+            prepared = dependencies.download_service.prepare(list(body.manga_ids))
         except ValueError as error:
             raise ApiError(400, "INVALID_DOWNLOAD_REQUEST", str(error)) from error
+        if prepared.pending_ids:
+            threading.Thread(
+                target=_enqueue_pending_in_background,
+                args=(dependencies, list(prepared.pending_ids), context),
+                daemon=True,
+                name="download-enqueue",
+            ).start()
         return {
-            "items": [asdict(item) for item in result.items],
-            "queued_count": result.queued_count,
-            "duplicate_count": result.duplicate_count,
-            "skipped_blacklisted": list(result.skipped_blacklisted),
+            "items": [asdict(item) for item in prepared.items],
+            "queued_count": prepared.accepted_count,
+            "duplicate_count": prepared.duplicate_count,
+            "skipped_blacklisted": list(prepared.skipped_blacklisted),
+        }
+
+    @router.post("/tasks/pause")
+    def pause_download_queue(
+        _request: Request,
+        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """暂停下载队列；幂等，已暂停时 changed 为 False。"""
+        changed = dependencies.download_service.pause()
+        _publish_queue_status(dependencies)
+        return {
+            "paused": dependencies.download_service.is_paused(),
+            "changed": changed,
+        }
+
+    @router.post("/tasks/resume")
+    def resume_download_queue(
+        _request: Request,
+        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """恢复下载队列；幂等，未暂停时 changed 为 False。"""
+        changed = dependencies.download_service.resume()
+        _publish_queue_status(dependencies)
+        return {
+            "paused": dependencies.download_service.is_paused(),
+            "changed": changed,
         }
 
     @router.get("/downloads/progress")

@@ -16,6 +16,7 @@ from tests.test_web.support import (
     create_test_client,
     csrf_headers,
     setup_and_login,
+    wait_for_queued_downloads,
 )
 
 
@@ -85,6 +86,7 @@ def test_single_blacklist_flow_and_download_skip(db_manager) -> None:
             json={"manga_ids": ["100", "101"]},
             headers=headers,
         )
+        wait_for_queued_downloads(context.download_queue, ["101"])
         removed = client.delete("/api/v1/mangas/100/blacklist", headers=headers)
         removed_again = client.delete("/api/v1/mangas/100/blacklist", headers=headers)
         detail_after = client.get("/api/v1/mangas/100")

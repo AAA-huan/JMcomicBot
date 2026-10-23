@@ -16,6 +16,10 @@ from src.service.operation_context import OperationContext
 EFFECT_IMMEDIATE = "immediate"
 EFFECT_RESTART = "restart"
 
+# 内部运行状态也保存在 settings 表，但不属于配置注册表，不参与配置列表展示
+DOWNLOAD_QUEUE_PAUSED_KEY = "download_queue_paused"
+_INTERNAL_SETTING_KEYS = frozenset({DOWNLOAD_QUEUE_PAUSED_KEY})
+
 # 敏感值对前端和审计只展示占位符，永不回显真实内容
 _MASKED_VALUE = "******"
 _BOOL_TRUE_VALUES = {"true", "1", "yes", "on"}
@@ -321,6 +325,9 @@ class SettingsService:
         """
         applied_count = 0
         for setting in self.setting_repository.list():
+            # 内部运行状态由对应组件自行读取，不是可覆盖的运行配置
+            if setting.key in _INTERNAL_SETTING_KEYS:
+                continue
             definition = self.definitions.get(setting.key)
             if definition is None:
                 raise ValueError(f"数据库中保存了未注册的配置项: {setting.key}")
@@ -330,6 +337,21 @@ class SettingsService:
             self.config_manager.config_dict[setting.key] = parsed_value
             applied_count += 1
         return applied_count
+
+    def is_download_queue_paused(self) -> bool:
+        """读取持久化的下载队列暂停状态，未保存时视为未暂停。"""
+        raw_value = self.setting_repository.get_optional(DOWNLOAD_QUEUE_PAUSED_KEY)
+        if raw_value is None:
+            return False
+        if raw_value == "1":
+            return True
+        if raw_value == "0":
+            return False
+        raise ValueError(f"下载队列暂停状态非法: {raw_value}")
+
+    def set_download_queue_paused(self, paused: bool) -> None:
+        """持久化下载队列暂停状态，供重启后恢复。"""
+        self.setting_repository.set(DOWNLOAD_QUEUE_PAUSED_KEY, "1" if paused else "0")
 
     def list(self) -> Tuple[SettingView, ...]:
         """返回全部配置项的安全视图，保持注册表顺序。"""

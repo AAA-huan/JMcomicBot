@@ -80,7 +80,7 @@ describe('DownloadPage', () => {
     await flushPromises()
 
     expect(requestDownloads).toHaveBeenCalledWith(['100', '200'])
-    expect(wrapper.text()).toContain('已入队 1 个')
+    expect(wrapper.text()).toContain('已提交 1 个，正在加入队列')
     expect(wrapper.text()).toContain('1 个已有活动任务（200）')
     expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('')
     wrapper.unmount()

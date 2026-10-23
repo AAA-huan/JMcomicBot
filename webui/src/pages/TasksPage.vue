@@ -5,7 +5,15 @@ import { useDisplay } from 'vuetify'
 
 import { errorMessage } from '@/api/client'
 import { useEventSubscription } from '@/api/eventStream'
-import { cancelQueuedTasks, cancelTask, cancelTasks, listTasks, retryTasks } from '@/api/tasks'
+import {
+  cancelQueuedTasks,
+  cancelTask,
+  cancelTasks,
+  listTasks,
+  pauseDownloadQueue,
+  resumeDownloadQueue,
+  retryTasks,
+} from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
@@ -104,6 +112,35 @@ const retryableSelected = computed(() =>
 
 const downloadQueue = computed(() => system.status?.download_queue ?? null)
 const sendQueue = computed(() => system.status?.send_queue ?? null)
+const downloadPaused = computed(() => downloadQueue.value?.paused === true)
+const pauseLoading = ref(false)
+
+/** 暂停/恢复下载队列；当前下载任务不会被中断。 */
+async function toggleQueuePause(): Promise<void> {
+  if (pauseLoading.value) return
+  pauseLoading.value = true
+  actionError.value = ''
+  actionNotice.value = ''
+  try {
+    const result = downloadPaused.value
+      ? await resumeDownloadQueue()
+      : await pauseDownloadQueue()
+    actionNotice.value = result.paused
+      ? '下载队列已暂停，当前任务完成后不再开始新任务'
+      : '下载队列已恢复，将继续处理排队任务'
+    // 立即更新本地状态，服务端队列事件随后保持一致
+    if (system.status) {
+      system.status.download_queue = {
+        ...system.status.download_queue,
+        paused: result.paused,
+      }
+    }
+  } catch (err) {
+    actionError.value = errorMessage(err)
+  } finally {
+    pauseLoading.value = false
+  }
+}
 
 function readQuery(): void {
   const query = route.query
@@ -320,13 +357,25 @@ watch(
     <v-row dense class="mb-4">
       <v-col cols="12" md="6">
         <v-card class="pa-4 h-100">
-          <div class="d-flex align-center">
+          <div class="d-flex align-center flex-wrap">
             <v-icon class="mr-2">mdi-download-box-outline</v-icon>
             <span class="text-subtitle-2">下载队列</span>
             <v-spacer />
             <v-chip size="small" variant="tonal" :color="downloadQueue?.running ? 'success' : 'medium-emphasis'">
               {{ downloadQueue?.running ? '运行中' : '已停止' }}
             </v-chip>
+            <v-btn
+              size="small"
+              variant="tonal"
+              class="ml-2"
+              :color="downloadPaused ? 'success' : 'warning'"
+              :prepend-icon="downloadPaused ? 'mdi-play' : 'mdi-pause'"
+              :loading="pauseLoading"
+              :disabled="!downloadQueue?.running"
+              @click="toggleQueuePause"
+            >
+              {{ downloadPaused ? '恢复队列' : '暂停队列' }}
+            </v-btn>
           </div>
           <div class="text-h5 mt-2">{{ downloadQueue?.queue_size ?? 0 }} 个任务</div>
           <div class="text-caption text-medium-emphasis">
@@ -335,6 +384,9 @@ watch(
                 ? `正在下载：${downloadQueue.current_manga_id}`
                 : '当前没有正在下载的漫画'
             }}
+          </div>
+          <div v-if="downloadPaused" class="text-caption text-warning">
+            队列已暂停，当前任务完成后停止取新任务。
           </div>
           <div class="text-caption text-medium-emphasis">
             下载任务由后台串行执行，刷新页面不会丢失。

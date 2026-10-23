@@ -31,6 +31,13 @@ class _TaskService:
             return None
         return SimpleNamespace(id=task_id)
 
+    def find_active_downloads(self, manga_ids: List[str]) -> Dict[str, SimpleNamespace]:
+        return {
+            manga_id: SimpleNamespace(id=self.active_task_ids[manga_id])
+            for manga_id in manga_ids
+            if manga_id in self.active_task_ids
+        }
+
     def get(self, task_id: str) -> Optional[SimpleNamespace]:
         return self.task_snapshots.get(task_id)
 
@@ -87,6 +94,22 @@ class _DownloadQueue:
     def __init__(self, queued_manga_ids: List[str]) -> None:
         self.queued_manga_ids = set(queued_manga_ids)
         self.requested_manga_ids: List[str] = []
+        self.paused = False
+
+    def pause(self) -> bool:
+        if self.paused:
+            return False
+        self.paused = True
+        return True
+
+    def resume(self) -> bool:
+        if not self.paused:
+            return False
+        self.paused = False
+        return True
+
+    def is_paused(self) -> bool:
+        return self.paused
 
     def cancel_download(self, manga_id: str) -> bool:
         if manga_id not in self.queued_manga_ids:
@@ -236,6 +259,59 @@ def test_request_returns_in_memory_duplicate_status() -> None:
     assert result.items[0].status == "duplicate"
     assert result.items[0].task_id == "memory-200"
     assert download_queue.requested_manga_ids == []
+
+
+def test_prepare_returns_pending_duplicates_and_blacklisted() -> None:
+    """预检批量查询活动任务，返回待入队、重复与黑名单跳过三类结果。"""
+    download_queue = _DownloadQueue(["300"])
+    task_service = _TaskService(active_task_ids={"200": "active-200"})
+    service = _build_service(
+        download_queue,
+        task_service,
+        blacklist_service=_BlacklistService(["400"]),
+    )
+
+    result = service.prepare(["100", "200", "300", "400", "100"])
+
+    assert result.pending_ids == ("100",)
+    assert result.accepted_count == 1
+    assert result.duplicate_count == 2
+    assert result.skipped_blacklisted == ("400",)
+    assert [(item.manga_id, item.status) for item in result.items] == [
+        ("100", "accepted"),
+        ("200", "duplicate"),
+        ("300", "duplicate"),
+    ]
+    assert result.duplicate_items[0].task_id == "active-200"
+    assert result.duplicate_items[1].task_id == "memory-300"
+    assert download_queue.requested_manga_ids == []
+
+
+def test_enqueue_pending_requests_each_manga_in_order() -> None:
+    """后台入队按预检顺序逐个请求下载。"""
+    download_queue = _DownloadQueue([])
+    service = _build_service(download_queue)
+
+    result = service.enqueue_pending(
+        ["100", "101"], OperationContext.web("1", "127.0.0.1")
+    )
+
+    assert download_queue.requested_manga_ids == ["100", "101"]
+    assert result.queued_count == 2
+
+
+def test_pause_resume_are_forwarded_and_idempotent() -> None:
+    """暂停/恢复转发到队列网关，重复调用返回 False。"""
+    download_queue = _DownloadQueue([])
+    service = _build_service(download_queue)
+
+    assert service.is_paused() is False
+    assert service.pause() is True
+    assert service.pause() is False
+    assert service.is_paused() is True
+    assert service.resume() is True
+    assert service.resume() is False
+    assert service.is_paused() is False
 
 
 def test_request_rejects_invalid_id() -> None:
