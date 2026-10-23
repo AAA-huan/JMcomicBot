@@ -58,14 +58,14 @@ describe('pageGap', () => {
 })
 
 describe('swipeTurnDelta', () => {
-  it('普通模式右滑下一页、左滑上一页', () => {
-    expect(swipeTurnDelta('normal', 100, 0)).toBe(1)
-    expect(swipeTurnDelta('normal', -100, 0)).toBe(-1)
+  it('普通模式左滑下一页、右滑上一页', () => {
+    expect(swipeTurnDelta('normal', -100, 0)).toBe(1)
+    expect(swipeTurnDelta('normal', 100, 0)).toBe(-1)
   })
 
-  it('日漫模式左滑下一页、右滑上一页', () => {
-    expect(swipeTurnDelta('manga', -100, 0)).toBe(1)
-    expect(swipeTurnDelta('manga', 100, 0)).toBe(-1)
+  it('日漫模式右滑下一页、左滑上一页', () => {
+    expect(swipeTurnDelta('manga', 100, 0)).toBe(1)
+    expect(swipeTurnDelta('manga', -100, 0)).toBe(-1)
   })
 
   it('滚动模式下滑下一页、上滑上一页', () => {
