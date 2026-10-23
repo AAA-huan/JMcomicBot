@@ -112,12 +112,17 @@ class WebSecurityMiddleware(
             "worker-src 'self'; "
             "frame-ancestors 'none'"
         )
-        if request.url.path.startswith("/api/") or response.headers.get(
-            "content-type", ""
-        ).startswith("text/html"):
-            response.headers["Cache-Control"] = "no-store"
-        elif request.url.path.startswith("/assets/"):
-            response.headers["Cache-Control"] = "public, max-age=31536000, immutable"
+        # 图片等允许浏览器缓存的接口会显式声明 Cache-Control，不能被默认
+        # 的 no-store 覆盖；其余 API 与 HTML 入口仍禁用缓存。
+        if "cache-control" not in response.headers:
+            if request.url.path.startswith("/api/") or response.headers.get(
+                "content-type", ""
+            ).startswith("text/html"):
+                response.headers["Cache-Control"] = "no-store"
+            elif request.url.path.startswith("/assets/"):
+                response.headers["Cache-Control"] = (
+                    "public, max-age=31536000, immutable"
+                )
         return response
 
     @staticmethod

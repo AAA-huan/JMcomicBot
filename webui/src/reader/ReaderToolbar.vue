@@ -5,7 +5,12 @@ import { computed, ref, watch } from 'vue'
 import { useDisplay } from 'vuetify'
 
 import type { ProgressSyncState } from './progressSync'
-import { ZOOM_PERCENT_OPTIONS, type ReaderMode, type ZoomMode } from './types'
+import {
+  PREFETCH_OPTIONS,
+  ZOOM_PERCENT_OPTIONS,
+  type ReaderMode,
+  type ZoomMode,
+} from './types'
 
 const props = defineProps<{
   pageNumber: number
@@ -14,6 +19,7 @@ const props = defineProps<{
   continuous: boolean
   clickToTurn: boolean
   reverseClick: boolean
+  prefetchPages: number
   zoomMode: ZoomMode
   zoomPercent: number
   dark: boolean
@@ -32,6 +38,7 @@ const emit = defineEmits<{
   (event: 'update:continuous', continuous: boolean): void
   (event: 'update:click-to-turn', clickToTurn: boolean): void
   (event: 'update:reverse-click', reverseClick: boolean): void
+  (event: 'update:prefetch-pages', prefetchPages: number): void
   (event: 'update:zoomMode', mode: ZoomMode): void
   (event: 'zoom-percent', percent: number): void
   (event: 'update:dark', dark: boolean): void
@@ -51,6 +58,12 @@ const MODE_OPTIONS: ModeOption[] = [
   { value: 'manga', title: '日漫模式', icon: 'mdi-book-open-variant' },
   { value: 'scroll', title: '滚动模式', icon: 'mdi-view-agenda-outline' },
 ]
+
+const PREFETCH_ITEMS = PREFETCH_OPTIONS.map((value) => ({
+  title: value === 0 ? '仅当前页' : `${value} 页`,
+  value,
+}))
+const PREFETCH_HINT = '连续模式当前页前后保留的页数，越大越流畅但更耗内存；手机建议 1-2'
 
 const { mobile } = useDisplay()
 const pageInput = ref(String(props.pageNumber))
@@ -96,6 +109,10 @@ function setClickToTurn(value: unknown): void {
 
 function setReverseClick(value: unknown): void {
   emit('update:reverse-click', Boolean(value))
+}
+
+function setPrefetchPages(value: unknown): void {
+  emit('update:prefetch-pages', Number(value))
 }
 
 function selectZoom(mode: ZoomMode): void {
@@ -284,6 +301,18 @@ function zoomLabel(): string {
               hide-details
               @update:model-value="emit('update:dark', Boolean($event))"
             />
+            <v-select
+              :model-value="prefetchPages"
+              :items="PREFETCH_ITEMS"
+              label="预加载页数"
+              :hint="PREFETCH_HINT"
+              persistent-hint
+              color="primary"
+              density="compact"
+              variant="outlined"
+              class="mt-2"
+              @update:model-value="setPrefetchPages"
+            />
           </div>
         </v-list>
       </v-menu>
@@ -356,6 +385,18 @@ function zoomLabel(): string {
             density="compact"
             hide-details
             @update:model-value="emit('update:dark', Boolean($event))"
+          />
+          <v-select
+            :model-value="prefetchPages"
+            :items="PREFETCH_ITEMS"
+            label="预加载页数"
+            :hint="PREFETCH_HINT"
+            persistent-hint
+            color="primary"
+            density="compact"
+            variant="outlined"
+            class="mt-2"
+            @update:model-value="setPrefetchPages"
           />
         </div>
         <v-divider class="my-1" />

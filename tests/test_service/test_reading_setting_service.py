@@ -30,6 +30,7 @@ def test_get_or_default_does_not_persist(db_manager) -> None:
     assert setting.click_to_turn is False
     assert setting.reverse_click is False
     assert setting.dark_background is False
+    assert setting.prefetch_pages == 1
     assert setting.updated_at is not None
     assert ReadingSettingRepository(db_manager).get(1) is None
 
@@ -45,6 +46,7 @@ def test_upsert_partial_update_preserves_existing_fields(db_manager) -> None:
             "click_to_turn": True,
             "reverse_click": True,
             "dark_background": True,
+            "prefetch_pages": 3,
         },
         OperationContext.web("1", "127.0.0.1"),
     )
@@ -59,6 +61,7 @@ def test_upsert_partial_update_preserves_existing_fields(db_manager) -> None:
     assert updated.click_to_turn is True
     assert updated.reverse_click is True
     assert updated.dark_background is False
+    assert updated.prefetch_pages == 3
 
     events = AuditEventRepository(db_manager).list(page_size=20)
     assert [event.event_type for event in events[:2]] == [
@@ -80,6 +83,10 @@ def test_upsert_rejects_invalid_values_without_writing(db_manager) -> None:
         {"reading_mode": "single"},
         {"continuous": "yes"},
         {"unknown": True},
+        {"prefetch_pages": -1},
+        {"prefetch_pages": 11},
+        {"prefetch_pages": True},
+        {"prefetch_pages": "2"},
         {"click_to_turn": False, "reverse_click": True},
     ]
     for payload in cases:

@@ -28,6 +28,16 @@ vi.mock('@/api/reader', () => ({
   getReaderSettings: vi.fn(),
   updateReaderSettings: vi.fn(),
 }))
+const pageImageMocks = vi.hoisted(() => ({
+  probePageImage: vi.fn(),
+  loadPageImageSize: vi.fn(),
+}))
+vi.mock('./pageImage', () => ({
+  pageImageUrl: (_fileId: number, pageNumber: number) =>
+    `/api/v1/files/42/page/${pageNumber}`,
+  probePageImage: pageImageMocks.probePageImage,
+  loadPageImageSize: pageImageMocks.loadPageImageSize,
+}))
 vi.mock('./usePdfDocument', () => ({
   usePdfDocument: () => ({
     doc: ref({
@@ -66,6 +76,7 @@ const DEFAULT_SETTINGS: ReadingSettings = {
   click_to_turn: false,
   reverse_click: false,
   dark_background: false,
+  prefetch_pages: 1,
   updated_at: '2026-01-01T00:00:00Z',
 }
 
@@ -84,6 +95,13 @@ function makeSettings(overrides: Partial<ReadingSettings> = {}): ReadingSettings
 
 function applyUpdate(payload: ReadingSettingUpdate): ReadingSettings {
   return makeSettings(payload)
+}
+
+/** 让页面探测返回图片型结果，并指定当前页原始尺寸。 */
+function useImageProbe(
+  size: { width: number; height: number } = { width: 800, height: 1200 },
+): void {
+  pageImageMocks.probePageImage.mockResolvedValue({ kind: 'image', size })
 }
 
 /** 等待 PDF 初始化完成（页数登记、12 页尺寸读取与进度恢复）。 */
@@ -120,6 +138,10 @@ async function pressKey(key: string): Promise<void> {
 }
 
 beforeEach(() => {
+  pageImageMocks.probePageImage.mockReset()
+  pageImageMocks.probePageImage.mockResolvedValue({ kind: 'fallback' })
+  pageImageMocks.loadPageImageSize.mockReset()
+  pageImageMocks.loadPageImageSize.mockResolvedValue({ width: 1000, height: 1320 })
   vi.mocked(getReaderSettings).mockReset()
   vi.mocked(updateReaderSettings).mockReset()
   vi.mocked(updateReaderSettings).mockImplementation(async (payload) =>
@@ -289,26 +311,13 @@ describe('翻页方向', () => {
       configurable: true,
       value: 300,
     })
-    Object.defineProperty(scroll, 'scrollWidth', {
-      configurable: true,
-      value: 1200,
-    })
-    const pageTwo = wrapper.find('[data-reader-page="2"]').element as HTMLElement
-    Object.defineProperty(pageTwo, 'offsetLeft', {
-      configurable: true,
-      value: 500,
-    })
-    Object.defineProperty(pageTwo, 'offsetWidth', {
-      configurable: true,
-      value: 200,
-    })
     const scrollTo = HTMLElement.prototype.scrollTo as ReturnType<typeof vi.fn>
     scrollTo.mockClear()
 
     await clickAt(wrapper, 270)
     expect(currentPage()).toBe(2)
-    // 页中心 500 + 100，减去视口中心 150
-    expect(scrollTo).toHaveBeenCalledWith({ left: 450, behavior: 'auto' })
+    // 页宽 600、间距/内边距 4：第 2 页中心 908，减去视口中心 150
+    expect(scrollTo).toHaveBeenCalledWith({ left: 758, behavior: 'auto' })
     wrapper.unmount()
   })
 
@@ -322,20 +331,7 @@ describe('翻页方向', () => {
       configurable: true,
       value: 300,
     })
-    Object.defineProperty(scroll, 'scrollWidth', {
-      configurable: true,
-      value: 1200,
-    })
     scroll.scrollLeft = 100
-    const firstPage = wrapper.find('[data-reader-page="1"]').element as HTMLElement
-    Object.defineProperty(firstPage, 'offsetLeft', {
-      configurable: true,
-      value: 0,
-    })
-    Object.defineProperty(firstPage, 'offsetWidth', {
-      configurable: true,
-      value: 200,
-    })
     const scrollTo = HTMLElement.prototype.scrollTo as ReturnType<typeof vi.fn>
     scrollTo.mockClear()
 
@@ -343,7 +339,8 @@ describe('翻页方向', () => {
     await new Promise((resolve) => setTimeout(resolve, 220))
 
     expect(currentPage()).toBe(1)
-    expect(scrollTo).toHaveBeenCalledWith({ left: 0, behavior: 'smooth' })
+    // 第 1 页中心 304，减去视口中心 150
+    expect(scrollTo).toHaveBeenCalledWith({ left: 154, behavior: 'smooth' })
     wrapper.unmount()
   })
 })
@@ -385,6 +382,117 @@ describe('连续布局', () => {
     const wrapper = await mountReader({ continuous: false })
     expect(wrapper.find('.reader-pages').exists()).toBe(false)
     expect(wrapper.findAll('canvas')).toHaveLength(1)
+    wrapper.unmount()
+  })
+})
+
+describe('页面类型探测', () => {
+  it('探测为图片型时使用 <img> 渲染且不再加载 PDF.js', async () => {
+    useImageProbe()
+    const wrapper = await mountReader()
+
+    expect(pageImageMocks.probePageImage).toHaveBeenCalledWith(42, 1)
+    const image = wrapper.find('.reader-single img')
+    expect(image.exists()).toBe(true)
+    expect(image.attributes('src')).toBe('/api/v1/files/42/page/1')
+    expect(image.attributes('alt')).toBe('第 1 页')
+    expect(wrapper.find('canvas').exists()).toBe(false)
+    // 图片型页数直接取进度接口，不再通过 PDF.js 回写
+    expect(updateFilePageCount).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('探测为 404/415 回退时保留 PDF.js Canvas 并同步页数', async () => {
+    const wrapper = await mountReader()
+
+    expect(pageImageMocks.probePageImage).toHaveBeenCalledWith(42, 1)
+    expect(wrapper.find('canvas').exists()).toBe(true)
+    expect(wrapper.find('.reader-single img').exists()).toBe(false)
+    expect(updateFilePageCount).toHaveBeenCalledWith(42, 12)
+    wrapper.unmount()
+  })
+})
+
+describe('图片型连续模式', () => {
+  it('按预加载页数限制 <img> 挂载窗口', async () => {
+    useImageProbe()
+    const wrapper = await mountReader({ continuous: true, prefetch_pages: 2 })
+
+    // 第 1 页窗口为 1-3 页
+    expect(wrapper.findAll('.reader-page img')).toHaveLength(3)
+    expect(
+      wrapper.findAll('.reader-page img').map((image) => image.attributes('src')),
+    ).toEqual([
+      '/api/v1/files/42/page/1',
+      '/api/v1/files/42/page/2',
+      '/api/v1/files/42/page/3',
+    ])
+
+    vi.mocked(updateReaderSettings).mockResolvedValueOnce(
+      makeSettings({ continuous: true, prefetch_pages: 0 }),
+    )
+    wrapper
+      .findComponent(ReaderToolbar)
+      .vm.$emit('update:prefetch-pages', 0)
+    await flushPromises()
+    expect(wrapper.findAll('.reader-page img')).toHaveLength(1)
+    wrapper.unmount()
+  })
+
+  it('单页模式忽略预加载页数，只保留当前页', async () => {
+    useImageProbe()
+    const wrapper = await mountReader({ continuous: false, prefetch_pages: 5 })
+
+    expect(wrapper.findAll('img')).toHaveLength(1)
+    expect(wrapper.find('img').attributes('src')).toBe('/api/v1/files/42/page/1')
+    wrapper.unmount()
+  })
+
+  it('图片加载完成后用真实尺寸更新占位布局', async () => {
+    useImageProbe({ width: 800, height: 1200 })
+    const wrapper = await mountReader()
+
+    const image = wrapper.find('.reader-single img')
+    expect(image.attributes('style')).toContain('width: 800px')
+    expect(image.attributes('style')).toContain('height: 1200px')
+
+    Object.defineProperty(image.element, 'naturalWidth', {
+      configurable: true,
+      value: 1000,
+    })
+    Object.defineProperty(image.element, 'naturalHeight', {
+      configurable: true,
+      value: 1500,
+    })
+    await image.trigger('load')
+
+    expect(image.attributes('style')).toContain('width: 1000px')
+    expect(image.attributes('style')).toContain('height: 1500px')
+    wrapper.unmount()
+  })
+
+  it('日漫连排滚动位置按从右往左映射当前页', async () => {
+    useImageProbe()
+    const wrapper = await mountReader({
+      continuous: true,
+      reading_mode: 'manga',
+      prefetch_pages: 1,
+    })
+    const scroll = wrapper.find('.reader-scroll').element as HTMLElement
+    Object.defineProperty(scroll, 'clientWidth', {
+      configurable: true,
+      value: 300,
+    })
+    scroll.scrollLeft = 0
+
+    const rectSpy = vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect')
+    scroll.dispatchEvent(new Event('scroll'))
+    await new Promise((resolve) => setTimeout(resolve, 220))
+
+    // 反向排列时首页在最右，scrollLeft=0 对应最后一页
+    expect(currentPage()).toBe(12)
+    expect(rectSpy).not.toHaveBeenCalled()
+    rectSpy.mockRestore()
     wrapper.unmount()
   })
 })

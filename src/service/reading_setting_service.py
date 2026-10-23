@@ -1,4 +1,4 @@
-"""阅读器偏好设置应用服务，统一校验并持久化五项配置。"""
+"""阅读器偏好设置应用服务，统一校验并持久化六项配置。"""
 
 from typing import Any, Dict, Optional
 
@@ -7,12 +7,14 @@ from src.database.repositories import AuditEventRepository, ReadingSettingReposi
 from src.service.operation_context import OperationContext
 
 READING_MODES = ("normal", "manga", "scroll")
+PREFETCH_PAGES_MAX = 10
 _SETTING_FIELDS = (
     "reading_mode",
     "continuous",
     "click_to_turn",
     "reverse_click",
     "dark_background",
+    "prefetch_pages",
 )
 
 
@@ -41,10 +43,11 @@ class ReadingSettingService:
         payload: Dict[str, Any],
         context: Optional[OperationContext] = None,
     ) -> ReadingSetting:
-        """整体更新五项配置，未传字段保留原值，并写入审计。
+        """整体更新六项配置，未传字段保留原值，并写入审计。
 
         Raises:
-            ValueError: 字段未知、类型非法、模式非法或反转点击缺少点击翻页。
+            ValueError: 字段未知、类型非法、模式非法、预加载页数越界或
+                反转点击缺少点击翻页。
         """
         self._validate_admin_id(admin_id)
         unexpected = set(payload) - set(_SETTING_FIELDS)
@@ -58,6 +61,12 @@ class ReadingSettingService:
             if field == "reading_mode":
                 if not isinstance(value, str) or value not in READING_MODES:
                     raise ValueError(f"不支持的阅读模式: {value}")
+            elif field == "prefetch_pages":
+                # bool 是 int 的子类，必须显式排除，避免 true/false 被当作页数
+                if isinstance(value, bool) or not isinstance(value, int):
+                    raise ValueError("预加载页数必须是整数")
+                if not 0 <= value <= PREFETCH_PAGES_MAX:
+                    raise ValueError(f"预加载页数必须在 0 到 {PREFETCH_PAGES_MAX} 之间")
             elif not isinstance(value, bool):
                 raise ValueError(f"阅读设置 {field} 必须是布尔值")
             merged[field] = value
@@ -72,6 +81,7 @@ class ReadingSettingService:
             click_to_turn=merged["click_to_turn"],
             reverse_click=merged["reverse_click"],
             dark_background=merged["dark_background"],
+            prefetch_pages=merged["prefetch_pages"],
         )
         operation_context = context or OperationContext.system()
         self.audit_repository.record(
@@ -103,10 +113,11 @@ class ReadingSettingService:
             click_to_turn=False,
             reverse_click=False,
             dark_background=False,
+            prefetch_pages=1,
             updated_at=utc_now(),
         )
 
     @staticmethod
     def _as_dict(setting: ReadingSetting) -> Dict[str, Any]:
-        """提取五项可更新字段的当前值。"""
+        """提取六项可更新字段的当前值。"""
         return {field: getattr(setting, field) for field in _SETTING_FIELDS}

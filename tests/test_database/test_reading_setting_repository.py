@@ -28,9 +28,11 @@ def test_reading_setting_insert_and_update(db_manager) -> None:
         click_to_turn=False,
         reverse_click=False,
         dark_background=False,
+        prefetch_pages=1,
     )
     assert created.reading_mode == "normal"
     assert created.continuous is False
+    assert created.prefetch_pages == 1
     assert created.updated_at is not None
     assert repository.exists(1) is True
 
@@ -41,6 +43,7 @@ def test_reading_setting_insert_and_update(db_manager) -> None:
         click_to_turn=True,
         reverse_click=True,
         dark_background=True,
+        prefetch_pages=3,
     )
     assert updated.admin_id == 1
     assert updated.reading_mode == "manga"
@@ -48,6 +51,7 @@ def test_reading_setting_insert_and_update(db_manager) -> None:
     assert updated.click_to_turn is True
     assert updated.reverse_click is True
     assert updated.dark_background is True
+    assert updated.prefetch_pages == 3
 
 
 def test_reading_setting_mode_check_constraint(db_manager) -> None:
@@ -62,6 +66,7 @@ def test_reading_setting_mode_check_constraint(db_manager) -> None:
             click_to_turn=False,
             reverse_click=False,
             dark_background=False,
+            prefetch_pages=1,
         )
 
 
@@ -76,6 +81,7 @@ def test_reading_setting_cascades_with_admin_delete(db_manager) -> None:
         click_to_turn=True,
         reverse_click=False,
         dark_background=True,
+        prefetch_pages=2,
     )
     with db_manager.get_session() as session:
         session.execute(delete(WebAdmin).where(WebAdmin.id == 1))

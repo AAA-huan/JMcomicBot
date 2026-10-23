@@ -9,6 +9,7 @@ from src.service.manga_service import MangaFileDownloadError, MangaService
 from src.service.operation_context import OperationContext
 from src.service.operation_task_service import OperationTaskService
 from src.service.option_file_service import OptionFileService
+from src.service.page_image_service import PageImageError, PageImageService
 from src.service.permission_service import (
     CachedGroup,
     CachedUser,
@@ -63,6 +64,8 @@ __all__ = [
     "OperationContext",
     "OperationTaskService",
     "OptionFileService",
+    "PageImageError",
+    "PageImageService",
     "PermissionService",
     "ReadingProgressFileNotFoundError",
     "ReadingProgressService",

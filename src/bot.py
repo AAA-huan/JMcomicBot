@@ -47,6 +47,7 @@ from src.service import (
     OperationContext,
     OperationTaskService,
     OptionFileService,
+    PageImageService,
     PermissionService,
     ReadingProgressService,
     ReadingSettingService,
@@ -301,6 +302,8 @@ class MangaBot:
             self.reading_setting_repo,
             self.audit_event_repo,
         )
+        # 页面图片服务：从图片型 PDF 抽取嵌入图，内存缓存不落盘
+        self.page_image_service = PageImageService()
         self.web_auth_service = WebAuthService(
             self.web_admin_repo,
             self.web_session_repo,
@@ -448,6 +451,7 @@ class MangaBot:
                         scan_service=self.scan_service,
                         reading_progress_service=self.reading_progress_service,
                         reading_setting_service=self.reading_setting_service,
+                        page_image_service=self.page_image_service,
                         event_bus=self.event_bus,
                         download_progress_tracker=self.download_progress_tracker,
                         audit_query_service=self.audit_query_service,

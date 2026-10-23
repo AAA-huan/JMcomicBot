@@ -40,6 +40,7 @@ from src.service import (
     MangaService,
     OperationTaskService,
     OptionFileService,
+    PageImageService,
     PermissionService,
     ReadingProgressService,
     ReadingSettingService,
@@ -331,6 +332,7 @@ def build_web_context(  # pylint: disable=too-many-locals
         reading_setting_service=ReadingSettingService(
             ReadingSettingRepository(db_manager), audit_repo
         ),
+        page_image_service=PageImageService(),
         favorite_service=FavoriteService(FavoriteRepository(db_manager), audit_repo),
         jm_favorite_service=JmFavoriteService(JmFavoriteRepository(db_manager)),
         admin_qq_service=AdminQQService(
