@@ -165,6 +165,13 @@ class ReadingSetting(Base):
         server_default=text("0"),
         comment="是否使用深色背景",
     )
+    prefetch_pages: Mapped[int] = mapped_column(
+        Integer,
+        nullable=False,
+        default=1,
+        server_default=text("1"),
+        comment="连续模式预加载页数半径",
+    )
     updated_at: Mapped[datetime] = mapped_column(
         DateTime,
         nullable=False,

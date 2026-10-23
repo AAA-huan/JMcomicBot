@@ -52,6 +52,7 @@ def test_reader_settings_defaults_and_persistence(db_manager) -> None:
         assert payload["click_to_turn"] is False
         assert payload["reverse_click"] is False
         assert payload["dark_background"] is False
+        assert payload["prefetch_pages"] == 1
         assert payload["updated_at"] is not None
         assert ReadingSettingRepository(db_manager).get(1) is None
 
@@ -63,6 +64,7 @@ def test_reader_settings_defaults_and_persistence(db_manager) -> None:
                 "click_to_turn": True,
                 "reverse_click": True,
                 "dark_background": True,
+                "prefetch_pages": 5,
             },
             headers=headers,
         )
@@ -72,6 +74,7 @@ def test_reader_settings_defaults_and_persistence(db_manager) -> None:
         assert saved.json()["click_to_turn"] is True
         assert saved.json()["reverse_click"] is True
         assert saved.json()["dark_background"] is True
+        assert saved.json()["prefetch_pages"] == 5
 
         partial = client.put(
             "/api/v1/reader/settings",
@@ -82,10 +85,12 @@ def test_reader_settings_defaults_and_persistence(db_manager) -> None:
         assert partial.json()["reading_mode"] == "manga"
         assert partial.json()["continuous"] is True
         assert partial.json()["dark_background"] is False
+        assert partial.json()["prefetch_pages"] == 5
 
         reloaded = client.get("/api/v1/reader/settings")
         assert reloaded.json()["reading_mode"] == "manga"
         assert reloaded.json()["dark_background"] is False
+        assert reloaded.json()["prefetch_pages"] == 5
 
     stored = ReadingSettingRepository(db_manager).get(1)
     assert stored is not None
@@ -125,6 +130,16 @@ def test_reader_settings_invalid_combinations(db_manager) -> None:
             json={"click_to_turn": False},
             headers=headers,
         )
+        too_large_prefetch = client.put(
+            "/api/v1/reader/settings",
+            json={"prefetch_pages": 11},
+            headers=headers,
+        )
+        negative_prefetch = client.put(
+            "/api/v1/reader/settings",
+            json={"prefetch_pages": -1},
+            headers=headers,
+        )
 
     assert invalid_mode.status_code == 400
     assert invalid_mode.json()["code"] == "READER_SETTING_INVALID"
@@ -135,6 +150,10 @@ def test_reader_settings_invalid_combinations(db_manager) -> None:
     # 关闭点击翻页时反转仍为 true，后端拒绝而不是静默修正。
     assert disable_click_keeps_reverse.status_code == 400
     assert disable_click_keeps_reverse.json()["code"] == "READER_SETTING_INVALID"
+    assert too_large_prefetch.status_code == 400
+    assert too_large_prefetch.json()["code"] == "READER_SETTING_INVALID"
+    assert negative_prefetch.status_code == 400
+    assert negative_prefetch.json()["code"] == "READER_SETTING_INVALID"
     stored = ReadingSettingRepository(db_manager).get(1)
     assert stored is not None
     assert stored.click_to_turn is True

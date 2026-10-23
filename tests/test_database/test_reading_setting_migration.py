@@ -48,6 +48,7 @@ def test_reading_setting_migration_and_guarded_downgrade(tmp_path) -> None:
         "click_to_turn",
         "reverse_click",
         "dark_background",
+        "prefetch_pages",
         "updated_at",
     }
     assert all(column["nullable"] is False for column in columns.values())
@@ -66,12 +67,14 @@ def test_reading_setting_migration_and_guarded_downgrade(tmp_path) -> None:
         row = connection.execute(
             text(
                 "SELECT reading_mode, continuous, click_to_turn, reverse_click,"
-                " dark_background, updated_at FROM reading_setting WHERE admin_id = 1"
+                " dark_background, prefetch_pages, updated_at"
+                " FROM reading_setting WHERE admin_id = 1"
             )
         ).one()
         assert row[0] == "normal"
         assert row[1:5] == (0, 0, 0, 0)
-        assert row[5] is not None
+        assert row[5] == 1
+        assert row[6] is not None
 
         with pytest.raises(IntegrityError):
             connection.execute(

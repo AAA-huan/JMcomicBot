@@ -1,52 +1,42 @@
-import { flushPromises, mount } from '@vue/test-utils'
-import { shallowRef } from 'vue'
+import { mount } from '@vue/test-utils'
 import { createVuetify } from 'vuetify'
-import { beforeEach, describe, expect, it, vi } from 'vitest'
-
-const mocks = vi.hoisted(() => ({ load: vi.fn(), destroy: vi.fn(), getPage: vi.fn() }))
-vi.mock('@/reader/usePdfDocument', () => ({
-  usePdfDocument: () => ({
-    doc: shallowRef({ getPage: mocks.getPage }),
-    load: mocks.load,
-    destroy: mocks.destroy,
-  }),
-}))
+import { describe, expect, it } from 'vitest'
 
 import MangaCover from './MangaCover.vue'
 
+/** 用可控的图片桩替换 v-img，便于断言地址并模拟加载失败。 */
+const VImgStub = {
+  name: 'VImg',
+  props: { src: { type: String, default: '' } },
+  emits: ['error'],
+  template: '<div class="img-stub" :data-src="src" @click="$emit(\'error\')" />',
+}
+
+function mountCover() {
+  return mount(MangaCover, {
+    props: { fileId: 42 },
+    global: {
+      plugins: [createVuetify()],
+      stubs: { VImg: VImgStub },
+    },
+  })
+}
+
 describe('漫画封面预览', () => {
-  beforeEach(() => {
-    vi.clearAllMocks()
-    mocks.load.mockResolvedValue(null)
-    mocks.destroy.mockResolvedValue(undefined)
-  })
-
-  it('渲染第一页并在离开页面时释放 PDF', async () => {
-    const cancel = vi.fn()
-    const cleanup = vi.fn()
-    const render = vi.fn().mockReturnValue({ promise: Promise.resolve(), cancel })
-    mocks.getPage.mockResolvedValue({
-      getViewport: () => ({ width: 640, height: 960 }), render, cleanup,
-    })
-    const wrapper = mount(MangaCover, { props: { fileId: 42 }, global: { plugins: [createVuetify()] } })
-    await flushPromises()
-    expect(mocks.load).toHaveBeenCalledWith(42)
-    expect(mocks.getPage).toHaveBeenCalledWith(1)
-    expect(render).toHaveBeenCalledOnce()
-    expect(wrapper.find('canvas').isVisible()).toBe(true)
-    expect(cleanup).toHaveBeenCalledOnce()
+  it('直接使用封面图片地址，不加载 PDF.js', () => {
+    const wrapper = mountCover()
+    expect(wrapper.find('.img-stub').attributes('data-src')).toBe(
+      '/api/v1/files/42/cover',
+    )
+    expect(wrapper.find('canvas').exists()).toBe(false)
     wrapper.unmount()
-    expect(cancel).toHaveBeenCalledOnce()
-    expect(mocks.destroy).toHaveBeenCalledOnce()
   })
 
-  it('加载失败显示错误，不尝试渲染', async () => {
-    mocks.load.mockResolvedValue({ type: 'missing', message: '文件不存在或已被移除' })
-    const wrapper = mount(MangaCover, { props: { fileId: 42 }, global: { plugins: [createVuetify()] } })
-    await flushPromises()
-    expect(wrapper.text()).toContain('文件不存在或已被移除')
-    expect(mocks.getPage).not.toHaveBeenCalled()
-    expect(wrapper.find('canvas').isVisible()).toBe(false)
+  it('封面加载失败显示占位文案', async () => {
+    const wrapper = mountCover()
+    await wrapper.find('.img-stub').trigger('click')
+    expect(wrapper.text()).toContain('封面不可用')
+    expect(wrapper.find('.img-stub').exists()).toBe(false)
     wrapper.unmount()
   })
 })

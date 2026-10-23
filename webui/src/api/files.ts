@@ -13,6 +13,16 @@ export function fileDownloadUrl(fileId: number): string {
   return `/api/v1/files/${fileId}/content`
 }
 
+/** 漫画首页缩略图地址；非图片型 PDF 返回 404。 */
+export function fileCoverUrl(fileId: number): string {
+  return `/api/v1/files/${fileId}/cover`
+}
+
+/** 阅读器按页获取嵌入原图的地址，页码从 1 开始。 */
+export function filePageImageUrl(fileId: number, pageNumber: number): string {
+  return `/api/v1/files/${fileId}/page/${pageNumber}`
+}
+
 export function getReadingProgress(fileId: number): Promise<ReadingProgress> {
   return apiRequest<ReadingProgress>(`/files/${fileId}/progress`)
 }

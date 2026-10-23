@@ -29,6 +29,7 @@ const DEFAULT_READER_SETTINGS: ReadingSettings = {
   click_to_turn: false,
   reverse_click: false,
   dark_background: false,
+  prefetch_pages: 1,
   updated_at: '2026-01-01T00:00:00Z',
 }
 

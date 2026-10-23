@@ -24,6 +24,7 @@ class ReadingSettingUpdateRequest(BaseModel):
     click_to_turn: Optional[bool] = None
     reverse_click: Optional[bool] = None
     dark_background: Optional[bool] = None
+    prefetch_pages: Optional[int] = None
 
 
 def _setting_payload(setting: ReadingSetting) -> dict[str, object]:
@@ -35,6 +36,7 @@ def _setting_payload(setting: ReadingSetting) -> dict[str, object]:
         "click_to_turn": setting.click_to_turn,
         "reverse_click": setting.reverse_click,
         "dark_background": setting.dark_background,
+        "prefetch_pages": setting.prefetch_pages,
         "updated_at": updated_at,
     }
 
