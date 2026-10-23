@@ -114,8 +114,8 @@ class TestDatabaseManager:
                 text("SELECT MAX(version) FROM schema_version")
             ).scalar()
 
-        assert alembic_version == "0028_drop_backup_record"
-        assert version == 28
+        assert alembic_version == "0029_add_manga_status_favorited"
+        assert version == 29
 
     def test_task_summary_migration_backfills_existing_tasks(self, tmp_path) -> None:
         """0021 应为旧任务回填摘要，且保留原有任务状态。"""
@@ -171,7 +171,7 @@ class TestDatabaseManager:
                 version = session.execute(
                     text("SELECT MAX(version) FROM schema_version")
                 ).scalar_one()
-            assert version == 28
+            assert version == 29
         finally:
             db.close()
 
@@ -212,7 +212,7 @@ class TestDatabaseManager:
                     .all()
                 )
 
-            assert versions == ["0028_drop_backup_record"]
+            assert versions == ["0029_add_manga_status_favorited"]
             assert backup_path.stat().st_mtime_ns == initial_backup_mtime
         finally:
             db.close()

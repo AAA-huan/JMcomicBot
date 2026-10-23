@@ -88,6 +88,23 @@ def test_repair_marks_orphan_manga_and_deletes_orphan_tags(
     assert records[0].repaired_count == 2
 
 
+def test_repair_does_not_mark_favorited_without_files_missing(
+    db_manager, tmp_path
+) -> None:
+    """已收藏未下载漫画预期没有文件，不应被修复任务标记缺失。"""
+    repair_service, manga_repo, _tag_repo, _scan_record_repo = _build_repair_service(
+        db_manager, str(tmp_path)
+    )
+    manga_repo.upsert("400", "收藏未下载", "", 0, 0, status="favorited")
+
+    diff = repair_service.preview()
+    result = repair_service.repair()
+
+    assert "400" not in diff.orphan_manga_ids
+    assert "400" not in result.processed_manga_ids
+    assert manga_repo.get("400").status == "favorited"
+
+
 def test_preview_reports_diff_without_writes(db_manager, tmp_path) -> None:
     """preview 应返回孤儿差异清单，且不修改数据、不创建任务。"""
     repair_service, manga_repo, tag_repo, scan_record_repo = _build_repair_service(

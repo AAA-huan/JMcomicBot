@@ -216,6 +216,14 @@ onMounted(load)
         <v-card-text>
           <template v-if="coverPreview">
             <MangaCover v-if="coverFile" :key="coverFile.id" :file-id="coverFile.id" />
+            <v-alert
+              v-else-if="manga.status === 'favorited'"
+              type="info"
+              variant="tonal"
+              class="mb-4"
+            >
+              该漫画已收藏但尚未下载，下载完成并生成 PDF 后可预览封面。
+            </v-alert>
             <p v-else class="text-body-2 text-medium-emphasis mb-4">暂无可预览的章节文件</p>
           </template>
           <div class="d-flex flex-wrap align-center ga-2 mb-3">
@@ -246,7 +254,9 @@ onMounted(load)
               </div>
             </v-col>
             <v-col cols="12" sm="6">
-              <div class="text-caption text-medium-emphasis">下载时间</div>
+              <div class="text-caption text-medium-emphasis">
+                {{ manga.status === 'favorited' ? '入库时间' : '下载时间' }}
+              </div>
               <div class="text-body-1">{{ formatDateTime(manga.downloaded_at) }}</div>
             </v-col>
             <v-col cols="12" sm="6">
@@ -290,7 +300,7 @@ onMounted(load)
             :loading="actionLoading"
             @click="handleDownload"
           >
-            请求下载
+            {{ manga.status === 'favorited' ? '下载漫画' : '请求下载' }}
           </v-btn>
           <v-btn
             variant="tonal"
@@ -311,8 +321,10 @@ onMounted(load)
         <EmptyState
           v-if="manga.files.length === 0"
           icon="mdi-file-pdf-box"
-          title="没有章节文件"
-          description="该漫画的记录存在，但尚未关联 PDF 文件。"
+          :title="manga.status === 'favorited' ? '尚未下载' : '没有章节文件'"
+          :description="manga.status === 'favorited'
+            ? '该漫画已收藏但尚未下载，下载完成并生成 PDF 后可在此阅读。'
+            : '该漫画的记录存在，但尚未关联 PDF 文件。'"
         />
 
         <template v-else-if="!mobile">

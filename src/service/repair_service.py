@@ -55,7 +55,8 @@ class RepairService:
     def preview(self) -> RepairDiff:
         """扫描数据库与磁盘差异，返回待修复清单且不写入任何数据。"""
         disk_ids = self._scan_disk_ids(self.download_root)
-        db_ids = {manga.id for manga in self.manga_repo.get_all()}
+        # favorited 漫画尚未下载，预期没有文件，不参与孤儿判定
+        db_ids = {manga.id for manga in self.manga_repo.list_with_expected_files()}
         return RepairDiff(
             orphan_manga_ids=tuple(sorted(db_ids - disk_ids)),
             orphan_tag_names=tuple(self.tag_repo.list_orphan_tags()),

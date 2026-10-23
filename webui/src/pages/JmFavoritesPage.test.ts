@@ -5,13 +5,14 @@ import { createVuetify } from 'vuetify'
 import { VSelect } from 'vuetify/components'
 
 vi.mock('@/api/jmFavorites', () => ({
-  getJmAccount: vi.fn(), getJmImport: vi.fn(), listJmFavorites: vi.fn(), listJmImports: vi.fn(),
-  loginJmAccount: vi.fn(), logoutJmAccount: vi.fn(), requestJmDownloads: vi.fn(), startJmImport: vi.fn(),
+  getJmAccount: vi.fn(), getJmImport: vi.fn(), importJmFavoritesToLibrary: vi.fn(),
+  listJmFavorites: vi.fn(), listJmImports: vi.fn(), loginJmAccount: vi.fn(),
+  logoutJmAccount: vi.fn(), requestJmDownloads: vi.fn(), startJmImport: vi.fn(),
 }))
 
 import {
-  getJmAccount, getJmImport, listJmFavorites, listJmImports, loginJmAccount,
-  logoutJmAccount, requestJmDownloads, startJmImport,
+  getJmAccount, getJmImport, importJmFavoritesToLibrary, listJmFavorites, listJmImports,
+  loginJmAccount, logoutJmAccount, requestJmDownloads, startJmImport,
 } from '@/api/jmFavorites'
 import type { JmImport } from '@/api/jmFavorites'
 import JmFavoritesPage from './JmFavoritesPage.vue'
@@ -39,13 +40,14 @@ describe('JM 收藏导入页', () => {
     vi.mocked(listJmImports).mockResolvedValue({ items: [] })
     vi.mocked(listJmFavorites).mockResolvedValue({
       items: [
-        { manga_id: '100', title: '未下载漫画', username: 'user', folders: { '7': '精选' }, downloaded: false, file_id: null, imported_at: '' },
-        { manga_id: '200', title: '本地漫画', username: 'user', folders: { '7': '精选' }, downloaded: true, file_id: 1, imported_at: '' },
+        { manga_id: '100', title: '未下载漫画', username: 'user', folders: { '7': '精选' }, downloaded: false, in_library: false, file_id: null, imported_at: '' },
+        { manga_id: '200', title: '本地漫画', username: 'user', folders: { '7': '精选' }, downloaded: true, in_library: true, file_id: 1, imported_at: '' },
       ], total: 2, page: 1, page_size: 20, pages: 1,
     })
     vi.mocked(loginJmAccount).mockResolvedValue(account)
     vi.mocked(logoutJmAccount).mockResolvedValue({ connected: false })
     vi.mocked(requestJmDownloads).mockResolvedValue({ items: [], queued_count: 1, duplicate_count: 0, skipped_blacklisted: [] })
+    vi.mocked(importJmFavoritesToLibrary).mockResolvedValue({ imported_count: 1, already_count: 0 })
     vi.mocked(startJmImport).mockResolvedValue(job)
   })
 
@@ -60,6 +62,25 @@ describe('JM 收藏导入页', () => {
     await flushPromises()
     expect(requestJmDownloads).toHaveBeenCalledWith(['100'])
     expect(wrapper.text()).toContain('已加入下载队列 1 本')
+    wrapper.unmount()
+  })
+
+  it('选中未下载漫画导入漫画库后标记已入库，仍可继续下载', async () => {
+    const { wrapper } = await mountPage()
+    await wrapper.find('input[type="checkbox"]').setValue(true)
+    await wrapper.find('[data-testid="jm-import-library"]').trigger('click')
+    await flushPromises()
+
+    expect(importJmFavoritesToLibrary).toHaveBeenCalledWith(['100'])
+    expect(wrapper.text()).toContain('已导入 1 本到漫画库')
+    expect(wrapper.text()).toContain('已入库')
+    expect(wrapper.find('a[href="/library/100"]').exists()).toBe(true)
+    expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(1)
+
+    await wrapper.find('input[type="checkbox"]').setValue(true)
+    await wrapper.find('[data-testid="jm-download"]').trigger('click')
+    await flushPromises()
+    expect(requestJmDownloads).toHaveBeenCalledWith(['100'])
     wrapper.unmount()
   })
 

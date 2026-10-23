@@ -112,6 +112,61 @@ def test_login_import_list_download_and_web_logout(db_manager):
         assert client.get("/api/v1/jm-favorites").json()["total"] == 2
 
 
+def test_import_selected_favorites_to_library_api(db_manager):
+    """选中的未下载收藏可直接入库并标记收藏，重复导入返回已有数量。"""
+    client, context = create_client_for(db_manager)
+    service = context.dependencies.jm_favorite_service
+    service.client_factory = FakeClient
+    with client:
+        setup_and_login(client)
+        headers = csrf_headers(client)
+        client.post(
+            "/api/v1/jm-favorites/account/login",
+            json={"username": "user", "password": "secret"},
+            headers=headers,
+        )
+        client.post(
+            "/api/v1/jm-favorites/imports", json={"folder_ids": ["7"]}, headers=headers
+        )
+        wait_job(service)
+        path = "/api/v1/jm-favorites/import-to-library"
+        assert client.post(path, json={"manga_ids": ["100"]}).status_code == 403
+        assert (
+            client.post(path, json={"manga_ids": []}, headers=headers).status_code
+            == 422
+        )
+        assert (
+            client.post(
+                path, json={"manga_ids": ["not-a-number"]}, headers=headers
+            ).status_code
+            == 400
+        )
+        assert (
+            client.post(path, json={"manga_ids": ["999"]}, headers=headers).status_code
+            == 404
+        )
+
+        imported = client.post(
+            path, json={"manga_ids": ["100", "200", "100"]}, headers=headers
+        )
+        assert imported.status_code == 200
+        assert imported.json() == {"imported_count": 2, "already_count": 0}
+
+        library = client.get("/api/v1/mangas?status=favorited").json()
+        assert library["total"] == 2
+        assert {item["status"] for item in library["items"]} == {"favorited"}
+        assert all(item["is_favorite"] for item in library["items"])
+        assert all(item["files"] == [] for item in library["items"])
+
+        favorites = client.get("/api/v1/jm-favorites").json()["items"]
+        assert all(item["in_library"] and not item["downloaded"] for item in favorites)
+
+        repeated = client.post(
+            path, json={"manga_ids": ["100", "200"]}, headers=headers
+        )
+        assert repeated.json() == {"imported_count": 0, "already_count": 2}
+
+
 def test_login_failure_is_sanitized_and_password_change_clears_sessions(db_manager):
     client, context = create_client_for(db_manager)
     service = context.dependencies.jm_favorite_service

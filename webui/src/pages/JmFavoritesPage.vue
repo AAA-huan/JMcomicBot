@@ -5,7 +5,7 @@ import { useDisplay } from 'vuetify'
 
 import { errorMessage } from '@/api/client'
 import {
-  getJmAccount, getJmImport, listJmFavorites, listJmImports,
+  getJmAccount, getJmImport, importJmFavoritesToLibrary, listJmFavorites, listJmImports,
   loginJmAccount, logoutJmAccount, requestJmDownloads, startJmImport,
 } from '@/api/jmFavorites'
 import type { JmAccount, JmFavorite, JmImport } from '@/api/jmFavorites'
@@ -34,6 +34,7 @@ const downloadStatus = ref('')
 const loading = ref(false)
 const busy = ref(false)
 const downloading = ref(false)
+const importingToLibrary = ref(false)
 const error = ref('')
 const notice = ref('')
 const running = computed(() => jobs.value.some((job) => job.status === 'running'))
@@ -46,6 +47,11 @@ const allSelectableSelected = computed(
   () => selectableIds.value.length > 0
     && selectableIds.value.every((id) => selected.value.includes(id)),
 )
+// 仅导入尚未下载且不在漫画库中的选中项，已在库中的重复提交没有意义
+const importableIds = computed(() => selectedIds.value.filter((id) => {
+  const item = items.value.find((candidate) => candidate.manga_id === id)
+  return item !== undefined && !item.downloaded && !item.in_library
+}))
 const downloadOptions = [
   { title: '全部下载状态', value: '' },
   { title: '未下载', value: 'not_downloaded' },
@@ -205,6 +211,30 @@ async function importFavorites(): Promise<void> {
   }
 }
 
+async function importToLibrary(): Promise<void> {
+  const mangaIds = importableIds.value
+  if (mangaIds.length === 0) return
+  importingToLibrary.value = true
+  error.value = ''
+  notice.value = ''
+  try {
+    const result = await importJmFavoritesToLibrary(mangaIds)
+    const imported = new Set(mangaIds)
+    items.value = items.value.map((item) => imported.has(item.manga_id)
+      ? { ...item, in_library: true }
+      : item)
+    const already = result.already_count > 0
+      ? `，${result.already_count} 本已在漫画库`
+      : ''
+    notice.value = `已导入 ${result.imported_count} 本到漫画库${already}。可继续选择下载。`
+    selected.value = []
+  } catch (err) {
+    error.value = errorMessage(err)
+  } finally {
+    importingToLibrary.value = false
+  }
+}
+
 async function download(): Promise<void> {
   downloading.value = true
   error.value = ''
@@ -316,9 +346,10 @@ onBeforeUnmount(() => { disposed = true; if (timer !== undefined) clearTimeout(t
             <v-btn variant="tonal" :disabled="selectableIds.length === 0" @click="toggleSelectAll">
               {{ allSelectableSelected ? '取消全选' : '全选' }}
             </v-btn>
+            <v-btn variant="tonal" prepend-icon="mdi-bookshelf" :loading="importingToLibrary" :disabled="importableIds.length === 0" data-testid="jm-import-library" @click="importToLibrary">导入漫画库（{{ importableIds.length }}）</v-btn>
             <v-btn color="primary" :loading="downloading" :disabled="selectedIds.length === 0 || selectedIds.length > 100" data-testid="jm-download" @click="download">下载所选（{{ selectedIds.length }}）</v-btn>
             <v-btn variant="tonal" prepend-icon="mdi-content-copy" :disabled="selectedIds.length === 0" @click="copySelectedIds">复制 ID</v-btn>
-            <span class="text-caption text-medium-emphasis">每次最多 100 本，下载后自动关联管理员收藏。</span>
+            <span class="text-caption text-medium-emphasis">每次最多 100 本；可先导入漫画库，下载后自动关联管理员收藏。</span>
           </div>
           <v-spacer />
           <v-btn variant="text" to="/tasks">查看任务管理</v-btn>
@@ -332,8 +363,12 @@ onBeforeUnmount(() => { disposed = true; if (timer !== undefined) clearTimeout(t
           <v-list-item-title class="text-wrap">{{ item.title }} <span class="text-medium-emphasis">JM{{ item.manga_id }}</span></v-list-item-title>
           <v-list-item-subtitle class="text-wrap">{{ item.username }} · {{ Object.values(item.folders).join(' / ') }}</v-list-item-subtitle>
           <template #append>
-            <v-btn v-if="item.downloaded" variant="text" :to="`/library/${item.manga_id}`">查看漫画</v-btn>
-            <v-chip v-else size="small" variant="tonal">未下载</v-chip>
+            <div class="d-flex align-center ga-1">
+              <v-chip v-if="item.downloaded" size="small" color="success" variant="tonal">已下载</v-chip>
+              <v-chip v-else-if="item.in_library" size="small" color="info" variant="tonal">已入库</v-chip>
+              <v-chip v-else size="small" variant="tonal">未下载</v-chip>
+              <v-btn v-if="item.downloaded || item.in_library" variant="text" :to="`/library/${item.manga_id}`">查看漫画</v-btn>
+            </div>
           </template>
         </v-list-item>
       </v-list>

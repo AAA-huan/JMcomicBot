@@ -112,7 +112,7 @@ describe('维护页数据迁移', () => {
   it('导出数据触发浏览器下载并提示文件名', async () => {
     vi.mocked(exportData).mockResolvedValue({
       blob: new Blob(['zip']),
-      filename: 'data-export-20261023-120000-schema0028_drop_backup_record.zip',
+      filename: 'data-export-20261023-120000-schema0029_add_manga_status_favorited.zip',
     })
     const click = vi.spyOn(HTMLAnchorElement.prototype, 'click').mockImplementation(() => {})
     const wrapper = mount(MaintenancePage, { global: { plugins: [createVuetify()] } })
@@ -122,7 +122,7 @@ describe('维护页数据迁移', () => {
 
     expect(exportData).toHaveBeenCalledTimes(1)
     expect(click).toHaveBeenCalledTimes(1)
-    expect(wrapper.text()).toContain('数据已导出：data-export-20261023-120000-schema0028_drop_backup_record.zip')
+    expect(wrapper.text()).toContain('数据已导出：data-export-20261023-120000-schema0029_add_manga_status_favorited.zip')
     click.mockRestore()
     wrapper.unmount()
   })
@@ -136,7 +136,7 @@ describe('维护页数据迁移', () => {
       db_sha256: 'a'.repeat(64),
       table_counts: { manga: 12, manga_favorite: 3 },
       export_env: { db_path: './data', manga_download_path: './downloads' },
-      current_schema_revision: '0028_drop_backup_record',
+      current_schema_revision: '0029_add_manga_status_favorited',
       path_warnings: ['导出环境下载目录为 ./downloads，当前为 ./other-downloads，请确保 PDF 已拷贝到当前目录或调整配置'],
     })
     const wrapper = mount(MaintenancePage, {
@@ -151,7 +151,7 @@ describe('维护页数据迁移', () => {
 
     expect(validateDataImport).toHaveBeenCalledWith(file)
     expect(wrapper.text()).toContain('导出 schema：0026_manga_blacklist')
-    expect(wrapper.text()).toContain('当前 schema：0028_drop_backup_record')
+    expect(wrapper.text()).toContain('当前 schema：0029_add_manga_status_favorited')
     expect(wrapper.text()).toContain('漫画')
     expect(wrapper.text()).toContain('12')
     expect(wrapper.text()).toContain('请确保 PDF 已拷贝到当前目录')
@@ -161,13 +161,13 @@ describe('维护页数据迁移', () => {
   it('二次确认后使用同一文件执行导入并提示重启', async () => {
     vi.mocked(validateDataImport).mockResolvedValue({
       format_version: 1,
-      schema_revision: '0028_drop_backup_record',
+      schema_revision: '0029_add_manga_status_favorited',
       exported_at: '2026-10-23T12:00:00Z',
       db_filename: 'main-20261023-120000.db',
       db_sha256: 'a'.repeat(64),
       table_counts: { manga: 1 },
       export_env: { db_path: './data', manga_download_path: './downloads' },
-      current_schema_revision: '0028_drop_backup_record',
+      current_schema_revision: '0029_add_manga_status_favorited',
       path_warnings: [],
     })
     vi.mocked(applyDataImport).mockResolvedValue({ restart: true })

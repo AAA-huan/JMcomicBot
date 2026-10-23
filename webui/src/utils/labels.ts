@@ -2,6 +2,7 @@
 
 export const MANGA_STATUS_LABELS: Record<string, string> = {
   downloaded: '已下载',
+  favorited: '已收藏未下载',
   missing_file: '文件缺失',
   invalid: '无效记录',
   deleted: '已删除',
@@ -10,6 +11,7 @@ export const MANGA_STATUS_LABELS: Record<string, string> = {
 
 export const MANGA_STATUS_COLORS: Record<string, string> = {
   downloaded: 'success',
+  favorited: 'info',
   missing_file: 'warning',
   invalid: 'error',
   deleted: 'medium-emphasis',

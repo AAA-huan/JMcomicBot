@@ -38,6 +38,7 @@ const pageSizeOptions = [20, 50, 100]
 const statusOptions = [
   { value: '', title: '全部状态' },
   { value: 'downloaded', title: '已下载' },
+  { value: 'favorited', title: '已收藏未下载' },
   { value: 'missing_file', title: '文件缺失' },
   { value: 'invalid', title: '无效记录' },
   { value: 'deleted', title: '已删除' },
@@ -685,7 +686,7 @@ watch(
               <th class="text-no-wrap">章节 / 页数</th>
               <th>标签</th>
               <th>状态</th>
-              <th class="text-no-wrap">下载时间</th>
+              <th class="text-no-wrap">下载/入库时间</th>
               <th class="text-no-wrap">操作</th>
             </tr>
           </thead>
@@ -743,6 +744,16 @@ watch(
                   :href="fileDownloadUrl(manga.files[0].id)"
                   aria-label="下载 PDF"
                 />
+                <v-btn
+                  v-else-if="manga.status === 'favorited'"
+                  size="small"
+                  variant="text"
+                  prepend-icon="mdi-download"
+                  aria-label="下载漫画"
+                  @click="requestDownloadIds([manga.id])"
+                >
+                  下载
+                </v-btn>
                 <v-btn
                   v-else
                   icon="mdi-file-download-outline"
@@ -843,6 +854,16 @@ watch(
                   :href="fileDownloadUrl(manga.files[0].id)"
                   aria-label="下载 PDF"
                 />
+                <v-btn
+                  v-else-if="manga.status === 'favorited'"
+                  size="small"
+                  variant="text"
+                  prepend-icon="mdi-download"
+                  aria-label="下载漫画"
+                  @click="requestDownloadIds([manga.id])"
+                >
+                  下载
+                </v-btn>
                 <v-btn
                   v-else
                   icon="mdi-file-download-outline"

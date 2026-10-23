@@ -26,7 +26,13 @@ from src.database.models import (
 from ._base import BaseRepository
 from .jm_favorite_repository import link_imported_favorites
 
-_VALID_MANGA_STATUSES = {"downloaded", "missing_file", "invalid", "deleted"}
+_VALID_MANGA_STATUSES = {
+    "downloaded",
+    "missing_file",
+    "invalid",
+    "deleted",
+    "favorited",
+}
 _VALID_FILE_STATUSES = {
     "ready",
     "missing",
@@ -93,6 +99,17 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             stmt = (
                 select(Manga)
                 .where(Manga.status != "deleted")
+                .options(selectinload(Manga.files))
+                .order_by(Manga.downloaded_at.desc(), cast(Manga.id, Integer), Manga.id)
+            )
+            return list(session.scalars(stmt).all())
+
+    def list_with_expected_files(self) -> List[Manga]:
+        """查询预期应有本地 PDF 的漫画，排除未下载收藏与已删除记录。"""
+        with self._get_session() as session:
+            stmt = (
+                select(Manga)
+                .where(Manga.status.not_in(("favorited", "deleted")))
                 .options(selectinload(Manga.files))
                 .order_by(Manga.downloaded_at.desc(), cast(Manga.id, Integer), Manga.id)
             )
@@ -244,6 +261,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
 
         with self._get_session() as session:
             manga = session.get(Manga, manga_id)
+            previous_status = manga.status if manga is not None else None
             if manga is None:
                 manga = Manga(id=manga_id)
                 session.add(manga)
@@ -253,6 +271,9 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             manga.chapter_count = chapter_count
             manga.page_count = page_count
             manga.status = status
+            if status == "downloaded" and previous_status == "favorited":
+                # 收藏导入时还没有真实下载，完成下载后以本次完成时间替换入库时间
+                manga.downloaded_at = utc_now()
             manga.updated_at = utc_now()
             session.commit()
             session.refresh(manga)
@@ -524,7 +545,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             # 校验通过且文件恢复时同步恢复漫画状态，避免文件正常但漫画仍标记缺失
             if status == "ready":
                 manga = session.get(Manga, manga_file.manga_id)
-                if manga is not None and manga.status == "missing_file":
+                if manga is not None and manga.status in ("missing_file", "favorited"):
                     manga.status = "downloaded"
                     manga.updated_at = utc_now()
             session.commit()
@@ -534,7 +555,8 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
         """将漫画及其文件标记为缺失，不删除数据库记录。"""
         with self._get_session() as session:
             manga = session.get(Manga, manga_id)
-            if manga is None or manga.status == "deleted":
+            # favorited 表示尚未下载，预期没有文件，不能按缺失文件处理
+            if manga is None or manga.status in ("deleted", "favorited"):
                 return False
             manga.status = "missing_file"
             manga.updated_at = utc_now()
