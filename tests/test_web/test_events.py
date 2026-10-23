@@ -73,9 +73,18 @@ def test_websocket_pushes_snapshot_and_task_events(db_manager) -> None:
             )
             assert response.status_code == 202
 
-            event = websocket.receive_json()
-            assert event["type"] == "task.updated"
-            assert event["data"]["manga_id"] == "101"
+            # 批量入队在后台线程执行，期间可能穿插 queue.updated，
+            # 循环等待目标漫画的 task.updated 事件
+            event = None
+            for _ in range(50):
+                candidate = websocket.receive_json()
+                if (
+                    candidate["type"] == "task.updated"
+                    and candidate["data"]["manga_id"] == "101"
+                ):
+                    event = candidate
+                    break
+            assert event is not None
             assert event["data"]["status"] in ("queued", "running")
             assert "requested_by" not in event["data"]
             assert event["occurred_at"]

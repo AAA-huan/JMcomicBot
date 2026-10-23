@@ -4,7 +4,12 @@ from hashlib import sha256
 from pathlib import Path
 
 from src.database.repositories import AuditEventRepository, MangaRepository
-from tests.test_web.support import create_client_for, csrf_headers, setup_and_login
+from tests.test_web.support import (
+    create_client_for,
+    csrf_headers,
+    setup_and_login,
+    wait_for_queued_downloads,
+)
 
 
 def test_audit_requires_login_and_returns_stable_filtered_pages(db_manager) -> None:
@@ -78,7 +83,7 @@ def test_verify_hashes_registered_file_and_persists_web_task(db_manager) -> None
 
 def test_verify_validates_ids_limits_csrf_and_busy_files(db_manager) -> None:
     """拒绝任意路径、超量请求和正在下载的目标。"""
-    client, _context = create_client_for(db_manager)
+    client, context = create_client_for(db_manager)
     with client:
         setup_and_login(client)
         headers = csrf_headers(client)
@@ -108,6 +113,7 @@ def test_verify_validates_ids_limits_csrf_and_busy_files(db_manager) -> None:
         client.post(
             "/api/v1/tasks/downloads", json={"manga_ids": ["100"]}, headers=headers
         )
+        wait_for_queued_downloads(context.download_queue, ["100"])
         response = client.post(
             "/api/v1/maintenance/verify", json={"manga_ids": ["100"]}, headers=headers
         )

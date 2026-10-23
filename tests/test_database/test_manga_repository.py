@@ -45,6 +45,33 @@ class TestManga:
         assert loaded is not None
         assert loaded.title == "新标题"
 
+    def test_favorited_manga_completed_download_updates_metadata(
+        self, manga_repo: MangaRepository
+    ) -> None:
+        """下载完成后应把 favorited 转为 downloaded 并补全元数据。"""
+        manga_repo.upsert(
+            "15",
+            "收藏标题",
+            "",
+            0,
+            0,
+            status="favorited",
+        )
+        manga_repo.upsert("16", "另一本收藏", "", 0, 0, status="favorited")
+        assert [manga.id for manga in manga_repo.list_with_expected_files()] == []
+
+        manga_repo.upsert("15", "下载标题", "作者", 2, 30)
+
+        loaded = manga_repo.get("15")
+        assert loaded is not None
+        assert (loaded.status, loaded.title, loaded.author) == (
+            "downloaded",
+            "下载标题",
+            "作者",
+        )
+        assert (loaded.chapter_count, loaded.page_count) == (2, 30)
+        assert [manga.id for manga in manga_repo.list_with_expected_files()] == ["15"]
+
     def test_count(self, manga_repo: MangaRepository) -> None:
         assert manga_repo.count() == 0
         manga_repo.upsert(

@@ -1,7 +1,10 @@
 """Web API 测试共享依赖构造工具。"""
 
 from pathlib import Path
+from threading import Lock
 from typing import Dict, List, Optional, Tuple
+
+import time
 
 from argon2 import PasswordHasher
 from starlette.testclient import TestClient
@@ -81,34 +84,76 @@ class FakeDownloadQueue:
         self.task_service = task_service
         self.queued_task_ids: Dict[str, str] = {}
         self.requested_manga_ids: List[str] = []
+        self.paused = False
+        self._lock = Lock()
+
+    def pause(self) -> bool:
+        if self.paused:
+            return False
+        self.paused = True
+        return True
+
+    def resume(self) -> bool:
+        if not self.paused:
+            return False
+        self.paused = False
+        return True
+
+    def is_paused(self) -> bool:
+        return self.paused
+
+    def get_queue_status(self) -> Dict[str, object]:
+        """返回与真实下载管理器一致的最小队列状态。"""
+        return {
+            "running": True,
+            "paused": self.paused,
+            "queue_size": len(self.queued_task_ids),
+            "pending_count": len(self.queued_task_ids),
+            "current_manga_id": None,
+        }
 
     def request_download(self, manga_id: str, context, notifier) -> DownloadRequestItem:
         del notifier
-        task = self.task_service.create("download", context, manga_id=manga_id)
-        self.queued_task_ids[manga_id] = task.id
-        self.requested_manga_ids.append(manga_id)
-        return DownloadRequestItem(manga_id=manga_id, status="queued", task_id=task.id)
+        with self._lock:
+            existing_task_id = self.queued_task_ids.get(manga_id)
+            if existing_task_id is not None:
+                return DownloadRequestItem(
+                    manga_id=manga_id,
+                    status="duplicate",
+                    task_id=existing_task_id,
+                )
+            task = self.task_service.create("download", context, manga_id=manga_id)
+            self.queued_task_ids[manga_id] = task.id
+            self.requested_manga_ids.append(manga_id)
+            return DownloadRequestItem(
+                manga_id=manga_id, status="queued", task_id=task.id
+            )
 
     def find_active_download(self, manga_id: str) -> Optional[str]:
-        return self.queued_task_ids.get(manga_id)
+        with self._lock:
+            return self.queued_task_ids.get(manga_id)
 
     def enqueue_existing_task(self, manga_id, task_id, context=None) -> bool:
         # 测试替身：记录入队，不真正下载；重复 manga_id 返回 False
-        if manga_id in self.queued_task_ids:
-            return False
-        self.queued_task_ids[manga_id] = task_id
-        return True
+        del context
+        with self._lock:
+            if manga_id in self.queued_task_ids:
+                return False
+            self.queued_task_ids[manga_id] = task_id
+            return True
 
     def cancel_download(self, manga_id: str) -> bool:
-        task_id = self.queued_task_ids.pop(manga_id, None)
+        with self._lock:
+            task_id = self.queued_task_ids.pop(manga_id, None)
         if task_id is None:
             return False
         self.task_service.cancel(task_id)
         return True
 
     def cancel_all_downloads(self) -> int:
-        task_ids = list(self.queued_task_ids.values())
-        self.queued_task_ids.clear()
+        with self._lock:
+            task_ids = list(self.queued_task_ids.values())
+            self.queued_task_ids.clear()
         for task_id in task_ids:
             self.task_service.cancel(task_id)
         return len(task_ids)
@@ -238,7 +283,7 @@ def build_web_context(  # pylint: disable=too-many-locals
             started_at=utc_now(),
             manga_repository=manga_repo,
             connection_provider=lambda: True,
-            download_queue_provider=lambda: {"running": True, "queue_size": 0},
+            download_queue_provider=download_queue.get_queue_status,
             send_queue_provider=lambda: {"running": True, "queue_size": 0},
             reconnect_requester=request_reconnect,
             shutdown_requester=request_shutdown,
@@ -319,6 +364,47 @@ def create_client_for(
     root = Path(db_manager.db_dir).parent
     context = build_web_context(db_manager, root)
     return create_test_client(context.dependencies, host), context
+
+
+def wait_for_queued_downloads(
+    download_queue: FakeDownloadQueue,
+    manga_ids: List[str],
+    timeout: float = 3.0,
+) -> None:
+    """等待后台批量入队把指定漫画写入内存队列替身。"""
+    expected = set(manga_ids)
+    deadline = time.monotonic() + timeout
+    while True:
+        missing = expected - download_queue.queued_task_ids.keys()
+        if not missing:
+            return
+        if time.monotonic() >= deadline:
+            raise AssertionError(f"等待内存队列入队超时，缺少漫画: {sorted(missing)}")
+        time.sleep(0.01)
+
+
+def wait_for_active_downloads(
+    db_manager: DatabaseManager,
+    manga_ids: List[str],
+    timeout: float = 3.0,
+) -> Dict[str, object]:
+    """等待后台批量入队创建指定漫画的活动下载任务。"""
+    expected = set(manga_ids)
+    repository = OperationTaskRepository(db_manager)
+    deadline = time.monotonic() + timeout
+    while True:
+        active = {
+            task.manga_id: task
+            for task in repository.list_active_downloads()
+            if task.manga_id in expected
+        }
+        if expected <= active.keys():
+            return active
+        if time.monotonic() >= deadline:
+            raise AssertionError(
+                f"等待下载任务入队超时，缺少漫画: {sorted(expected - active.keys())}"
+            )
+        time.sleep(0.01)
 
 
 def create_test_client(

@@ -26,6 +26,7 @@ import {
   unblacklistManga,
 } from '@/api/mangas'
 import { setFavorite } from '@/api/favorites'
+import { requestDownloads } from '@/api/tasks'
 import { ApiError } from '@/api/client'
 import LibraryPage from '@/pages/LibraryPage.vue'
 import type { Manga } from '@/types/api'
@@ -113,6 +114,39 @@ describe('LibraryPage', () => {
     expect(
       wrapper.find('a[href="/api/v1/files/200/content"]').exists(),
     ).toBe(true)
+  })
+
+  it('已收藏未下载漫画显示下载入口并提交下载任务', async () => {
+    vi.mocked(listMangas).mockResolvedValue({
+      items: [{
+        ...mangaFixture('300', '已收藏未下载'),
+        status: 'favorited',
+        chapter_count: 0,
+        page_count: 0,
+        files: [],
+      }],
+      page: 1,
+      page_size: 20,
+      total: 1,
+      pages: 1,
+    })
+    vi.mocked(requestDownloads).mockResolvedValue({
+      items: [], queued_count: 1, duplicate_count: 0, skipped_blacklisted: [],
+    })
+
+    const { wrapper } = await mountPage('/library?status=favorited')
+
+    expect(listMangas).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'favorited' }),
+    )
+    expect(wrapper.text()).toContain('已收藏未下载')
+    const download = wrapper.find('[aria-label="下载漫画"]')
+    expect(download.exists()).toBe(true)
+    await download.trigger('click')
+    await flushPromises()
+    expect(requestDownloads).toHaveBeenCalledWith(['300'])
+    expect(wrapper.text()).toContain('已提交 1 个，正在加入队列')
+    wrapper.unmount()
   })
 
   it('全选与取消全选仅作用于当前页', async () => {

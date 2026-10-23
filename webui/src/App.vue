@@ -40,4 +40,26 @@ body {
   overflow-x: hidden;
   min-width: 320px;
 }
+
+/* 移动端操作按钮横向滚动，避免大量按钮堆叠换行 */
+.action-scroll {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+}
+
+.action-scroll--mobile {
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding-bottom: 2px;
+  scrollbar-width: thin;
+  -webkit-overflow-scrolling: touch;
+}
+
+.action-scroll--mobile > * {
+  flex: 0 0 auto;
+}
 </style>

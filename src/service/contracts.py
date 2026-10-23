@@ -12,6 +12,7 @@ from src.service.results import (
     BlacklistOutcome,
     DataExportResult,
     DownloadCancellationResult,
+    DownloadPrepareResult,
     DownloadRequestItem,
     DownloadRequestResult,
     ImportPreview,
@@ -66,6 +67,18 @@ class DownloadQueueGateway(Protocol):
         """把既有任务记录重新装入内存队列（批量重试与启动续传共用）。"""
         raise NotImplementedError
 
+    def pause(self) -> bool:
+        """暂停下载队列，返回状态是否发生变化。"""
+        raise NotImplementedError
+
+    def resume(self) -> bool:
+        """恢复下载队列，返回状态是否发生变化。"""
+        raise NotImplementedError
+
+    def is_paused(self) -> bool:
+        """返回下载队列是否暂停。"""
+        raise NotImplementedError
+
 
 class DownloadService(Protocol):
     """下载任务应用服务接口。"""
@@ -85,6 +98,31 @@ class DownloadService(Protocol):
         notifier: Optional[DownloadNotifier] = None,
     ) -> DownloadRequestResult:
         """校验、去重并请求下载。"""
+        raise NotImplementedError
+
+    def prepare(self, manga_ids: List[str]) -> DownloadPrepareResult:
+        """同步预检批量下载，返回待入队与重复条目。"""
+        raise NotImplementedError
+
+    def enqueue_pending(
+        self,
+        manga_ids: List[str],
+        context: OperationContext,
+        notifier: Optional[DownloadNotifier] = None,
+    ) -> DownloadRequestResult:
+        """把预检通过的漫画逐个加入下载队列。"""
+        raise NotImplementedError
+
+    def pause(self) -> bool:
+        """暂停下载队列，返回状态是否发生变化。"""
+        raise NotImplementedError
+
+    def resume(self) -> bool:
+        """恢复下载队列，返回状态是否发生变化。"""
+        raise NotImplementedError
+
+    def is_paused(self) -> bool:
+        """返回下载队列是否暂停。"""
         raise NotImplementedError
 
     def cancel_task(self, task_id: str) -> TaskCancellationResult:
@@ -260,6 +298,10 @@ class TaskService(Protocol):
 
     def find_active_download(self, manga_id: str) -> Optional[TaskResult]:
         """查找同漫画尚未结束的下载任务。"""
+        raise NotImplementedError
+
+    def find_active_downloads(self, manga_ids: List[str]) -> Dict[str, TaskResult]:
+        """批量查找尚未结束的下载任务，按漫画 ID 返回。"""
         raise NotImplementedError
 
     def list_active_downloads(self) -> List[TaskResult]:

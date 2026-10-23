@@ -19,7 +19,7 @@ from src.database.repositories import (
     MangaTagRepository,
     TaskLogRepository,
 )
-from src.service import OperationContext, TaskService
+from src.service import OperationContext, SettingsService, TaskService
 from src.service.contracts import DownloadNotifier
 from src.service.manga_service import ADMIN_FAVORITE_DELETE_MESSAGE
 from src.service.results import (
@@ -145,6 +145,7 @@ class DownloadManager:
         send_conflict_checker: Optional[Callable[[str], bool]] = None,
         favorite_repository: Optional[FavoriteRepository] = None,
         progress_tracker: Optional[DownloadProgressTracker] = None,
+        settings_service: Optional[SettingsService] = None,
     ) -> None:
         """
         初始化下载管理器
@@ -161,6 +162,7 @@ class DownloadManager:
             send_conflict_checker: 判断漫画文件是否正在发送
             favorite_repository: 管理员收藏仓储，用于低内存模式保护收藏文件
             progress_tracker: WebUI 下载进度采集器；为空时不采集实时进度
+            settings_service: 运行时配置服务，用于持久化下载队列暂停状态
         """
         self.logger = logger_instance
         self.config = config
@@ -181,14 +183,26 @@ class DownloadManager:
         self.operation_task_service = operation_task_service
         self.send_conflict_checker = send_conflict_checker
         self.progress_tracker = progress_tracker
+        self.settings_service = settings_service
         self.download_queue: queue.Queue = queue.Queue()
         self.queue_running: bool = True
+        # 暂停只阻塞取新任务，不中断正在进行的 jmcomic 下载
+        self.paused: bool = (
+            settings_service.is_download_queue_paused()
+            if settings_service is not None
+            else False
+        )
+        self._resume_event: threading.Event = threading.Event()
+        if not self.paused:
+            self._resume_event.set()
         self._stop_event: threading.Event = threading.Event()
         self._queue_state_lock: threading.Lock = threading.Lock()
         self._queue_thread: Optional[threading.Thread] = None
         self.queued_tasks: Dict[str, DownloadQueueItem] = {}
         self.downloading_mangas: Dict[str, bool] = {}
         self._start_download_queue_processor()
+        if self.paused:
+            self.logger.info("下载队列处于暂停状态，恢复前不会开始新任务")
 
         # 取消下载任务标记：排队中尚未开始的任务可通过取消标记被跳过
         self.cancelled_downloads: Dict[str, bool] = {}
@@ -215,10 +229,43 @@ class DownloadManager:
         pending_count = self.download_queue.qsize()
         return {
             "running": self.queue_running,
+            "paused": self.is_paused(),
             "queue_size": pending_count + (1 if current_manga_id is not None else 0),
             "pending_count": pending_count,
             "current_manga_id": current_manga_id,
         }
+
+    def is_paused(self) -> bool:
+        """返回下载队列是否处于暂停状态。"""
+        return self.paused
+
+    def pause(self) -> bool:
+        """暂停下载队列，返回本次调用是否改变了状态。
+
+        暂停后当前正在下载的漫画会继续完成，队列线程不再取新任务；
+        状态持久化到 settings 表，重启后仍然生效。
+        """
+        with self._queue_state_lock:
+            if self.paused:
+                return False
+            if self.settings_service is not None:
+                self.settings_service.set_download_queue_paused(True)
+            self.paused = True
+            self._resume_event.clear()
+        self.logger.info("下载队列已暂停，当前任务完成后不再取新任务")
+        return True
+
+    def resume(self) -> bool:
+        """恢复下载队列，返回本次调用是否改变了状态。"""
+        with self._queue_state_lock:
+            if not self.paused:
+                return False
+            if self.settings_service is not None:
+                self.settings_service.set_download_queue_paused(False)
+            self.paused = False
+            self._resume_event.set()
+        self.logger.info("下载队列已恢复")
+        return True
 
     def _start_download_queue_processor(self) -> None:
         """
@@ -229,11 +276,22 @@ class DownloadManager:
         def process_queue() -> None:
             """下载队列处理函数，顺序执行队列中的下载任务"""
             while not self._stop_event.is_set():
+                # 暂停时等待恢复信号；超时用于定期检查停止事件
+                if not self._resume_event.wait(timeout=1):
+                    continue
+                if self._stop_event.is_set():
+                    return
                 try:
                     item = self.download_queue.get(timeout=1)
                     if item is None or self._stop_event.is_set():
                         self.download_queue.task_done()
                         return
+                    # 取出任务后再次确认暂停：暂停瞬间已出队的任务放回队列，
+                    # 保证暂停生效后不会启动新下载
+                    if self.paused:
+                        self.download_queue.put(item)
+                        self.download_queue.task_done()
+                        continue
                     self._process_download_task(item)
                     self.download_queue.task_done()
                 except queue.Empty:
@@ -268,6 +326,8 @@ class DownloadManager:
         with self._queue_state_lock:
             self.queue_running = False
             self._stop_event.set()
+            # 唤醒暂停等待中的线程，使其能观察到停止事件
+            self._resume_event.set()
             self.queued_tasks.clear()
             self.download_queue.put(None)
         if self._queue_thread is not None:

@@ -7,7 +7,7 @@ from typing import Dict, List, Tuple
 
 import pytest
 
-from src.database.models import utc_now
+from src.database.models import JmRemoteFavorite, utc_now
 from src.database.repositories import (
     FavoriteRepository,
     JmFavoriteRepository,
@@ -143,6 +143,74 @@ def test_all_folders_pagination_membership_and_idempotence(db_manager, tmp_path)
         == 1
     )
     assert service.repository.list_favorites(1, 1, 20, search="%")["total"] == 0
+
+
+def test_import_favorites_to_library_creates_favorited_records(db_manager, tmp_path):
+    """导入未下载收藏应建立 favorited 漫画并写入管理员收藏，重复导入幂等。"""
+    service, auth, _client = make_service(db_manager)
+    wait_for_import(service, auth, service.start_import(auth, ["7"]))
+    mangas = MangaRepository(db_manager, str(tmp_path))
+    favorites = FavoriteRepository(db_manager)
+
+    result = service.import_to_library(1, ["100", "200", "100"])
+
+    assert result == {"imported_count": 2, "already_count": 0}
+    for manga_id, title in (("100", "漫画一"), ("200", "漫画二")):
+        manga = mangas.get(manga_id)
+        assert manga is not None
+        assert (manga.title, manga.source_site) == (title, "jmcomic")
+        assert (manga.status, manga.chapter_count, manga.page_count) == (
+            "favorited",
+            0,
+            0,
+        )
+        assert favorites.get("web_admin", "1", manga_id) is not None
+    items = service.repository.list_favorites(1, 1, 20)["items"]
+    assert all(item["in_library"] and not item["downloaded"] for item in items)
+    with db_manager.get_session() as session:
+        remote = session.get(JmRemoteFavorite, (1, "user", "100"))
+        assert remote is not None
+        assert not remote.pending_local_favorite
+
+    repeated = service.import_to_library(1, ["100", "200"])
+    assert repeated == {"imported_count": 0, "already_count": 2}
+    assert mangas.get("100").status == "favorited"
+
+    with pytest.raises(JmFavoriteError) as empty_error:
+        service.import_to_library(1, [])
+    assert empty_error.value.code == "JM_INVALID_LIBRARY_SELECTION"
+    with pytest.raises(JmFavoriteError) as missing_error:
+        service.import_to_library(1, ["999"])
+    assert missing_error.value.code == "JM_FAVORITE_NOT_FOUND"
+
+
+def test_import_existing_download_keeps_metadata_and_revives_deleted(
+    db_manager, tmp_path
+):
+    """已下载漫画只补收藏；已删除漫画按未下载收藏重新入库。"""
+    service, auth, _client = make_service(db_manager)
+    wait_for_import(service, auth, service.start_import(auth, ["7"]))
+    mangas = MangaRepository(db_manager, str(tmp_path))
+    pdf = tmp_path / "100.pdf"
+    pdf.write_bytes(b"%PDF")
+    mangas.upsert("100", "本地标题", "本地作者", 2, 10)
+    mangas.add_file("100", str(pdf))
+    mangas.upsert("200", "已删除标题", "旧作者", 1, 3, status="deleted")
+
+    result = service.import_to_library(1, ["100", "200"])
+
+    assert result == {"imported_count": 1, "already_count": 1}
+    existing = mangas.get("100")
+    assert existing is not None
+    assert (existing.status, existing.title, existing.page_count) == (
+        "downloaded",
+        "本地标题",
+        10,
+    )
+    revived = mangas.get("200")
+    assert revived is not None
+    assert (revived.status, revived.title) == ("favorited", "漫画二")
+    assert (revived.chapter_count, revived.page_count) == (0, 0)
 
 
 def test_partial_failure_retains_pages_without_secret(db_manager):

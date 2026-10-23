@@ -218,6 +218,21 @@ class TestSyncScannedToDb:
         assert missing is not None
         assert missing.status == "missing_file"
 
+    def test_cleanup_excludes_favorited_without_files(
+        self, tmp_path, manga_repo: MangaRepository
+    ) -> None:
+        """已收藏未下载漫画不应被扫描清理标记为缺失文件。"""
+        os.makedirs(tmp_path, exist_ok=True)
+        entries = scan_download_dir(str(tmp_path))
+        manga_repo.upsert("888888", "收藏未下载", "", 0, 0, status="favorited")
+
+        result = sync_scanned_to_db(manga_repo, entries)
+        preview = sync_scanned_to_db(manga_repo, entries, dry_run=True)
+
+        assert result.marked_missing_count == 0
+        assert preview.pending_cleanup_count == 0
+        assert manga_repo.get("888888").status == "favorited"
+
     def test_dry_run_writes_nothing(
         self, tmp_path, manga_repo: MangaRepository
     ) -> None:

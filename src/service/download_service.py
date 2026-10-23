@@ -13,6 +13,7 @@ from src.service.results import (
     BatchTaskItem,
     BatchTaskResult,
     DownloadCancellationResult,
+    DownloadPrepareResult,
     DownloadRequestItem,
     DownloadRequestResult,
     TaskCancellationResult,
@@ -34,6 +35,18 @@ class DownloadQueueService:
         self.download_queue = download_queue
         self.task_service = task_service
         self.blacklist_service = blacklist_service
+
+    def pause(self) -> bool:
+        """暂停下载队列，返回状态是否发生变化。"""
+        return self.download_queue.pause()
+
+    def resume(self) -> bool:
+        """恢复下载队列，返回状态是否发生变化。"""
+        return self.download_queue.resume()
+
+    def is_paused(self) -> bool:
+        """返回下载队列是否暂停。"""
+        return self.download_queue.is_paused()
 
     def cancel(self, manga_ids: List[str]) -> DownloadCancellationResult:
         """取消指定漫画的排队任务，并返回实际取消的漫画 ID。"""
@@ -114,6 +127,79 @@ class DownloadQueueService:
         return DownloadRequestResult(
             items=tuple(items), skipped_blacklisted=skipped_blacklisted
         )
+
+    def prepare(self, manga_ids: List[str]) -> DownloadPrepareResult:
+        """同步预检批量下载，快速返回待入队与重复条目。
+
+        数据库活动任务使用一次批量查询识别，避免 100 个 ID 逐个查询；
+        真正的任务创建交给 enqueue_pending 在后台完成。
+        """
+        normalized_ids = self._normalize_manga_ids(manga_ids)
+        skipped_blacklisted = tuple(
+            manga_id
+            for manga_id in normalized_ids
+            if self.blacklist_service is not None
+            and self.blacklist_service.is_blacklisted(manga_id)
+        )
+        skipped_set = set(skipped_blacklisted)
+        candidates = [
+            manga_id for manga_id in normalized_ids if manga_id not in skipped_set
+        ]
+        active_tasks = self.task_service.find_active_downloads(candidates)
+        items: List[DownloadRequestItem] = []
+        pending_ids: List[str] = []
+        for manga_id in candidates:
+            active_task = active_tasks.get(manga_id)
+            if active_task is not None:
+                items.append(
+                    DownloadRequestItem(
+                        manga_id=manga_id,
+                        status="duplicate",
+                        task_id=active_task.id,
+                    )
+                )
+                continue
+            active_task_id = self.download_queue.find_active_download(manga_id)
+            if active_task_id is not None:
+                items.append(
+                    DownloadRequestItem(
+                        manga_id=manga_id,
+                        status="duplicate",
+                        task_id=active_task_id,
+                    )
+                )
+                continue
+            pending_ids.append(manga_id)
+            items.append(
+                DownloadRequestItem(
+                    manga_id=manga_id,
+                    status="accepted",
+                    task_id=None,
+                )
+            )
+        return DownloadPrepareResult(
+            items=tuple(items),
+            pending_ids=tuple(pending_ids),
+            skipped_blacklisted=skipped_blacklisted,
+        )
+
+    def enqueue_pending(
+        self,
+        manga_ids: List[str],
+        context: OperationContext,
+        notifier: Optional[DownloadNotifier] = None,
+    ) -> DownloadRequestResult:
+        """把预检通过的漫画逐个加入下载队列，供后台任务调用。
+
+        内存队列与任务服务仍会二次去重；并发请求或预检后状态变化时，
+        返回状态为 duplicate，不会重复创建活动任务。
+        """
+        normalized_ids = self._normalize_manga_ids(manga_ids)
+        items = [
+            self.download_queue.request_download(manga_id, context, notifier)
+            for manga_id in normalized_ids
+        ]
+        return DownloadRequestResult(items=tuple(items))
 
     def cancel_task(self, task_id: str) -> TaskCancellationResult:
         """取消尚未开始的下载任务；重启后遗留的排队记录会被直接标记取消。"""

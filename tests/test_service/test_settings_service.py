@@ -190,6 +190,34 @@ def test_load_persisted_rejects_readonly_and_unknown_keys(db_manager) -> None:
         service.load_persisted()
 
 
+def test_internal_download_queue_pause_state_is_persisted_and_skipped(
+    db_manager,
+) -> None:
+    """内部暂停状态可持久化，启动加载配置时不会当作未注册配置报错。"""
+    service, _applied = _build_service(db_manager)
+
+    assert service.is_download_queue_paused() is False
+    service.set_download_queue_paused(True)
+
+    restarted, _applied = _build_service(db_manager)
+    assert restarted.is_download_queue_paused() is True
+    assert restarted.load_persisted() == 0
+
+    restarted.set_download_queue_paused(False)
+    assert _build_service(db_manager)[0].is_download_queue_paused() is False
+
+
+def test_internal_download_queue_pause_state_rejects_invalid_value(
+    db_manager,
+) -> None:
+    """数据库中的暂停状态非法时必须明确报错。"""
+    service, _applied = _build_service(db_manager)
+    SettingRepository(db_manager).set("download_queue_paused", "paused")
+
+    with pytest.raises(ValueError, match="暂停状态非法"):
+        service.is_download_queue_paused()
+
+
 def test_register_appliers_requires_complete_set(db_manager) -> None:
     """应用接口必须完整覆盖可编辑配置，多余或缺失都明确报错。"""
     service = SettingsService(

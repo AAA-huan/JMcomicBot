@@ -21,6 +21,7 @@ def _make_manager() -> DownloadManager:
     manager.operation_task_service = None
     manager._queue_state_lock = Lock()
     manager.queue_running = True
+    manager.paused = False
     manager.download_queue = Mock()
     manager.download_queue.put = Mock()
     return manager
@@ -101,6 +102,7 @@ def test_queue_status_counts_active_download() -> None:
     assert status["pending_count"] == 2
     assert status["current_manga_id"] == "100"
     assert status["running"] is True
+    assert status["paused"] is False
 
 
 def test_queue_status_without_active_download() -> None:

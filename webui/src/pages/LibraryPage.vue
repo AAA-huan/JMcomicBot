@@ -17,6 +17,7 @@ import {
 import { requestDownloads } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
+import PaginationBar from '@/components/PaginationBar.vue'
 import { useCoverPreview } from '@/stores/coverPreview'
 import type { Manga } from '@/types/api'
 import { copyText } from '@/utils/clipboard'
@@ -37,6 +38,7 @@ const pageSizeOptions = [20, 50, 100]
 const statusOptions = [
   { value: '', title: '全部状态' },
   { value: 'downloaded', title: '已下载' },
+  { value: 'favorited', title: '已收藏未下载' },
   { value: 'missing_file', title: '文件缺失' },
   { value: 'invalid', title: '无效记录' },
   { value: 'deleted', title: '已删除' },
@@ -275,7 +277,7 @@ async function requestDownloadIds(ids: string[]): Promise<void> {
   }
   try {
     const result = await requestDownloads(ids)
-    const parts = [`已入队 ${result.queued_count} 个`]
+    const parts = [`已提交 ${result.queued_count} 个，正在加入队列`]
     if (result.skipped_blacklisted.length > 0) {
       parts.push(
         `${result.skipped_blacklisted.length} 个已被拉黑跳过（${result.skipped_blacklisted.join('、')}）`,
@@ -601,57 +603,59 @@ watch(
           <template v-if="selectedCount > 0">，已选 {{ selectedCount }} 条</template>
         </span>
         <v-spacer />
-        <v-btn
-          variant="tonal"
-          :disabled="mangas.length === 0"
-          @click="toggleSelectAll"
-        >
-          {{ allSelectableSelected ? '取消全选' : '全选' }}
-        </v-btn>
-        <v-btn
-          variant="tonal"
-          prepend-icon="mdi-download"
-          :disabled="selectedCount === 0"
-          @click="requestDownloadIds(selected)"
-        >
-          下载选中
-        </v-btn>
-        <v-btn
-          variant="tonal"
-          prepend-icon="mdi-content-copy"
-          :disabled="selectedCount === 0"
-          @click="copySelectedIds"
-        >
-          复制 ID
-        </v-btn>
-        <v-btn
-          variant="tonal"
-          color="error"
-          prepend-icon="mdi-delete-sweep"
-          :disabled="selectedCount === 0"
-          @click="batchDeleteDialog = true"
-        >
-          批量删除
-        </v-btn>
-        <v-btn
-          variant="tonal"
-          color="warning"
-          prepend-icon="mdi-lock"
-          :disabled="selectedCount === 0"
-          @click="openBatchBlacklist('add')"
-        >
-          批量拉黑
-        </v-btn>
-        <v-btn
-          variant="tonal"
-          color="warning"
-          prepend-icon="mdi-lock-off"
-          :disabled="!hasSelectedBlacklisted"
-          @click="openBatchBlacklist('remove')"
-        >
-          批量解除
-        </v-btn>
-        <v-btn icon="mdi-refresh" variant="text" aria-label="刷新" @click="load" />
+        <div class="action-scroll" :class="{ 'action-scroll--mobile': mobile }">
+          <v-btn
+            variant="tonal"
+            :disabled="mangas.length === 0"
+            @click="toggleSelectAll"
+          >
+            {{ allSelectableSelected ? '取消全选' : '全选' }}
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            prepend-icon="mdi-download"
+            :disabled="selectedCount === 0"
+            @click="requestDownloadIds(selected)"
+          >
+            下载选中
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            prepend-icon="mdi-content-copy"
+            :disabled="selectedCount === 0"
+            @click="copySelectedIds"
+          >
+            复制 ID
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            color="error"
+            prepend-icon="mdi-delete-sweep"
+            :disabled="selectedCount === 0"
+            @click="batchDeleteDialog = true"
+          >
+            批量删除
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            color="warning"
+            prepend-icon="mdi-lock"
+            :disabled="selectedCount === 0"
+            @click="openBatchBlacklist('add')"
+          >
+            批量拉黑
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            color="warning"
+            prepend-icon="mdi-lock-off"
+            :disabled="!hasSelectedBlacklisted"
+            @click="openBatchBlacklist('remove')"
+          >
+            批量解除
+          </v-btn>
+          <v-btn icon="mdi-refresh" variant="text" aria-label="刷新" @click="load" />
+        </div>
       </v-card-actions>
     </v-card>
 
@@ -682,7 +686,7 @@ watch(
               <th class="text-no-wrap">章节 / 页数</th>
               <th>标签</th>
               <th>状态</th>
-              <th class="text-no-wrap">下载时间</th>
+              <th class="text-no-wrap">下载/入库时间</th>
               <th class="text-no-wrap">操作</th>
             </tr>
           </thead>
@@ -740,6 +744,16 @@ watch(
                   :href="fileDownloadUrl(manga.files[0].id)"
                   aria-label="下载 PDF"
                 />
+                <v-btn
+                  v-else-if="manga.status === 'favorited'"
+                  size="small"
+                  variant="text"
+                  prepend-icon="mdi-download"
+                  aria-label="下载漫画"
+                  @click="requestDownloadIds([manga.id])"
+                >
+                  下载
+                </v-btn>
                 <v-btn
                   v-else
                   icon="mdi-file-download-outline"
@@ -841,6 +855,16 @@ watch(
                   aria-label="下载 PDF"
                 />
                 <v-btn
+                  v-else-if="manga.status === 'favorited'"
+                  size="small"
+                  variant="text"
+                  prepend-icon="mdi-download"
+                  aria-label="下载漫画"
+                  @click="requestDownloadIds([manga.id])"
+                >
+                  下载
+                </v-btn>
+                <v-btn
                   v-else
                   icon="mdi-file-download-outline"
                   size="small"
@@ -886,25 +910,15 @@ watch(
       </template>
 
       <v-divider v-if="pages > 1" />
-      <div class="d-flex flex-wrap align-center justify-center pa-2">
-        <v-pagination
-          v-if="pages > 1"
-          :model-value="filters.page"
-          :length="pages"
-          :total-visible="5"
-          @update:model-value="updateQuery({ page: $event })"
-        />
-        <v-select
-          :model-value="filters.pageSize"
-          :items="pageSizeOptions"
-          label="每页"
-          hide-details
-          density="compact"
-          class="mt-2"
-          style="max-width: 120px"
-          @update:model-value="updateQuery({ page_size: $event, page: 1 })"
-        />
-      </div>
+      <PaginationBar
+        :page="filters.page"
+        :pages="pages"
+        :page-size="filters.pageSize"
+        :page-size-options="pageSizeOptions"
+        :loading="loading"
+        @update:page="updateQuery({ page: $event })"
+        @update:page-size="updateQuery({ page_size: $event, page: 1 })"
+      />
     </v-card>
 
     <ConfirmDialog

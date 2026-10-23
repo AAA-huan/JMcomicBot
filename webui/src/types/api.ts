@@ -52,6 +52,7 @@ export interface OperationTask {
 
 export interface QueueStatus {
   running: boolean
+  paused?: boolean
   queue_size: number
   pending_count?: number
   current_file?: string | null
@@ -118,7 +119,8 @@ export interface SettingView {
 
 export interface DownloadRequestItem {
   manga_id: string
-  status: 'queued' | 'duplicate'
+  /** accepted 表示已接收等待后台入队；queued 为同步入队结果。 */
+  status: 'accepted' | 'queued' | 'duplicate'
   task_id: string | null
 }
 

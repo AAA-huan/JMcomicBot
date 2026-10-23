@@ -332,7 +332,7 @@ def sync_scanned_to_db(  # pylint: disable=too-many-locals, too-many-branches
 
     # 清理数据库中文件已不存在的残留记录
     if not dry_run:
-        db_ids = {manga.id for manga in repo.get_all()}
+        db_ids = {manga.id for manga in repo.list_with_expected_files()}
         orphan_ids = db_ids - disk_ids
         for manga_id in sorted(orphan_ids):
             logger.info(f"标记缺失文件: 漫画ID {manga_id} 的PDF文件已不存在")
@@ -373,7 +373,7 @@ def record_scan_result(
 
 def _count_pending_cleanup(repo: MangaRepository, disk_ids: Set[str]) -> int:
     """统计数据库中存在但不在磁盘文件集合中的残留记录数量"""
-    db_ids = {manga.id for manga in repo.get_all()}
+    db_ids = {manga.id for manga in repo.list_with_expected_files()}
     return len(db_ids - disk_ids)
 
 
