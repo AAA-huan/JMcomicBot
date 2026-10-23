@@ -1,13 +1,27 @@
-"""维护操作 API：扫描、修复与数据库备份。"""
+"""维护操作 API：扫描、修复、数据库备份与数据迁移。"""
 
 from dataclasses import asdict
+from pathlib import Path
+from tempfile import NamedTemporaryFile
 from typing import Annotated, Callable, List, Optional
 
-from fastapi import APIRouter, Depends, Query, Request, status
+import shutil
+
+from fastapi import (
+    APIRouter,
+    BackgroundTasks,
+    Depends,
+    File,
+    Query,
+    Request,
+    UploadFile,
+    status,
+)
 from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
+from starlette.background import BackgroundTask
 
-from src.service import BackupConflictError, BackupDownloadError
+from src.service import BackupConflictError, BackupDownloadError, DataImportError
 from src.service.web_auth_service import AuthenticatedSession
 from src.web.dependencies import WebDependencies
 from src.web.errors import ApiError
@@ -40,10 +54,19 @@ class VerifyRequest(BaseModel):
     )
 
 
+def _save_upload(file: UploadFile) -> Path:
+    """把上传的 zip 流式写入系统临时文件，避免整包读入内存。"""
+    with NamedTemporaryFile(
+        prefix="jmbot-data-import-upload-", suffix=".zip", delete=False
+    ) as temporary:
+        shutil.copyfileobj(file.file, temporary)
+        return Path(temporary.name)
+
+
 def create_maintenance_router(
     dependencies: WebDependencies, authenticate: AuthenticateCallable
 ) -> APIRouter:
-    """创建扫描、修复与备份路由。"""
+    """创建扫描、修复、备份与数据迁移路由。"""
     router = APIRouter(tags=["维护"])
 
     @router.post("/maintenance/verify")
@@ -181,5 +204,68 @@ def create_maintenance_router(
             "filename": result.filename,
             "file_size_bytes": result.file_size_bytes,
         }
+
+    @router.post("/maintenance/data-export")
+    def export_data(
+        request: Request,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> FileResponse:
+        """生成一次性数据导出包并流式下载，下载结束后清理临时目录。"""
+        context = build_operation_context(request, authenticated)
+        result = dependencies.data_migration_service.export_data(context)
+        return FileResponse(
+            result.path,
+            media_type="application/zip",
+            filename=result.filename,
+            headers={"X-Content-Type-Options": "nosniff"},
+            # 无论下载成功与否，响应结束后删除整个临时导出目录
+            background=BackgroundTask(
+                shutil.rmtree, result.path.parent, ignore_errors=True
+            ),
+        )
+
+    @router.post("/maintenance/data-import/validate")
+    def validate_data_import(
+        file: Annotated[UploadFile, File()],
+        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """上传数据包并返回预览，不替换文件、不写审计。"""
+        upload_path = _save_upload(file)
+        try:
+            preview = dependencies.data_migration_service.validate_import(upload_path)
+        except DataImportError as error:
+            raise ApiError(
+                error.status_code, error.error_code, error.message
+            ) from error
+        finally:
+            upload_path.unlink(missing_ok=True)
+        return asdict(preview)
+
+    @router.post("/maintenance/data-import", status_code=status.HTTP_202_ACCEPTED)
+    def apply_data_import(
+        request: Request,
+        background_tasks: BackgroundTasks,
+        file: Annotated[UploadFile, File()],
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+        confirm: Annotated[bool, Query()] = False,
+    ) -> dict[str, bool]:
+        """重新校验并替换整库，响应发出后由后台任务触发优雅重启。"""
+        if not confirm:
+            raise ApiError(
+                400, "DATA_IMPORT_CONFIRM_REQUIRED", "导入数据需要确认参数 confirm=1"
+            )
+        context = build_operation_context(request, authenticated)
+        upload_path = _save_upload(file)
+        try:
+            dependencies.data_migration_service.apply_import(upload_path, context)
+        except DataImportError as error:
+            raise ApiError(
+                error.status_code, error.error_code, error.message
+            ) from error
+        finally:
+            upload_path.unlink(missing_ok=True)
+        # 复用系统重启机制：先返回 202，响应发送后再收尾并 execv
+        background_tasks.add_task(dependencies.system_service.request_restart, context)
+        return {"restart": True}
 
     return router

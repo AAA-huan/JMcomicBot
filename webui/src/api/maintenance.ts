@@ -1,6 +1,7 @@
-/** 维护操作接口：扫描、修复与备份。 */
+/** 维护操作接口：扫描、修复、备份与数据迁移。 */
 
-import { apiRequest } from './client'
+import { apiDownload, apiRequest, apiUpload } from './client'
+import type { DownloadedFile } from './client'
 import type { BackupRecord, PageResult, ScanResultView, VerifyResult } from '@/types/api'
 
 export interface ScanOptions {
@@ -52,4 +53,35 @@ export interface CreatedBackup {
 
 export function createBackup(): Promise<CreatedBackup> {
   return apiRequest<CreatedBackup>('/maintenance/backups', { method: 'POST' })
+}
+
+export interface ImportPreview {
+  format_version: number
+  schema_revision: string
+  exported_at: string
+  db_filename: string
+  db_sha256: string
+  table_counts: Record<string, number>
+  export_env: Record<string, string>
+  current_schema_revision: string
+  path_warnings: string[]
+}
+
+export function exportData(): Promise<DownloadedFile> {
+  return apiDownload('/maintenance/data-export', 'POST')
+}
+
+export function validateDataImport(file: File): Promise<ImportPreview> {
+  const formData = new FormData()
+  formData.append('file', file, file.name)
+  return apiUpload<ImportPreview>('/maintenance/data-import/validate', formData)
+}
+
+export function applyDataImport(file: File): Promise<{ restart: boolean }> {
+  const formData = new FormData()
+  formData.append('file', file, file.name)
+  return apiUpload<{ restart: boolean }>(
+    '/maintenance/data-import?confirm=1',
+    formData,
+  )
 }

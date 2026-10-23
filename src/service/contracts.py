@@ -1,5 +1,6 @@
 """QQ 命令与未来 Web API 共用的应用服务协议。"""
 
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Protocol
 
 from src.database.models import ReadingSetting
@@ -9,9 +10,11 @@ from src.service.results import (
     BatchTaskResult,
     BlacklistBatchResult,
     BlacklistOutcome,
+    DataExportResult,
     DownloadCancellationResult,
     DownloadRequestItem,
     DownloadRequestResult,
+    ImportPreview,
     MangaBlacklistItem,
     TaskCancellationResult,
     TaskResult,
@@ -170,6 +173,28 @@ class ReadingSettingService(Protocol):
         context: Optional[OperationContext] = None,
     ) -> ReadingSetting:
         """整体更新设置，未传字段保留原值。"""
+        raise NotImplementedError
+
+
+class DataMigrationService(Protocol):
+    """数据库导出与导入应用服务接口。"""
+
+    def export_data(
+        self, context: Optional[OperationContext] = None
+    ) -> DataExportResult:
+        """生成包含整库备份与一致性记录的 zip。"""
+        raise NotImplementedError
+
+    def validate_import(self, zip_source: bytes | Path) -> ImportPreview:
+        """校验导入包并返回预览，不替换任何文件。"""
+        raise NotImplementedError
+
+    def apply_import(
+        self,
+        zip_source: bytes | Path,
+        context: Optional[OperationContext] = None,
+    ) -> None:
+        """重新校验后替换整库；失败时自动恢复旧库并抛错。"""
         raise NotImplementedError
 
 

@@ -33,6 +33,7 @@ from src.database.repositories import (
 from src.permission.manager import PermissionManager
 from src.service import (
     DatabaseMaintenanceService,
+    DataMigrationService,
     DownloadQueueService,
     MangaBlacklistService,
     MangaService,
@@ -267,6 +268,12 @@ def build_web_context(  # pylint: disable=too-many-locals
             task_service,
             BackupRepository(db_manager),
             backup_dir=str(backup_dir),
+        ),
+        data_migration_service=DataMigrationService(
+            db_manager,
+            audit_repo,
+            db_path_config=str(db_manager.db_dir),
+            manga_download_path=str(download_root),
         ),
         repair_service=RepairService(
             manga_repo,

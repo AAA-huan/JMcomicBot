@@ -3,7 +3,7 @@
 from dataclasses import dataclass
 from datetime import datetime
 from pathlib import Path
-from typing import Optional, Tuple
+from typing import Dict, Optional, Tuple
 
 
 @dataclass(frozen=True)
@@ -32,6 +32,32 @@ class BackupResult:
     backup_id: int
     filename: str
     file_size_bytes: int
+
+
+@dataclass(frozen=True)
+class DataExportResult:
+    """漫画数据库导出结果，路径指向待流式下载的临时 zip。"""
+
+    path: Path
+    filename: str
+    file_size_bytes: int
+    schema_revision: str
+    exported_at: datetime
+
+
+@dataclass(frozen=True)
+class ImportPreview:  # pylint: disable=too-many-instance-attributes
+    """导入校验预览，不包含任何绝对临时路径。"""
+
+    format_version: int
+    schema_revision: str
+    exported_at: str
+    db_filename: str
+    db_sha256: str
+    table_counts: Dict[str, int]
+    export_env: Dict[str, str]
+    current_schema_revision: str
+    path_warnings: Tuple[str, ...]
 
 
 @dataclass(frozen=True)

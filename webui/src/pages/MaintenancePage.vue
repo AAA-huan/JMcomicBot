@@ -5,13 +5,16 @@ import { useDisplay } from 'vuetify'
 import { errorMessage } from '@/api/client'
 import { useEventSubscription } from '@/api/eventStream'
 import {
+  applyDataImport,
   createBackup,
+  exportData,
   listBackups,
   repairLibrary,
   scanLibrary,
+  validateDataImport,
   verifyLibrary,
 } from '@/api/maintenance'
-import type { RepairResult } from '@/api/maintenance'
+import type { ImportPreview, RepairResult } from '@/api/maintenance'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import type { BackupRecord, OperationTask, ScanResultView, VerifyResult } from '@/types/api'
@@ -24,6 +27,17 @@ import {
 } from '@/utils/labels'
 
 const { mobile } = useDisplay()
+
+const TABLE_LABELS: Record<string, string> = {
+  manga: '漫画',
+  manga_file: '漫画文件',
+  manga_favorite: '收藏',
+  reading_progress: '阅读进度',
+  reading_setting: '阅读设置',
+  manga_blacklist: '黑名单',
+  operation_task: '操作任务',
+  audit_event: '审计事件',
+}
 
 const error = ref('')
 const actionError = ref('')
@@ -150,6 +164,90 @@ async function confirmCreateBackup(): Promise<void> {
     createBackupDialog.value = false
   } finally {
     createBackupLoading.value = false
+  }
+}
+
+const exportLoading = ref(false)
+const importFileInput = ref<HTMLInputElement | null>(null)
+const importFile = ref<File | null>(null)
+const importPreview = ref<ImportPreview | null>(null)
+const importValidating = ref(false)
+const importDialog = ref(false)
+const importLoading = ref(false)
+const importRestarting = ref(false)
+
+async function runExport(): Promise<void> {
+  if (exportLoading.value || importRestarting.value) return
+  actionError.value = ''
+  actionNotice.value = ''
+  exportLoading.value = true
+  try {
+    const { blob, filename } = await exportData()
+    const downloadName = filename ?? 'data-export.zip'
+    const objectUrl = URL.createObjectURL(blob)
+    const anchor = document.createElement('a')
+    anchor.href = objectUrl
+    anchor.download = downloadName
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    URL.revokeObjectURL(objectUrl)
+    actionNotice.value = `数据已导出：${downloadName}`
+  } catch (err) {
+    actionError.value = errorMessage(err)
+  } finally {
+    exportLoading.value = false
+  }
+}
+
+function pickImportFile(): void {
+  if (importValidating.value || importLoading.value || importRestarting.value) return
+  importFileInput.value?.click()
+}
+
+async function handleImportFile(event: Event): Promise<void> {
+  const input = event.target as HTMLInputElement
+  const file = input.files?.[0] ?? null
+  // 清空原生输入，允许用户重新选择同一个文件
+  input.value = ''
+  importPreview.value = null
+  importFile.value = null
+  actionError.value = ''
+  actionNotice.value = ''
+  if (!file) return
+  if (!file.name.toLowerCase().endsWith('.zip')) {
+    actionError.value = '请选择导出生成的 .zip 数据包'
+    return
+  }
+  importFile.value = file
+  importValidating.value = true
+  try {
+    importPreview.value = await validateDataImport(file)
+  } catch (err) {
+    importFile.value = null
+    actionError.value = errorMessage(err)
+  } finally {
+    importValidating.value = false
+  }
+}
+
+async function confirmImport(): Promise<void> {
+  if (!importFile.value || importLoading.value || importRestarting.value) return
+  actionError.value = ''
+  actionNotice.value = ''
+  importLoading.value = true
+  try {
+    // 使用与校验时相同的 File 对象再次上传，后端会重新校验后替换整库
+    await applyDataImport(importFile.value)
+    importDialog.value = false
+    importPreview.value = null
+    importRestarting.value = true
+    actionNotice.value = '数据库导入完成，服务正在重启，请稍后刷新页面。'
+  } catch (err) {
+    actionError.value = errorMessage(err)
+    importDialog.value = false
+  } finally {
+    importLoading.value = false
   }
 }
 
@@ -294,6 +392,100 @@ onMounted(() => {
       </v-alert>
     </v-card>
 
+    <v-card class="mt-4 pa-4">
+      <div class="d-flex align-center mb-2">
+        <v-icon class="mr-2">mdi-database-sync-outline</v-icon>
+        <span class="text-subtitle-2">数据导出与导入</span>
+      </div>
+      <p class="text-body-2 text-medium-emphasis">
+        导出当前数据库为 zip（含一致性记录），或上传导出包替换整库。PDF 文件需手动拷贝；
+        <code>.env</code> 启动配置不随数据库迁移。
+      </p>
+      <div class="d-flex flex-wrap ga-2">
+        <v-btn
+          color="primary"
+          variant="tonal"
+          prepend-icon="mdi-download"
+          :loading="exportLoading"
+          :disabled="importValidating || importLoading || importRestarting"
+          @click="runExport"
+        >
+          导出数据
+        </v-btn>
+        <v-btn
+          color="warning"
+          variant="tonal"
+          prepend-icon="mdi-upload"
+          :disabled="importValidating || importLoading || importRestarting"
+          @click="pickImportFile"
+        >
+          导入数据
+        </v-btn>
+        <input
+          ref="importFileInput"
+          type="file"
+          accept=".zip,application/zip"
+          class="d-none"
+          aria-label="选择导入数据包"
+          @change="handleImportFile"
+        >
+      </div>
+      <p v-if="importValidating" class="mt-3 text-body-2">正在校验数据包…</p>
+      <v-expand-transition>
+        <v-sheet
+          v-if="importPreview"
+          class="mt-3 pa-3 rounded"
+          color="surface-variant"
+        >
+          <div class="text-body-2">
+            导出 schema：{{ importPreview.schema_revision }}，当前 schema：{{ importPreview.current_schema_revision }}
+          </div>
+          <div class="text-body-2">
+            导出时间：{{ formatDateTime(importPreview.exported_at) }} · 数据库文件：{{ importPreview.db_filename }}
+          </div>
+          <div class="text-caption text-medium-emphasis text-break mb-2">
+            SHA-256：{{ importPreview.db_sha256 }}
+          </div>
+          <v-table density="compact" class="bg-transparent">
+            <tbody>
+              <tr v-for="(count, table) in importPreview.table_counts" :key="table">
+                <td>{{ TABLE_LABELS[table] ?? table }}</td>
+                <td class="text-right">{{ count }}</td>
+              </tr>
+            </tbody>
+          </v-table>
+          <v-alert
+            v-for="(warning, index) in importPreview.path_warnings"
+            :key="index"
+            type="warning"
+            variant="tonal"
+            density="comfortable"
+            class="mt-2"
+          >
+            {{ warning }}
+          </v-alert>
+          <v-btn
+            color="error"
+            class="mt-3"
+            prepend-icon="mdi-database-import-outline"
+            :disabled="importLoading || importRestarting"
+            @click="importDialog = true"
+          >
+            确认导入
+          </v-btn>
+        </v-sheet>
+      </v-expand-transition>
+      <v-alert
+        v-if="importRestarting"
+        type="info"
+        variant="tonal"
+        density="comfortable"
+        class="mt-3"
+      >
+        导入已提交，机器人正在重启。重启完成后请刷新页面，必要时重新登录。
+      </v-alert>
+    </v-card>
+
     <v-card class="mt-4">
       <v-card-title class="text-subtitle-1">
         数据库备份
@@ -428,5 +620,24 @@ onMounted(() => {
       :loading="createBackupLoading"
       @confirm="confirmCreateBackup"
     />
+
+    <ConfirmDialog
+      v-model="importDialog"
+      title="确认导入全部数据？"
+      confirm-text="确认导入并重启"
+      confirm-color="error"
+      :loading="importLoading"
+      @confirm="confirmImport"
+    >
+      <p>此操作将用上传的数据包替换当前全部数据库，并立即重启机器人。</p>
+      <p class="mt-2">
+        操作不可在线撤销。如需回滚，请手动恢复数据库目录下的
+        <code>main.db.pre-import-*.bak</code>。
+      </p>
+      <p class="mt-2">
+        PDF 文件不会随数据包迁移，请确保已拷贝到当前下载目录；<code>.env</code>
+        中的启动配置不会迁移。
+      </p>
+    </ConfirmDialog>
   </div>
 </template>
