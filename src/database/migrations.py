@@ -13,6 +13,7 @@ from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
 from alembic.script import ScriptDirectory
+from alembic.util import CommandError
 
 CURRENT_SCHEMA_VERSION = 27
 
@@ -237,6 +238,49 @@ def get_schema_revision(engine: Engine) -> str:
     if not revision:
         raise RuntimeError("数据库未应用任何 Alembic 迁移，无法确定 schema 版本")
     return revision
+
+
+def _load_script_directory() -> ScriptDirectory:
+    """加载项目迁移目录，供版本存在性与祖先链判断共用。"""
+    project_root = Path(__file__).resolve().parents[2]
+    config = Config(str(project_root / "alembic.ini"))
+    config.set_main_option("script_location", str(project_root / "alembic"))
+    return ScriptDirectory.from_config(config)
+
+
+def is_ancestor_revision(revision: str) -> bool:
+    """判断 revision 是否为当前代码迁移 head 的祖先（含 head 本身）。
+
+    导入旧版本数据时，导出方 revision 必须是当前 head 的历史节点，启动后
+    才能沿迁移链安全升级；分叉或更新的未知版本一律返回 False。
+    """
+    script = _load_script_directory()
+    head = script.get_current_head()
+    if head is None:
+        return False
+
+    visited: set[str] = set()
+    pending = [head]
+    while pending:
+        current = pending.pop()
+        if current == revision:
+            return True
+        if current in visited:
+            continue
+        visited.add(current)
+        try:
+            script_revision = script.get_revision(current)
+        except CommandError:
+            # 迁移图自身存在未知 revision 时按不兼容处理，由调用方拒绝导入
+            return False
+        if script_revision is None:
+            return False
+        down_revision = script_revision.down_revision
+        if isinstance(down_revision, (tuple, list)):
+            pending.extend(down_revision)
+        elif down_revision:
+            pending.append(down_revision)
+    return False
 
 
 def ensure_schema_version(engine: Engine) -> None:

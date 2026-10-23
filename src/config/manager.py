@@ -48,6 +48,8 @@ class ConfigManager:
         self.logger = logger
         self.config_dict: Dict[str, Union[str, int, float, bool]] = {}
         self._dotenv_values: Dict[str, Optional[str]] = {}
+        # 进程启动时 .env 的原始快照，仅用于识别旧版 load_dotenv 注入的残留值
+        self._startup_dotenv_values: Dict[str, Optional[str]] = {}
         self.group_whitelist: List[str] = []
         self.private_whitelist: List[str] = []
         self.global_blacklist: List[str] = []
@@ -81,27 +83,30 @@ class ConfigManager:
     def build_restart_environment(self) -> Dict[str, str]:
         """构造网页一键重启使用的新进程环境。
 
-        普通启动仍遵循“显式环境变量优先于 .env”。但网页重启会继承当前进程
-        的环境变量，若其中残留了旧版本 load_dotenv 注入的值，就会继续覆盖
-        .env。因此这里只移除 .env 中由本程序管理的同名键，让 exec 后的新进程
-        重新读取 .env；PATH、HOME 以及非本程序管理的变量保持不变。
+        普通启动遵循“显式环境变量优先于 .env”，因此重启时必须保留与启动时
+        .env 值不同的显式覆盖（例如部署时注入的数据库路径或 WebUI 端口）。
+        旧版本 load_dotenv 注入的环境变量值会与启动时 .env 快照一致，只有
+        这类残留值才需要移除，让 exec 后的新进程重新读取最新 .env。
         """
         environment = dict(os.environ)
-        dotenv_keys = set(dotenv_values(self.env_file))
+        latest_dotenv = dotenv_values(self.env_file)
         managed_keys = set(self.config_dict) | {
             "GROUP_WHITELIST",
             "PRIVATE_WHITELIST",
             "GLOBAL_BLACKLIST",
             "DELETE_PERMISSION_USER",
         }
-        for key in dotenv_keys & managed_keys:
-            environment.pop(key, None)
+        for key in set(latest_dotenv) & managed_keys:
+            startup_value = self._startup_dotenv_values.get(key)
+            if key in environment and environment[key] == startup_value:
+                environment.pop(key, None)
         return environment
 
     def load_config(self):
         """加载.env文件到内存配置（覆盖默认配置中同名项）"""
         # 读取 .env，但不写入 os.environ，避免自重启继承旧配置值
         self._dotenv_values = dotenv_values(self.env_file)
+        self._startup_dotenv_values = dict(self._dotenv_values)
         # 初始化配置
         # 简化token配置，只使用NAPCAT_TOKEN作为唯一的token配置项
         token = self._get_env("NAPCAT_TOKEN", "")

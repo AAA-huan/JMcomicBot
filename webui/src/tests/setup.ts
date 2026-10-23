@@ -28,6 +28,12 @@ if (typeof window.matchMedia !== 'function') {
   })
 }
 
+// jsdom 未实现对象 URL，导出下载测试需要创建与释放 Blob 地址
+if (typeof URL.createObjectURL !== 'function') {
+  URL.createObjectURL = vi.fn(() => 'blob:jmbot-test')
+  URL.revokeObjectURL = vi.fn()
+}
+
 // jsdom 未实现 visualViewport，Vuetify 弹层定位依赖该接口
 if (typeof window.visualViewport === 'undefined') {
   Object.defineProperty(window, 'visualViewport', {

@@ -44,10 +44,10 @@ def test_explicit_environment_still_overrides_dotenv(
     assert manager.get("DB_ECHO") is True
 
 
-def test_build_restart_environment_drops_managed_dotenv_keys(
+def test_build_restart_environment_keeps_explicit_overrides(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """网页重启只移除 .env 中由本程序管理的同名环境变量。"""
+    """网页重启保留显式环境变量，不能回退到 .env 默认值。"""
     env_file = tmp_path / ".env"
     env_file.write_text(
         "DB_ECHO=false\n"
@@ -69,12 +69,32 @@ def test_build_restart_environment_drops_managed_dotenv_keys(
     manager.load_config()
     environment = manager.build_restart_environment()
 
-    assert "DB_ECHO" not in environment
-    assert "WEBUI_PORT" not in environment
-    assert "GROUP_WHITELIST" not in environment
+    assert environment["DB_ECHO"] == "true"
+    assert environment["WEBUI_PORT"] == "9000"
+    assert environment["GROUP_WHITELIST"] == "20002"
     assert environment["OTHER_SETTING"] == "from-environment"
     assert environment["JMBOT_RESTART_TEST"] == "keep"
     assert "PATH" in environment
+
+
+def test_build_restart_environment_drops_stale_dotenv_values(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """旧版 load_dotenv 注入且仍等于启动时 .env 的残留值会在重启时清除。"""
+    env_file = tmp_path / ".env"
+    env_file.write_text(
+        "DB_ECHO=false\nWEBUI_PORT=7999\n",
+        encoding="utf-8",
+    )
+    monkeypatch.setenv("DB_ECHO", "false")
+    monkeypatch.setenv("WEBUI_PORT", "7999")
+
+    manager = ConfigManager(env_file=str(env_file))
+    manager.load_config()
+    environment = manager.build_restart_environment()
+
+    assert "DB_ECHO" not in environment
+    assert "WEBUI_PORT" not in environment
 
 
 def test_build_restart_environment_reads_latest_dotenv_file(

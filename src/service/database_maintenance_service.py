@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from datetime import datetime
 from math import ceil
 from pathlib import Path
-from threading import Lock
 from typing import Optional
 
 import os
@@ -14,6 +13,7 @@ from src.database.migrations import backup_database, get_schema_revision
 from src.database.models import utc_now
 from src.database.repositories import BackupRepository
 from src.service.contracts import TaskService
+from src.service.maintenance_lock import DATABASE_MAINTENANCE_LOCK
 from src.service.operation_context import OperationContext
 from src.service.query_service import PageResult
 from src.service.results import BackupResult
@@ -62,8 +62,8 @@ class DatabaseMaintenanceService:
         self.operation_task_service = operation_task_service
         self.backup_repo = backup_repo
         self.backup_dir = Path(backup_dir).resolve()
-        # 串行化备份创建，避免同一秒并发提交触发相对路径唯一约束
-        self._backup_lock = Lock()
+        # 与数据导出/导入共用维护锁，避免并发复制或替换数据库文件
+        self._backup_lock = DATABASE_MAINTENANCE_LOCK
 
     def create_backup(
         self,

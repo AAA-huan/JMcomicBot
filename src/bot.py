@@ -41,6 +41,7 @@ from src.permission.manager import PermissionManager
 from src.platform.compatibility import PlatformChecker
 from src.service import (
     CleanupService,
+    DataMigrationService,
     DatabaseMaintenanceService,
     DownloadQueueService,
     MangaBlacklistService,
@@ -276,6 +277,15 @@ class MangaBot:
             self.backup_repo,
             backup_dir=str(self.config_manager.config_dict["BACKUP_PATH"]),
         )
+        # 数据迁移服务：整库导出/导入，路径配置只用于生成导入预览差异提示
+        self.data_migration_service = DataMigrationService(
+            self.database_manager,
+            self.audit_event_repo,
+            db_path_config=str(self.config_manager.config_dict["DB_PATH"]),
+            manga_download_path=str(
+                self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]
+            ),
+        )
         # 统一删除服务：QQ 删除命令与 Web 写接口共用同一套删除流程
         self.manga_service = MangaService(
             manga_repository=self.manga_repo,
@@ -444,6 +454,7 @@ class MangaBot:
                         settings_service=self.settings_service,
                         option_file_service=self.option_file_service,
                         database_maintenance_service=self.database_maintenance_service,
+                        data_migration_service=self.data_migration_service,
                         repair_service=self.repair_service,
                         scan_service=self.scan_service,
                         reading_progress_service=self.reading_progress_service,
