@@ -18,6 +18,7 @@ from src.service import (
 from src.service.manga_service import ADMIN_FAVORITE_DELETE_MESSAGE
 from src.service.results import MangaDeleteOutcome
 from src.utils.batch import (
+    QUERY_PAGE_SEND_INTERVAL,
     format_batch_response,
     paginate_blocks,
     parse_batch_params,
@@ -418,7 +419,7 @@ class CommandExecutor:
             for i, page in enumerate(pages):
                 self.message_sender(user_id, page, group_id, private)
                 if i < len(pages) - 1:
-                    time.sleep(0.325)
+                    time.sleep(QUERY_PAGE_SEND_INTERVAL)
 
     def _handle_manga_send(
         self, user_id: str, params: str, group_id: Optional[str], private: bool
@@ -642,7 +643,7 @@ class CommandExecutor:
                         )
                     self.message_sender(user_id, page, group_id, private)
                     if i < len(pages) - 1:
-                        time.sleep(0.325)
+                        time.sleep(QUERY_PAGE_SEND_INTERVAL)
                 return
 
             # 模式 3：-<页码> → 发送指定页
@@ -845,7 +846,7 @@ class CommandExecutor:
         for i, page in enumerate(pages):
             self.message_sender(user_id, page, group_id, private)
             if i < len(pages) - 1:
-                time.sleep(0.325)
+                time.sleep(QUERY_PAGE_SEND_INTERVAL)
 
     def _handle_manga_tag_query(
         self, user_id: str, tags: List[str], group_id: Optional[str], private: bool
@@ -909,7 +910,7 @@ class CommandExecutor:
         for i, page in enumerate(pages):
             self.message_sender(user_id, page, group_id, private)
             if i < len(pages) - 1:
-                time.sleep(0.325)
+                time.sleep(QUERY_PAGE_SEND_INTERVAL)
 
     def _handle_manga_author_query(
         self, user_id: str, author: str, group_id: Optional[str], private: bool
@@ -964,7 +965,7 @@ class CommandExecutor:
         for i, page in enumerate(pages):
             self.message_sender(user_id, page, group_id, private)
             if i < len(pages) - 1:
-                time.sleep(0.325)
+                time.sleep(QUERY_PAGE_SEND_INTERVAL)
 
     def _send_version_info(
         self, user_id: str, args: str, group_id: Optional[str], private: bool

@@ -215,7 +215,6 @@ def test_register_appliers_requires_complete_set(db_manager) -> None:
         ("BLACKLIST_DELETE_BINDING", True),
         ("MANGA_DOWNLOAD_PATH", "./new-downloads"),
         ("DB_PATH", "./new-data"),
-        ("BACKUP_PATH", "./new-backups"),
         ("WEBUI_ENABLED", False),
         ("WEBUI_HOST", "0.0.0.0"),
         ("WEBUI_PORT", 8001),

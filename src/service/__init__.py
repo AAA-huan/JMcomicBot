@@ -3,12 +3,6 @@
 from src.service.cleanup_service import CleanupService
 from src.service.contracts import DownloadNotifier, DownloadService, TaskService
 from src.service.data_migration_service import DataImportError, DataMigrationService
-from src.service.database_maintenance_service import (
-    BackupConflictError,
-    BackupDownloadError,
-    BackupView,
-    DatabaseMaintenanceService,
-)
 from src.service.download_service import DownloadQueueService
 from src.service.manga_blacklist_service import MangaBlacklistService
 from src.service.manga_service import MangaFileDownloadError, MangaService
@@ -26,9 +20,8 @@ from src.service.reading_progress_service import (
     ReadingProgressView,
 )
 from src.service.reading_setting_service import ReadingSettingService
-from src.service.repair_service import RepairService
+from src.service.repair_service import RepairResult, RepairService
 from src.service.results import (
-    BackupResult,
     BlacklistBatchResult,
     BlacklistOutcome,
     DataExportResult,
@@ -47,10 +40,6 @@ from src.service.settings_service import SettingsService
 from src.service.verify_service import VerifyService
 
 __all__ = [
-    "BackupConflictError",
-    "BackupDownloadError",
-    "BackupResult",
-    "BackupView",
     "BlacklistBatchResult",
     "BlacklistOutcome",
     "CachedGroup",
@@ -59,7 +48,6 @@ __all__ = [
     "DataExportResult",
     "DataImportError",
     "DataMigrationService",
-    "DatabaseMaintenanceService",
     "DownloadCancellationResult",
     "DownloadNotifier",
     "DownloadRecoveryResult",
@@ -80,6 +68,7 @@ __all__ = [
     "ReadingProgressService",
     "ReadingProgressView",
     "ReadingSettingService",
+    "RepairResult",
     "RepairService",
     "ScanRunResult",
     "ScanService",

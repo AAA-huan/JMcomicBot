@@ -68,20 +68,6 @@ export const TASK_SOURCE_LABELS: Record<string, string> = {
   system: '系统',
 }
 
-export const BACKUP_STATUS_LABELS: Record<string, string> = {
-  creating: '创建中',
-  ready: '就绪',
-  failed: '失败',
-  deleted: '已删除',
-}
-
-export const BACKUP_STATUS_COLORS: Record<string, string> = {
-  creating: 'info',
-  ready: 'success',
-  failed: 'error',
-  deleted: 'medium-emphasis',
-}
-
 export const PERMISSION_SCOPE_LABELS: Record<string, string> = {
   group_whitelist: '群白名单',
   private_whitelist: '私聊白名单',

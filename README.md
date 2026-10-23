@@ -29,7 +29,7 @@
 - 📄 **格式转换** - 自动将图片转换为PDF格式，便于阅读
 - 📱 **跨平台** - 支持Windows、Linux、Android
 - 🌐 **WebUI 控制台** - 可选启用，在手机/电脑浏览器里管理漫画库、在线阅读、下载任务、权限与配置
-- 🗄️ **数据库维护** - 版本化迁移、任务与审计、备份 / 扫描 / 修复 / 文件校验
+- 🗄️ **数据库维护** - 版本化迁移、任务与审计、扫描 / 修复 / 文件校验 / 数据导出导入
 
 
 ## 🚀 快速开始
@@ -47,7 +47,7 @@
 | [命令大全](docs/commands.md) | 全部 QQ 指令与别名、批量操作规则 |
 | [WebUI 控制台](docs/webui.md) | 访问与首次设置、在线阅读与进度、局域网访问、忘记密码恢复 |
 | [JM 收藏导入](docs/jm-favorites.md) | JM 账号登录、收藏夹导入、未下载漫画选择下载与会话说明 |
-| [维护脚本](docs/maintenance.md) | 备份 / 扫描 / 修复 / 文件校验 / WebUI 管理员重置脚本与数据保留策略 |
+| [维护脚本](docs/maintenance.md) | 扫描 / 修复 / 文件校验 / WebUI 管理员重置脚本与数据保留策略 |
 | [Windows 部署](docs/deployment/windows.md) | Windows 安装、配置与常驻 |
 | [Linux 部署](docs/deployment/linux.md) | Linux 安装、配置与系统服务 |
 | [Android 部署](docs/deployment/android.md) | Termux + Ubuntu（proot）部署与常驻 |

@@ -11,7 +11,6 @@ mkdir -p "$E2E_DIR"
 
 export MANGA_DOWNLOAD_PATH="$E2E_DIR/downloads"
 export DB_PATH="$E2E_DIR/data"
-export BACKUP_PATH="$E2E_DIR/backups"
 export WEBUI_ENABLED=true
 export WEBUI_HOST=127.0.0.1
 export WEBUI_PORT="${E2E_PORT:-18080}"

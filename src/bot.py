@@ -13,7 +13,6 @@ from src.database.database import DatabaseManager
 from src.database.models import utc_now
 from src.database.repositories import (
     AuditEventRepository,
-    BackupRepository,
     FavoriteRepository,
     JmFavoriteRepository,
     MangaBlacklistRepository,
@@ -42,7 +41,6 @@ from src.platform.compatibility import PlatformChecker
 from src.service import (
     CleanupService,
     DataMigrationService,
-    DatabaseMaintenanceService,
     DownloadQueueService,
     MangaBlacklistService,
     MangaService,
@@ -120,7 +118,6 @@ class MangaBot:
         self.favorite_repo = FavoriteRepository(self.database_manager)
         self.web_admin_repo = WebAdminRepository(self.database_manager)
         self.web_session_repo = WebSessionRepository(self.database_manager)
-        self.backup_repo = BackupRepository(self.database_manager)
         self.scan_record_repo = ScanRecordRepository(self.database_manager)
         self.reading_progress_repo = ReadingProgressRepository(self.database_manager)
         self.reading_setting_repo = ReadingSettingRepository(self.database_manager)
@@ -165,8 +162,6 @@ class MangaBot:
         self.cleanup_service = CleanupService(
             self.operation_task_repo,
             self.audit_event_repo,
-            self.backup_repo,
-            backup_dir=str(self.config_manager.config_dict["BACKUP_PATH"]),
         )
         self._cleanup_thread: Optional[threading.Thread] = None
         self._cleanup_stop_event: threading.Event = threading.Event()
@@ -270,12 +265,6 @@ class MangaBot:
             self.scan_record_repo,
             self.operation_task_service,
             download_root=str(self.config_manager.config_dict["MANGA_DOWNLOAD_PATH"]),
-        )
-        self.database_maintenance_service = DatabaseMaintenanceService(
-            self.database_manager,
-            self.operation_task_service,
-            self.backup_repo,
-            backup_dir=str(self.config_manager.config_dict["BACKUP_PATH"]),
         )
         # 数据迁移服务：整库导出/导入，路径配置只用于生成导入预览差异提示
         self.data_migration_service = DataMigrationService(
@@ -453,7 +442,6 @@ class MangaBot:
                         permission_service=self.permission_service,
                         settings_service=self.settings_service,
                         option_file_service=self.option_file_service,
-                        database_maintenance_service=self.database_maintenance_service,
                         data_migration_service=self.data_migration_service,
                         repair_service=self.repair_service,
                         scan_service=self.scan_service,

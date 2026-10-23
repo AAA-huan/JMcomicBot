@@ -1,4 +1,4 @@
-"""维护操作 API：扫描、修复、数据库备份与数据迁移。"""
+"""维护操作 API：扫描、修复与数据迁移。"""
 
 from dataclasses import asdict
 from pathlib import Path
@@ -21,7 +21,7 @@ from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
 from starlette.background import BackgroundTask
 
-from src.service import BackupConflictError, BackupDownloadError, DataImportError
+from src.service import DataImportError
 from src.service.web_auth_service import AuthenticatedSession
 from src.web.dependencies import WebDependencies
 from src.web.errors import ApiError
@@ -66,7 +66,7 @@ def _save_upload(file: UploadFile) -> Path:
 def create_maintenance_router(
     dependencies: WebDependencies, authenticate: AuthenticateCallable
 ) -> APIRouter:
-    """创建扫描、修复、备份与数据迁移路由。"""
+    """创建扫描、修复与数据迁移路由。"""
     router = APIRouter(tags=["维护"])
 
     @router.post("/maintenance/verify")
@@ -138,71 +138,23 @@ def create_maintenance_router(
         try:
             if body.dry_run:
                 diff = dependencies.repair_service.preview()
-                return {"dry_run": True, "cleaned_count": 0, **asdict(diff)}
-            cleaned_count = dependencies.repair_service.repair(context)
+                return {
+                    "dry_run": True,
+                    "cleaned_count": 0,
+                    **asdict(diff),
+                    "processed_manga_ids": [],
+                    "removed_tag_names": [],
+                }
+            result = dependencies.repair_service.repair(context)
         except FileNotFoundError as error:
             raise ApiError(
                 500, "DOWNLOAD_DIRECTORY_MISSING", "下载目录不存在，请检查配置"
             ) from error
         return {
-            "cleaned_count": cleaned_count,
             "dry_run": False,
             "orphan_manga_ids": [],
             "orphan_tag_names": [],
-        }
-
-    @router.get("/maintenance/backups")
-    def list_backups(
-        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
-        page: Annotated[int, Query(ge=1)] = 1,
-        page_size: Annotated[int, Query(ge=1, le=100)] = 20,
-        backup_status: Annotated[Optional[str], Query(alias="status")] = None,
-    ) -> dict[str, object]:
-        """分页查询备份记录，不返回绝对路径。"""
-        try:
-            page_result = dependencies.database_maintenance_service.list_backups(
-                page, page_size, backup_status
-            )
-        except ValueError as error:
-            raise ApiError(400, "INVALID_QUERY", str(error)) from error
-        return asdict(page_result)
-
-    @router.get("/maintenance/backups/{backup_id}/download")
-    def download_backup(
-        backup_id: int,
-        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
-    ) -> FileResponse:
-        """下载已登记的备份文件；路径由数据库记录解析，不接受客户端路径。"""
-        try:
-            path = dependencies.database_maintenance_service.resolve_backup_file(
-                backup_id
-            )
-        except BackupDownloadError as error:
-            status_code = 500 if error.error_code == "BACKUP_PATH_INVALID" else 404
-            raise ApiError(status_code, error.error_code, error.message) from error
-        return FileResponse(
-            path,
-            media_type="application/octet-stream",
-            filename=path.name,
-            headers={"X-Content-Type-Options": "nosniff"},
-        )
-
-    @router.post("/maintenance/backups", status_code=status.HTTP_201_CREATED)
-    def create_backup(
-        request: Request,
-        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
-    ) -> dict[str, object]:
-        """创建一致性数据库备份；危险操作确认由前端对话框承担。"""
-        context = build_operation_context(request, authenticated)
-        try:
-            result = dependencies.database_maintenance_service.create_backup(context)
-        except BackupConflictError as error:
-            raise ApiError(409, "BACKUP_CONFLICT", str(error)) from error
-        return {
-            "task_id": result.task_id,
-            "backup_id": result.backup_id,
-            "filename": result.filename,
-            "file_size_bytes": result.file_size_bytes,
+            **asdict(result),
         }
 
     @router.post("/maintenance/data-export")

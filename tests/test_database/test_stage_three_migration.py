@@ -10,7 +10,6 @@ from sqlalchemy.orm import Session
 import pytest
 
 from src.database.models import (
-    BackupRecord,
     Manga,
     MangaFile,
     OperationTask,
@@ -74,11 +73,10 @@ def task_service(task_repo, event_repo, audit_repo) -> OperationTaskService:
 
 
 def test_stage_three_schema_columns_exist(db_manager) -> None:
-    """scan_record 与 backup_record 应重建为阶段三正式字段。"""
+    """scan_record 应重建为阶段三正式字段，备份表已由后续迁移移除。"""
     inspector = inspect(db_manager.engine)
-    assert {"reading_progress", "scan_record", "backup_record"} <= set(
-        inspector.get_table_names()
-    )
+    assert {"reading_progress", "scan_record"} <= set(inspector.get_table_names())
+    assert "backup_record" not in inspector.get_table_names()
 
     scan_columns = {item["name"]: item for item in inspector.get_columns("scan_record")}
     assert {
@@ -99,22 +97,6 @@ def test_stage_three_schema_columns_exist(db_manager) -> None:
     assert scan_columns["path_label"]["nullable"] is False
     assert {"path_key", "scanned_count", "added_count"}.isdisjoint(scan_columns)
 
-    backup_columns = {
-        item["name"]: item for item in inspector.get_columns("backup_record")
-    }
-    assert {
-        "filename",
-        "relative_path",
-        "file_size_bytes",
-        "sha256",
-        "schema_version",
-        "status",
-        "created_at",
-        "updated_at",
-        "deleted_at",
-    } <= set(backup_columns)
-    assert {"file_name", "path_key"}.isdisjoint(backup_columns)
-
     file_columns = {item["name"]: item for item in inspector.get_columns("manga_file")}
     assert "file_mtime" in file_columns
     assert file_columns["file_mtime"]["nullable"] is True
@@ -130,12 +112,8 @@ def test_stage_three_constraints_and_indexes_exist(db_manager) -> None:
     scan_checks = {
         item["name"] for item in inspector.get_check_constraints("scan_record")
     }
-    backup_checks = {
-        item["name"] for item in inspector.get_check_constraints("backup_record")
-    }
     assert "ck_operation_task_type" in task_checks
     assert "ck_scan_record_task_type" in scan_checks
-    assert "ck_backup_record_status" in backup_checks
 
     scan_foreign_keys = {
         tuple(item["constrained_columns"]): item
@@ -150,17 +128,8 @@ def test_stage_three_constraints_and_indexes_exist(db_manager) -> None:
     assert progress_foreign_keys[("manga_file_id",)]["referred_table"] == "manga_file"
     assert progress_foreign_keys[("manga_file_id",)]["options"]["ondelete"] == "CASCADE"
 
-    backup_uniques = {
-        item["name"] for item in inspector.get_unique_constraints("backup_record")
-    }
-    assert "uq_backup_record_relative_path" in backup_uniques
-
     expected_indexes = {
         "scan_record": {"ix_scan_record_task_id", "ix_scan_record_created"},
-        "backup_record": {
-            "ix_backup_record_status_created",
-            "ix_backup_record_created",
-        },
         "reading_progress": {"ix_reading_progress_updated"},
     }
     for table_name, names in expected_indexes.items():
@@ -215,52 +184,6 @@ def test_scan_record_type_check_and_task_cascade(db_manager) -> None:
         session.execute(delete(OperationTask).where(OperationTask.id == "scan-task"))
         session.commit()
         assert session.scalars(select(ScanRecord)).all() == []
-
-
-def test_backup_record_status_and_unique_path(db_manager) -> None:
-    """backup_record 应校验状态并保证相对路径唯一。"""
-    now = utc_now()
-    with db_manager.get_session() as session:
-        session.add(
-            BackupRecord(
-                filename="main-20260101-000000-0022.db",
-                relative_path="main-20260101-000000-0022.db",
-                file_size_bytes=1024,
-                schema_version="0022",
-                status="ready",
-                created_at=now,
-                updated_at=now,
-            )
-        )
-        session.commit()
-
-        session.add(
-            BackupRecord(
-                filename="main-20260102-000000-0022.db",
-                relative_path="main-20260101-000000-0022.db",
-                schema_version="0022",
-                status="ready",
-                created_at=now,
-                updated_at=now,
-            )
-        )
-        with pytest.raises(IntegrityError):
-            session.commit()
-        session.rollback()
-
-        session.add(
-            BackupRecord(
-                filename="main-20260103-000000-0022.db",
-                relative_path="main-20260103-000000-0022.db",
-                schema_version="0022",
-                status="broken",
-                created_at=now,
-                updated_at=now,
-            )
-        )
-        with pytest.raises(IntegrityError):
-            session.commit()
-        session.rollback()
 
 
 def test_reading_progress_cascades_with_manga_deletion(db_manager) -> None:
@@ -334,7 +257,7 @@ def test_verify_task_type_is_supported_by_service(
 
 
 def test_stage_three_queries_use_expected_indexes(db_manager) -> None:
-    """继续阅读、维护记录和备份列表查询应命中阶段三索引。"""
+    """继续阅读与维护记录查询应命中阶段三索引。"""
     with db_manager.get_session() as session:
         progress_plan = session.execute(
             text(
@@ -348,19 +271,11 @@ def test_stage_three_queries_use_expected_indexes(db_manager) -> None:
                 "WHERE task_id = 'x' ORDER BY created_at DESC, id LIMIT 20"
             )
         ).all()
-        backup_plan = session.execute(
-            text(
-                "EXPLAIN QUERY PLAN SELECT id FROM backup_record "
-                "WHERE status = 'ready' ORDER BY created_at DESC, id LIMIT 20"
-            )
-        ).all()
 
     progress_details = " ".join(str(row[-1]) for row in progress_plan)
     scan_details = " ".join(str(row[-1]) for row in scan_plan)
-    backup_details = " ".join(str(row[-1]) for row in backup_plan)
     assert "ix_reading_progress_updated" in progress_details
     assert "ix_scan_record_task_id" in scan_details
-    assert "ix_backup_record_status_created" in backup_details
 
 
 def test_migration_0022_upgrades_existing_database(tmp_path) -> None:
