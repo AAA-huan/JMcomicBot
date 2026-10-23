@@ -3,7 +3,12 @@
 from pathlib import Path
 
 from src.database.repositories import MangaRepository, OperationTaskRepository
-from tests.test_web.support import create_client_for, csrf_headers, setup_and_login
+from tests.test_web.support import (
+    create_client_for,
+    csrf_headers,
+    setup_and_login,
+    wait_for_queued_downloads,
+)
 
 
 def test_scan_and_repair_preview_do_not_write(db_manager, monkeypatch):
@@ -53,7 +58,7 @@ def test_verify_all_and_conflict_checks(db_manager):
         path = root / f"{manga_id}.pdf"
         path.write_bytes(b"%PDF")
         mangas.add_file(manga_id, str(path))
-    client, _context = create_client_for(db_manager)
+    client, context = create_client_for(db_manager)
     with client:
         setup_and_login(client)
         headers = csrf_headers(client)
@@ -65,6 +70,7 @@ def test_verify_all_and_conflict_checks(db_manager):
         client.post(
             "/api/v1/tasks/downloads", json={"manga_ids": ["100"]}, headers=headers
         )
+        wait_for_queued_downloads(context.download_queue, ["100"])
         assert (
             client.post(
                 "/api/v1/maintenance/verify", json={}, headers=headers

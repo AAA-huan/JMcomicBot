@@ -281,7 +281,7 @@ const vReaderSize: Directive<HTMLElement> = {
 // ---------- 翻页与滚动 ----------
 
 /** 连续横排滚动停止后，等待短暂时间再居中当前页。 */
-const HORIZONTAL_SNAP_DELAY = 160
+const HORIZONTAL_SNAP_DELAY = 80
 
 let scrollElement: HTMLElement | null = null
 let scrollRaf: number | null = null

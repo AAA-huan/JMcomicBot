@@ -64,7 +64,7 @@ describe('system store', () => {
       type: 'queue.updated',
       occurred_at: '2026-10-01T00:00:00Z',
       data: {
-        download: { running: false, queue_size: 0 },
+        download: { running: true, paused: true, queue_size: 0 },
         send: { running: true, queue_size: 4, current_file: '第 3 章.pdf' },
       },
     })
@@ -75,6 +75,7 @@ describe('system store', () => {
     })
 
     expect(store.status?.download_queue.queue_size).toBe(0)
+    expect(store.status?.download_queue.paused).toBe(true)
     expect(store.status?.send_queue.current_file).toBe('第 3 章.pdf')
     expect(store.status?.version).toBe('0.2.0')
     expect(store.status?.manga_count).toBe(5)

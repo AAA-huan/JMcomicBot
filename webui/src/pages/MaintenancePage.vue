@@ -288,15 +288,13 @@ async function confirmImport(): Promise<void> {
             <IdScrollWindow title="待清理标签" :items="repairResult.orphan_tag_names" />
           </template>
           <v-expand-transition>
-            <v-sheet
-              v-if="repairResult && !repairResult.dry_run"
-              class="mt-3 pa-3 rounded"
-              color="surface-variant"
-            >
-              <div class="text-body-2">已清理 {{ repairResult.cleaned_count }} 条孤儿记录</div>
+            <div v-if="repairResult && !repairResult.dry_run" class="mt-3">
+              <v-alert type="success" variant="tonal">
+                已清理 {{ repairResult.cleaned_count }} 条孤儿记录
+              </v-alert>
               <IdScrollWindow title="已标记缺失" :items="repairResult.processed_manga_ids" />
               <IdScrollWindow title="已清理标签" :items="repairResult.removed_tag_names" />
-            </v-sheet>
+            </div>
           </v-expand-transition>
         </v-card>
       </v-col>

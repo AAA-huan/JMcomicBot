@@ -35,7 +35,7 @@ class Manga(Base):
     __tablename__ = "manga"
     __table_args__ = (
         CheckConstraint(
-            "status IN ('downloaded', 'missing_file', 'invalid', 'deleted')",
+            "status IN ('downloaded', 'missing_file', 'invalid', 'deleted', 'favorited')",
             name="ck_manga_status",
         ),
     )

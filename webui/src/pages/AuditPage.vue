@@ -6,6 +6,7 @@ import { useDisplay } from 'vuetify'
 import { listAuditEvents } from '@/api/audit'
 import { errorMessage } from '@/api/client'
 import EmptyState from '@/components/EmptyState.vue'
+import PaginationBar from '@/components/PaginationBar.vue'
 import type { AuditEvent } from '@/types/api'
 import { formatDateTime } from '@/utils/format'
 import { labelOf, TASK_SOURCE_LABELS } from '@/utils/labels'
@@ -51,6 +52,13 @@ function filter(): void {
   void router.push({ query: { event_type: eventType.value || undefined, source: source.value || undefined } })
 }
 
+/** 翻页写入 URL，由路由监听统一触发加载，保证刷新和前进后退一致。 */
+function changePage(value: number): void {
+  void router.push({
+    query: { ...route.query, page: value > 1 ? value : undefined },
+  })
+}
+
 watch(() => route.query, (query) => {
   eventType.value = typeof query.event_type === 'string' ? query.event_type : ''
   source.value = typeof query.source === 'string' ? query.source : ''
@@ -90,7 +98,12 @@ watch(() => route.query, (query) => {
           <div class="text-body-2 audit-details">{{ formatDateTime(item.created_at) }} · {{ labelOf(TASK_SOURCE_LABELS, item.source) }} · {{ labelOf(resultLabels, item.result) }}<br>操作者 {{ item.actor_user_id ?? '—' }} · IP {{ item.client_ip ?? '—' }}<br>目标 {{ item.target_id ?? item.target_type ?? '—' }}<span v-if="item.error_code"> · {{ item.error_code }}</span></div>
         </v-list-item>
       </v-list>
-      <v-pagination v-if="pages > 1" :model-value="page" :length="pages" :total-visible="5" @update:model-value="router.push({ query: { ...route.query, page: $event } })" />
+      <PaginationBar
+        :page="page"
+        :pages="pages"
+        :loading="loading"
+        @update:page="changePage"
+      />
     </v-card>
   </div>
 </template>

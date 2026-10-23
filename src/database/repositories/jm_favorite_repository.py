@@ -201,6 +201,75 @@ class JmFavoriteRepository(BaseRepository):
                 record.pending_local_favorite = True
             session.commit()
 
+    def import_to_library(self, admin_id: int, manga_ids: List[str]) -> Dict[str, int]:
+        """把远端收藏登记为本地漫画与管理员收藏，不创建文件记录。
+
+        已存在且有效的漫画只补收藏；已删除的漫画按未下载收藏重新入库，
+        保证导入后能在漫画库中看到。重复导入保持幂等。
+        """
+        with self._get_session() as session:
+            records = session.scalars(
+                select(JmRemoteFavorite).where(
+                    JmRemoteFavorite.admin_id == admin_id,
+                    JmRemoteFavorite.manga_id.in_(manga_ids),
+                )
+            ).all()
+            records_by_id: Dict[str, JmRemoteFavorite] = {}
+            for record in records:
+                records_by_id.setdefault(record.manga_id, record)
+            missing = [
+                manga_id for manga_id in manga_ids if manga_id not in records_by_id
+            ]
+            if missing:
+                raise LookupError(
+                    "以下漫画不在当前管理员的导入收藏中: " + "、".join(missing)
+                )
+
+            imported_count = 0
+            already_count = 0
+            now = utc_now()
+            for manga_id in manga_ids:
+                record = records_by_id[manga_id]
+                manga = session.get(Manga, manga_id)
+                if manga is None or manga.status == "deleted":
+                    if manga is None:
+                        manga = Manga(id=manga_id)
+                        session.add(manga)
+                        manga.created_at = now
+                    # 未下载收藏只登记标题，章节、页数和作者在真实下载后补全
+                    manga.source_site = "jmcomic"
+                    manga.title = record.title
+                    manga.author = ""
+                    manga.chapter_count = 0
+                    manga.page_count = 0
+                    manga.status = "favorited"
+                    manga.downloaded_at = now
+                    manga.updated_at = now
+                    imported_count += 1
+                else:
+                    already_count += 1
+                session.flush()
+                session.execute(
+                    insert(MangaFavorite)
+                    .values(
+                        owner_type="web_admin",
+                        owner_id=str(admin_id),
+                        manga_id=manga_id,
+                        created_at=now,
+                    )
+                    .on_conflict_do_nothing(
+                        index_elements=["owner_type", "owner_id", "manga_id"]
+                    )
+                )
+            # 同一漫画可能来自同一管理员的多个 JM 账号，全部标记为已建立本地收藏
+            for record in records:
+                record.pending_local_favorite = False
+            session.commit()
+            return {
+                "imported_count": imported_count,
+                "already_count": already_count,
+            }
+
     def list_favorites(
         self,
         admin_id: int,
@@ -211,14 +280,20 @@ class JmFavoriteRepository(BaseRepository):
         folder_id: str = "",
         download_status: str = "",
     ) -> Dict[str, object]:
-        """先筛选再分页，联查本地文件状态而不创建占位漫画。"""
+        """先筛选再分页，联查本地文件与入库状态而不创建占位漫画。"""
         local = (
             (Manga.source_site == "jmcomic")
             & (Manga.status == "downloaded")
             & (MangaFile.status == "ready")
         )
         statement = (
-            select(JmRemoteFavorite, MangaFile.id, local.label("downloaded"))
+            select(
+                JmRemoteFavorite,
+                MangaFile.id,
+                local.label("downloaded"),
+                Manga.id.label("local_manga_id"),
+                Manga.status.label("local_status"),
+            )
             .outerjoin(Manga, Manga.id == JmRemoteFavorite.manga_id)
             .outerjoin(MangaFile, MangaFile.manga_id == Manga.id)
             .where(JmRemoteFavorite.admin_id == admin_id)
@@ -266,10 +341,13 @@ class JmFavoriteRepository(BaseRepository):
                         "username": record.username,
                         "folders": record.folders,
                         "downloaded": bool(downloaded),
+                        "in_library": (
+                            local_manga_id is not None and local_status != "deleted"
+                        ),
                         "file_id": file_id if downloaded else None,
                         "imported_at": record.imported_at,
                     }
-                    for record, file_id, downloaded in rows
+                    for record, file_id, downloaded, local_manga_id, local_status in rows
                 ],
                 "total": total,
                 "page": page,

@@ -37,6 +37,19 @@ export function getDownloadProgress(): Promise<{
   return apiRequest<{ active: DownloadProgressSnapshot | null }>('/downloads/progress')
 }
 
+export interface QueuePauseResult {
+  paused: boolean
+  changed: boolean
+}
+
+export function pauseDownloadQueue(): Promise<QueuePauseResult> {
+  return apiRequest<QueuePauseResult>('/tasks/pause', { method: 'POST' })
+}
+
+export function resumeDownloadQueue(): Promise<QueuePauseResult> {
+  return apiRequest<QueuePauseResult>('/tasks/resume', { method: 'POST' })
+}
+
 export function cancelTask(taskId: string): Promise<{ cancelled: boolean }> {
   return apiRequest(`/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' })
 }

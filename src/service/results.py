@@ -112,6 +112,44 @@ class DownloadRequestResult:
 
 
 @dataclass(frozen=True)
+class DownloadPrepareResult:
+    """批量下载请求的同步预检结果，实际入队由后台任务完成。
+
+    items 中 pending 项状态为 accepted，duplicate 项携带既有任务 ID；
+    pending_ids 与 accepted 项一一对应，保持请求顺序。
+    """
+
+    items: Tuple[DownloadRequestItem, ...]
+    pending_ids: Tuple[str, ...]
+    skipped_blacklisted: Tuple[str, ...] = ()
+
+    @property
+    def accepted_items(self) -> Tuple[DownloadRequestItem, ...]:
+        """已接收、等待后台入队的条目。"""
+        return tuple(item for item in self.items if item.status == "accepted")
+
+    @property
+    def duplicate_items(self) -> Tuple[DownloadRequestItem, ...]:
+        """因已有活动任务而未接收的条目。"""
+        return tuple(item for item in self.items if item.status == "duplicate")
+
+    @property
+    def accepted_count(self) -> int:
+        """已接收待入队的请求数量。"""
+        return len(self.accepted_items)
+
+    @property
+    def duplicate_count(self) -> int:
+        """已有活动任务的请求数量。"""
+        return len(self.duplicate_items)
+
+    @property
+    def skipped_count(self) -> int:
+        """因命中漫画黑名单而跳过的请求数量。"""
+        return len(self.skipped_blacklisted)
+
+
+@dataclass(frozen=True)
 class DownloadRecoveryResult:
     """启动恢复下载任务的汇总结果。
 

@@ -30,8 +30,15 @@ export interface JmFavorite {
   username: string
   folders: Record<string, string>
   downloaded: boolean
+  /** 是否已在漫画库中登记（已下载或已导入但尚未下载）。 */
+  in_library: boolean
   file_id: number | null
   imported_at: string
+}
+
+export interface JmImportToLibraryResult {
+  imported_count: number
+  already_count: number
 }
 
 export const getJmAccount = (): Promise<JmAccount> => apiRequest('/jm-favorites/account')
@@ -45,6 +52,8 @@ export const listJmImports = (): Promise<{ items: JmImport[] }> => apiRequest('/
 export const getJmImport = (id: string): Promise<JmImport> => apiRequest(`/jm-favorites/imports/${encodeURIComponent(id)}`)
 export const requestJmDownloads = (mangaIds: string[]): Promise<DownloadRequestResult> =>
   apiRequest('/jm-favorites/downloads', { method: 'POST', body: { manga_ids: mangaIds } })
+export const importJmFavoritesToLibrary = (mangaIds: string[]): Promise<JmImportToLibraryResult> =>
+  apiRequest('/jm-favorites/import-to-library', { method: 'POST', body: { manga_ids: mangaIds } })
 export const listJmFavorites = (query: {
   page: number; page_size: number; search: string; download_status: string
 }): Promise<PageResult<JmFavorite>> => apiRequest('/jm-favorites', { query })

@@ -265,6 +265,11 @@ class OperationTaskService:
         task = self.task_repo.find_active_download(manga_id)
         return self._to_result(task) if task is not None else None
 
+    def find_active_downloads(self, manga_ids: List[str]) -> Dict[str, TaskResult]:
+        """批量查找尚未结束的下载任务，按漫画 ID 返回。"""
+        tasks = self.task_repo.find_active_downloads(manga_ids)
+        return {manga_id: self._to_result(task) for manga_id, task in tasks.items()}
+
     def list_active_downloads(self) -> List[TaskResult]:
         """列出全部尚未结束的下载任务（queued/running）。"""
         return [

@@ -29,6 +29,12 @@ class JmImportRequest(BaseModel):
     folder_ids: List[str] = Field(min_length=1, max_length=100)
 
 
+class JmImportToLibraryRequest(BaseModel):
+    """把选中的已导入收藏直接登记到漫画库。"""
+
+    manga_ids: List[str] = Field(min_length=1, max_length=100)
+
+
 def create_jm_favorite_router(
     dependencies: WebDependencies, authenticate: Callable[..., AuthenticatedSession]
 ) -> APIRouter:
@@ -91,6 +97,18 @@ def create_jm_favorite_router(
         if job is None:
             raise ApiError(404, "JM_IMPORT_NOT_FOUND", "导入任务不存在")
         return import_view(job)
+
+    @router.post("/import-to-library")
+    def import_to_library(
+        body: JmImportToLibraryRequest,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> Dict[str, int]:
+        try:
+            return service.import_to_library(
+                authenticated.admin_id, list(dict.fromkeys(body.manga_ids))
+            )
+        except JmFavoriteError as error:
+            raise ApiError(error.status, error.code, str(error)) from error
 
     @router.get("")
     def list_favorites(

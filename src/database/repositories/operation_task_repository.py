@@ -183,6 +183,31 @@ class OperationTaskRepository(BaseRepository):
             )
             return session.scalar(statement)
 
+    def find_active_downloads(self, manga_ids: List[str]) -> Dict[str, OperationTask]:
+        """批量查找指定漫画尚未结束的下载任务。
+
+        一次查询返回全部命中记录；同漫画存在多条活动记录时保留创建时间最早
+        的一条，与 find_active_download 的单条查询语义一致。
+        """
+        if not manga_ids:
+            return {}
+        with self._get_session() as session:
+            statement = (
+                select(OperationTask)
+                .where(
+                    OperationTask.task_type == "download",
+                    OperationTask.manga_id.in_(manga_ids),
+                    OperationTask.status.in_(("queued", "running")),
+                )
+                .order_by(OperationTask.created_at, OperationTask.id)
+            )
+            tasks = session.scalars(statement).all()
+        active_by_manga: Dict[str, OperationTask] = {}
+        for task in tasks:
+            if task.manga_id is not None:
+                active_by_manga.setdefault(task.manga_id, task)
+        return active_by_manga
+
     def list_active_downloads(self) -> List[OperationTask]:
         """列出全部尚未结束的下载任务（queued/running），按创建时间排序。"""
         with self._get_session() as session:

@@ -223,6 +223,34 @@ class JmFavoriteService:
             self._worker.start()
             return import_view(job)
 
+    def import_to_library(self, admin_id: int, manga_ids: List[str]) -> Dict[str, int]:
+        """把已导入的远端收藏直接登记到漫画库，并标记为管理员收藏。
+
+        该操作只使用本地已导入的收藏记录，不依赖当前 JM 登录会话。
+        """
+        normalized_ids = list(dict.fromkeys(manga_ids))
+        if not normalized_ids:
+            raise JmFavoriteError(
+                "JM_INVALID_LIBRARY_SELECTION", "请选择要导入漫画库的漫画", 400
+            )
+        if len(normalized_ids) > 100:
+            raise JmFavoriteError(
+                "JM_INVALID_LIBRARY_SELECTION", "每次最多导入 100 本漫画", 400
+            )
+        if any(
+            not manga_id.isascii() or not manga_id.isdecimal() or len(manga_id) > 32
+            for manga_id in normalized_ids
+        ):
+            raise JmFavoriteError(
+                "JM_INVALID_LIBRARY_SELECTION",
+                "漫画编号必须为数字且不超过 32 位",
+                400,
+            )
+        try:
+            return self.repository.import_to_library(admin_id, normalized_ids)
+        except LookupError as error:
+            raise JmFavoriteError("JM_FAVORITE_NOT_FOUND", str(error), 404) from error
+
     def _ensure_active(self, session_id: str, account: AccountSession) -> None:
         with self._lock:
             if (

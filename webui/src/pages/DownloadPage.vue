@@ -105,7 +105,7 @@ async function submitDownload(): Promise<void> {
   submitting.value = true
   try {
     const result = await requestDownloads(mangaIds)
-    const parts = [`已入队 ${result.queued_count} 个`]
+    const parts = [`已提交 ${result.queued_count} 个，正在加入队列`]
     if (result.skipped_blacklisted.length > 0) {
       parts.push(
         `${result.skipped_blacklisted.length} 个已被拉黑跳过（${result.skipped_blacklisted.join('、')}）`,
