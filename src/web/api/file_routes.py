@@ -120,6 +120,28 @@ def create_file_router(
             },
         )
 
+    @router.get("/files/{file_id}/page/{page_number}/size")
+    def get_file_page_size(
+        file_id: int,
+        page_number: int,
+        response: Response,
+        _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> Dict[str, int]:
+        """返回第 n 页嵌入图的原始尺寸，供阅读器轻量探测与占位。
+
+        只读取图片 XObject 的宽高元数据，不传输或解码图片字节；越界、
+        非图片型、文件损坏或加密统一返回 404。尺寸不随文件内容变化，
+        与页图一样允许浏览器长期缓存。
+        """
+        path, _display_name = resolve_file(file_id)
+        try:
+            width, height = dependencies.page_image_service.page_size(path, page_number)
+        except PageImageError as error:
+            raise ApiError(404, "PAGE_IMAGE_NOT_FOUND", str(error)) from error
+        response.headers["Cache-Control"] = _IMAGE_CACHE_CONTROL
+        response.headers["X-Content-Type-Options"] = "nosniff"
+        return {"width": width, "height": height}
+
     @router.put("/files/{file_id}/page-count")
     def update_file_page_count(
         file_id: int,
