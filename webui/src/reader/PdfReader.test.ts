@@ -6,6 +6,7 @@ import { getReadingProgress, updateFilePageCount } from '@/api/files'
 import { getReaderSettings, updateReaderSettings } from '@/api/reader'
 import type { ReadingProgress } from '@/types/api'
 import PdfReader from './PdfReader.vue'
+import PdfReaderSource from './PdfReader.vue?raw'
 import ReaderToolbar from './ReaderToolbar.vue'
 import type { PageBaseSize, ReadingSettingUpdate, ReadingSettings } from './types'
 
@@ -420,6 +421,95 @@ describe('翻页方向', () => {
     // 第 1 页中心 304，减去视口中心 150
     expect(scrollTo).toHaveBeenCalledWith({ left: 154, behavior: 'smooth' })
     wrapper.unmount()
+  })
+})
+
+describe('鼠标滚轮', () => {
+  /** 在滚动容器上派发可取消的滚轮事件。 */
+  function dispatchWheel(
+    wrapper: ReturnType<typeof shallowMount>,
+    deltaY: number,
+  ): WheelEvent {
+    const scroll = wrapper.find('.reader-scroll').element
+    const event = new WheelEvent('wheel', {
+      deltaY,
+      bubbles: true,
+      cancelable: true,
+    })
+    scroll.dispatchEvent(event)
+    return event
+  }
+
+  it('单页模式滚轮下滚下一页、上滚上一页，并按 300ms 节流', async () => {
+    const wrapper = await mountReader()
+    const now = vi.spyOn(Date, 'now').mockReturnValue(1000)
+
+    dispatchWheel(wrapper, 120)
+    await flushPromises()
+    expect(currentPage()).toBe(2)
+
+    // 300ms 内的第二次滚动被忽略，避免触控板惯性连续翻页
+    dispatchWheel(wrapper, 120)
+    await flushPromises()
+    expect(currentPage()).toBe(2)
+
+    now.mockReturnValue(1300)
+    dispatchWheel(wrapper, -120)
+    await flushPromises()
+    expect(currentPage()).toBe(1)
+
+    now.mockRestore()
+    wrapper.unmount()
+  })
+
+  it('日漫单页模式滚轮仍保持下滚下一页，不随翻页方向反转', async () => {
+    const wrapper = await mountReader({ reading_mode: 'manga' })
+
+    dispatchWheel(wrapper, 120)
+    await flushPromises()
+
+    expect(currentPage()).toBe(2)
+    wrapper.unmount()
+  })
+
+  it('连续横排把 deltaY 转为横向滚动并阻止页面纵向滚动', async () => {
+    const wrapper = await mountReader({
+      continuous: true,
+      reading_mode: 'normal',
+    })
+    const scroll = wrapper.find('.reader-scroll').element as HTMLElement
+    scroll.scrollLeft = 100
+
+    const event = dispatchWheel(wrapper, 120)
+    await flushPromises()
+
+    expect(scroll.scrollLeft).toBe(220)
+    expect(event.defaultPrevented).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('连续垂直滚动模式保留原生滚动，不翻页也不阻止默认行为', async () => {
+    const wrapper = await mountReader({
+      continuous: true,
+      reading_mode: 'scroll',
+    })
+    const scroll = wrapper.find('.reader-scroll').element as HTMLElement
+    scroll.scrollTop = 80
+
+    const event = dispatchWheel(wrapper, 120)
+    await flushPromises()
+
+    expect(scroll.scrollTop).toBe(80)
+    expect(event.defaultPrevented).toBe(false)
+    expect(currentPage()).toBe(1)
+    wrapper.unmount()
+  })
+
+  it('加载占位固定白色，不跟随主题变量', () => {
+    expect(PdfReaderSource).toContain('background: #ffffff')
+    expect(PdfReaderSource).not.toContain(
+      'background: rgb(var(--v-theme-surface))',
+    )
   })
 })
 

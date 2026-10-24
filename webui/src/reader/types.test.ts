@@ -3,6 +3,7 @@
 import { describe, expect, it } from 'vitest'
 
 import {
+  PREFETCH_OPTIONS,
   clickTurnDelta,
   computeFitScale,
   isHorizontalScroll,
@@ -11,6 +12,12 @@ import {
   swipeTurnDelta,
   windowPagesFor,
 } from './types'
+
+describe('PREFETCH_OPTIONS', () => {
+  it('预加载档位为 1-4，且不再包含仅当前页', () => {
+    expect(PREFETCH_OPTIONS).toEqual([1, 2, 3, 4])
+  })
+})
 
 describe('windowPagesFor', () => {
   it('中间页返回当前页 ±1', () => {

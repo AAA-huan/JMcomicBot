@@ -375,10 +375,13 @@ const vReaderSize: Directive<HTMLElement> = {
 
 /** 连续横排滚动停止后，等待短暂时间再居中当前页。 */
 const HORIZONTAL_SNAP_DELAY = 80
+/** 单页模式滚轮翻页的最小间隔，避免触控板惯性一次翻多页。 */
+const WHEEL_TURN_THROTTLE = 300
 
 let scrollElement: HTMLElement | null = null
 let scrollRaf: number | null = null
 let snapTimer: number | null = null
+let wheelLock = 0
 
 const vReaderScroll: Directive<HTMLElement> = {
   mounted(element) {
@@ -507,7 +510,29 @@ function setZoomPercent(percent: number): void {
   zoomMode.value = 'custom'
 }
 
-// ---------- 触摸、键盘与点击翻页 ----------
+// ---------- 鼠标滚轮、触摸、键盘与点击翻页 ----------
+
+/**
+ * 鼠标滚轮：单页翻页、连续横排转横向滚动，垂直连排交给原生滚动。
+ *
+ * 滚轮「下滚=下一页」的语义固定，不随普通/日漫模式反转。横向模式需要
+ * preventDefault 阻止页面整体纵向滚动，因此监听器不能使用 passive。
+ */
+function onWheel(event: WheelEvent): void {
+  if (!continuous.value) {
+    if (event.deltaY === 0) return
+    const now = Date.now()
+    if (wheelLock !== 0 && now - wheelLock < WHEEL_TURN_THROTTLE) return
+    wheelLock = now
+    goRelative(event.deltaY > 0 ? 1 : -1)
+    return
+  }
+  if (!horizontal.value) return
+  const container = scrollElement
+  if (!container || event.deltaY === 0) return
+  event.preventDefault()
+  container.scrollLeft += event.deltaY
+}
 
 let touchStart: { x: number; y: number } | null = null
 let suppressClick = false
@@ -907,6 +932,7 @@ onMounted(() => {
       v-reader-size
       v-reader-scroll
       class="reader-scroll"
+      @wheel="onWheel"
       @touchstart.passive="onTouchStart"
       @touchend="onTouchEnd"
       @click="onReaderClick"
@@ -933,6 +959,7 @@ onMounted(() => {
       v-reader-scroll
       class="reader-scroll"
       :class="{ 'reader-scroll--horizontal': horizontal }"
+      @wheel="onWheel"
       @click="onReaderClick"
     >
       <div
@@ -1027,9 +1054,9 @@ onMounted(() => {
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
 }
 
-/* 当前页图片出图前显示主题背景色，避免转圈结束后白屏闪烁 */
+/* 当前页图片出图前固定白色占位，不跟随深色主题变化 */
 .reader-page-image--loading {
-  background: rgb(var(--v-theme-surface));
+  background: #ffffff;
 }
 
 .reader-pages {

@@ -12,8 +12,8 @@ export type ZoomMode = 'fit-width' | 'fit-page' | 'custom'
 /** 连续模式渲染窗口半径默认值：当前页前后各保留 1 页。 */
 export const RENDER_WINDOW_RADIUS = 1
 
-/** 「预加载页数」可选档位，0 表示只保留当前页。 */
-export const PREFETCH_OPTIONS = [0, 1, 2, 3, 5, 8]
+/** 「预加载页数」可选档位，数值表示当前页前后各保留的页数。 */
+export const PREFETCH_OPTIONS = [1, 2, 3, 4]
 
 /** 缩放百分比档位（自定义缩放菜单使用）。 */
 export const ZOOM_PERCENT_OPTIONS = [50, 75, 100, 125, 150, 200, 300]
