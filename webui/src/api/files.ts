@@ -23,6 +23,11 @@ export function filePageImageUrl(fileId: number, pageNumber: number): string {
   return `/api/v1/files/${fileId}/page/${pageNumber}`
 }
 
+/** 阅读器按页获取嵌入图原始尺寸的地址；只返回宽高 JSON，不含图字节。 */
+export function filePageImageSizeUrl(fileId: number, pageNumber: number): string {
+  return `/api/v1/files/${fileId}/page/${pageNumber}/size`
+}
+
 export function getReadingProgress(fileId: number): Promise<ReadingProgress> {
   return apiRequest<ReadingProgress>(`/files/${fileId}/progress`)
 }

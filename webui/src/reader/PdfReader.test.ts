@@ -4,9 +4,10 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { getReadingProgress, updateFilePageCount } from '@/api/files'
 import { getReaderSettings, updateReaderSettings } from '@/api/reader'
+import type { ReadingProgress } from '@/types/api'
 import PdfReader from './PdfReader.vue'
 import ReaderToolbar from './ReaderToolbar.vue'
-import type { ReadingSettingUpdate, ReadingSettings } from './types'
+import type { PageBaseSize, ReadingSettingUpdate, ReadingSettings } from './types'
 
 /** 记录进度同步配置，便于按键/点击后读取当前页码。 */
 const progressState = vi.hoisted(() => ({
@@ -171,6 +172,83 @@ describe('初始化', () => {
   it('打开后不翻页也立即上报 PDF 实际页数', async () => {
     const wrapper = await mountReader()
     expect(updateFilePageCount).toHaveBeenCalledExactlyOnceWith(42, 12)
+    wrapper.unmount()
+  })
+
+  it('设置与进度并行请求，probe 在两者完成后执行', async () => {
+    let resolveSettings!: (value: ReadingSettings) => void
+    let resolveProgress!: (value: ReadingProgress) => void
+    vi.mocked(getReaderSettings).mockReturnValue(
+      new Promise((resolve) => {
+        resolveSettings = resolve
+      }),
+    )
+    vi.mocked(getReadingProgress).mockReturnValue(
+      new Promise((resolve) => {
+        resolveProgress = resolve
+      }),
+    )
+    const wrapper = shallowMount(PdfReader, MOUNT_OPTIONS)
+    await flushPromises()
+
+    expect(getReaderSettings).toHaveBeenCalledTimes(1)
+    expect(getReadingProgress).toHaveBeenCalledTimes(1)
+    expect(pageImageMocks.probePageImage).not.toHaveBeenCalled()
+
+    resolveSettings(makeSettings())
+    resolveProgress({
+      file_id: 42,
+      page_number: 1,
+      page_count: 12,
+      percent: 0,
+      updated_at: null,
+    })
+    await flushPromises()
+    await flushPromises()
+
+    expect(pageImageMocks.probePageImage).toHaveBeenCalledWith(42, 1)
+    wrapper.unmount()
+  })
+
+  it('首页尺寸后台补全，不阻塞 loading 且不改变其余页占位', async () => {
+    vi.mocked(getReadingProgress).mockResolvedValue({
+      file_id: 42,
+      page_number: 2,
+      page_count: 12,
+      percent: 8,
+      updated_at: null,
+    })
+    let resolveFirstSize!: (size: PageBaseSize | null) => void
+    pageImageMocks.loadPageImageSize.mockReturnValue(
+      new Promise((resolve) => {
+        resolveFirstSize = resolve
+      }),
+    )
+    useImageProbe({ width: 800, height: 1200 })
+    const wrapper = await mountReader({ continuous: true, prefetch_pages: 2 })
+
+    expect(wrapper.find('.reader-status').exists()).toBe(false)
+    expect(pageImageMocks.probePageImage).toHaveBeenCalledWith(42, 2)
+    expect(pageImageMocks.loadPageImageSize).toHaveBeenCalledWith(42, 1)
+    const pageOne = wrapper.find('[data-reader-page="1"]')
+    const pageThree = wrapper.find('[data-reader-page="3"]')
+    expect(pageOne.attributes('style')).toContain('width: 800px')
+    expect(pageThree.attributes('style')).toContain('width: 800px')
+
+    resolveFirstSize({ width: 1000, height: 1320 })
+    await flushPromises()
+
+    expect(pageOne.attributes('style')).toContain('width: 1000px')
+    // 其余未知页继续使用 probe 页尺寸，不随首页尺寸整体跳动
+    expect(pageThree.attributes('style')).toContain('width: 800px')
+    wrapper.unmount()
+  })
+
+  it('进度页就是首页时不再额外请求首页尺寸', async () => {
+    useImageProbe()
+    const wrapper = await mountReader()
+
+    expect(pageImageMocks.loadPageImageSize).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 
@@ -455,6 +533,7 @@ describe('图片型连续模式', () => {
     const image = wrapper.find('.reader-single img')
     expect(image.attributes('style')).toContain('width: 800px')
     expect(image.attributes('style')).toContain('height: 1200px')
+    expect(image.classes()).toContain('reader-page-image--loading')
 
     Object.defineProperty(image.element, 'naturalWidth', {
       configurable: true,
@@ -468,6 +547,7 @@ describe('图片型连续模式', () => {
 
     expect(image.attributes('style')).toContain('width: 1000px')
     expect(image.attributes('style')).toContain('height: 1500px')
+    expect(image.classes()).not.toContain('reader-page-image--loading')
     wrapper.unmount()
   })
 

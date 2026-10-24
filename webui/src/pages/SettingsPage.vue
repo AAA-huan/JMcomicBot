@@ -493,6 +493,9 @@ onMounted(() => {
         <p class="text-body-2 text-medium-emphasis mb-2">
           jmcomic 下载器配置；保存后下一个下载任务即生效，无需重启。img2pdf 与进度插件由程序自动注入并覆盖关键项。
         </p>
+        <p class="text-caption text-medium-emphasis mb-2">
+          如果在下载漫画时感觉到阅读器打开或封面预览卡顿，可以尝试调低 jmcomic 的并发下载量，具体数值请按设备性能与体感调整。
+        </p>
         <v-textarea
           v-model="optionContent"
           :loading="optionLoading"

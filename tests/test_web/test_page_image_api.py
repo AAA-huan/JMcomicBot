@@ -53,9 +53,11 @@ def test_cover_requires_login(db_manager) -> None:
     with client:
         cover = client.get(f"/api/v1/files/{file_id}/cover")
         page = client.get(f"/api/v1/files/{file_id}/page/1")
+        size = client.get(f"/api/v1/files/{file_id}/page/1/size")
 
     assert cover.status_code == 401
     assert page.status_code == 401
+    assert size.status_code == 401
     assert cover.json()["code"] == "AUTH_REQUIRED"
 
 
@@ -97,6 +99,55 @@ def test_page_returns_original_bytes_and_content_type(db_manager) -> None:
     original = pdf_path.read_bytes()
     assert first.content != second.content
     assert original.startswith(b"%PDF")
+
+
+def test_page_size_returns_dimensions_with_cache_headers(db_manager) -> None:
+    """尺寸端点返回 JSON 宽高与长期缓存头，不传输图片字节。"""
+    client, root = _make_client(db_manager)
+    file_id, _pdf_path = _add_manga_with_pdf(db_manager, root)
+
+    with client:
+        setup_and_login(client)
+        first = client.get(f"/api/v1/files/{file_id}/page/1/size")
+        second = client.get(f"/api/v1/files/{file_id}/page/2/size")
+
+    assert first.status_code == 200
+    assert first.json() == {"width": 1000, "height": 1320}
+    assert first.headers["content-type"] == "application/json"
+    assert first.headers["cache-control"] == "public, max-age=31536000, immutable"
+    assert first.headers["x-content-type-options"] == "nosniff"
+    assert second.status_code == 200
+    assert second.json() == {"width": 800, "height": 1200}
+
+
+def test_page_size_out_of_range_and_non_image_return_404(db_manager) -> None:
+    """越界、未知文件与非图片型 PDF 的尺寸请求统一返回 404。"""
+    client, root = _make_client(db_manager)
+    file_id, _pdf_path = _add_manga_with_pdf(db_manager, root)
+    blank_path = root / "100-矢量.pdf"
+    writer = PdfWriter()
+    writer.add_blank_page(width=595, height=842)
+    with blank_path.open("wb") as stream:
+        writer.write(stream)
+    manga_repo = MangaRepository(db_manager, download_root=str(root))
+    manga_repo.upsert("102", "矢量漫画", "作者", 1, 1)
+    blank_file = manga_repo.add_file("102", str(blank_path), page_count=1)
+
+    with client:
+        setup_and_login(client)
+        zero = client.get(f"/api/v1/files/{file_id}/page/0/size")
+        beyond = client.get(f"/api/v1/files/{file_id}/page/3/size")
+        unknown = client.get("/api/v1/files/999999/page/1/size")
+        non_image = client.get(f"/api/v1/files/{blank_file.id}/page/1/size")
+
+    assert zero.status_code == 404
+    assert zero.json()["code"] == "PAGE_IMAGE_NOT_FOUND"
+    assert beyond.status_code == 404
+    assert unknown.status_code == 404
+    assert unknown.json()["code"] == "FILE_NOT_FOUND"
+    assert non_image.status_code == 404
+    assert non_image.json()["code"] == "PAGE_IMAGE_NOT_FOUND"
+    assert str(root) not in beyond.text
 
 
 def test_page_out_of_range_and_unknown_file_return_404(db_manager) -> None:
