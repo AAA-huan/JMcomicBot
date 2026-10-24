@@ -2,9 +2,10 @@
 /**
  * 漫画在线阅读器：单页/连排滚动、缩放、跳页、全屏、阅读设置与进度同步。
  *
- * 首次打开直接请求当前进度页：图片型 PDF 使用 <img> 按窗口懒加载，
- * 完全不经过 PDF.js；非图片型 PDF 回退到 PDF.js + Canvas。连排滚动位置
- * 由页面尺寸缓存的 offset 二分查找，不再逐页 getBoundingClientRect。
+ * 首次打开只请求当前进度页的尺寸端点：图片型 PDF 使用 <img> 按窗口懒加载，
+ * 完全不经过 PDF.js；非图片型 PDF 回退到 PDF.js + Canvas。尺寸请求不下载
+ * 图字节、不在客户端 decode，首页尺寸在 loading 结束后后台补全。连排滚动
+ * 位置由页面尺寸缓存的 offset 二分查找，不再逐页 getBoundingClientRect。
  * 阅读模式、连续显示、点击翻页、深色背景与预加载页数统一保存在后端，
  * 工具栏改动即时同步并在失败时回滚。进度 1 秒防抖写入，页面隐藏/离开时
  * keepalive 立即刷新；失败明确提示「进度未同步」并可重试，不阻塞阅读。
@@ -77,8 +78,12 @@ const fullscreen = ref(false)
 const progressState = ref<ProgressSyncState>('synced')
 const progressLoadFailed = ref(false)
 const pageCountSyncError = ref('')
-// 图片型路径初始只有首页/当前页尺寸，其余页为 null，占位使用已知尺寸
+// 图片型路径初始只有当前页尺寸，其余页为 null，占位使用 probe 页尺寸
 const baseSizes = ref<Array<PageBaseSize | null>>([])
+// probe 页尺寸作为所有未知页的占位基准；首页尺寸在后台单独补全
+const probeBaseSize = ref<PageBaseSize | null>(null)
+// 已成功加载图片的页码，用于清除当前页的背景占位
+const loadedPages = ref<Set<number>>(new Set())
 const containerWidth = ref(0)
 const containerHeight = ref(0)
 
@@ -221,8 +226,9 @@ watch(prefetchPages, () => {
 
 // ---------- 缩放与页面尺寸 ----------
 
-/** 已知页面尺寸；全部未知时使用固定占位值。 */
+/** 未知页占位尺寸：优先 probe 页尺寸，PDF.js 路径回退到已知尺寸。 */
 const placeholderSize = computed<PageBaseSize>(() => {
+  if (probeBaseSize.value) return probeBaseSize.value
   const known = baseSizes.value.find(
     (size): size is PageBaseSize => size !== null,
   )
@@ -289,10 +295,20 @@ function pageStyle(target: number): Record<string, string> {
   return { width: `${size.width}px`, height: `${size.height}px` }
 }
 
-/** <img> 加载完成后记录真实尺寸，驱动占位与 offset 自动更新。 */
+/** 当前页图片是否已完成加载；未完成时保留背景色占位。 */
+function isPageLoaded(target: number): boolean {
+  return loadedPages.value.has(target)
+}
+
+/** <img> 加载完成后清除占位，并记录真实尺寸驱动布局自动更新。 */
 function onPageLoad(target: number, event: Event): void {
   const image = event.target
   if (!(image instanceof HTMLImageElement)) return
+  if (!loadedPages.value.has(target)) {
+    const loaded = new Set(loadedPages.value)
+    loaded.add(target)
+    loadedPages.value = loaded
+  }
   const width = image.naturalWidth
   const height = image.naturalHeight
   if (width <= 0 || height <= 0) return
@@ -666,6 +682,20 @@ function startProgressSync(): void {
   })
 }
 
+/** 后台补全首页尺寸；不阻塞 loading，失败时继续使用 probe 页占位。 */
+function supplementFirstPageSize(): void {
+  void loadPageImageSize(fileId, 1)
+    .then((size) => {
+      if (!size) return
+      const updated = baseSizes.value.slice()
+      updated[0] = size
+      baseSizes.value = updated
+    })
+    .catch(() => {
+      // 后台补尺寸失败时保持 probe 页占位，不影响阅读
+    })
+}
+
 /** 图片型路径：只用 <img> 渲染，不加载 PDF.js，也不使用渲染窗口。 */
 async function initializeImageMode(
   progress: ReadingProgress,
@@ -679,18 +709,19 @@ async function initializeImageMode(
   )
   const target = Math.min(Math.max(progress.page_number, 1), pageCount.value)
   sizes[target - 1] = probeSize
-  if (target !== 1) {
-    // 首页尺寸作为其余未知页的占位基准；失败时退回当前页尺寸
-    const firstSize = await loadPageImageSize(fileId, 1)
-    if (firstSize) sizes[0] = firstSize
-  }
+  probeBaseSize.value = probeSize
   baseSizes.value = sizes
   pageNumber.value = target
   startProgressSync()
+  // probe 已拿到当前页尺寸，立即结束转圈；其余页先用 probe 尺寸占位
   loading.value = false
   await nextTick()
   if (continuous.value) {
     scrollToPage(pageNumber.value)
+  }
+  if (target !== 1) {
+    // 首页真实尺寸不阻塞打开，后台补全后由 computed 自动重算布局
+    supplementFirstPageSize()
   }
 }
 
@@ -739,13 +770,20 @@ async function initialize(): Promise<void> {
   imageMode.value = false
   pageCount.value = 0
   baseSizes.value = []
-  if (!(await loadReaderSettings())) {
+  probeBaseSize.value = null
+  loadedPages.value = new Set()
+
+  // 设置与进度互不依赖，并行请求以重叠网络等待；probe 依赖进度页码
+  const [settingsLoaded, progress] = await Promise.all([
+    loadReaderSettings(),
+    fetchProgress(),
+  ])
+  if (!settingsLoaded) {
     loading.value = false
     return
   }
 
-  // 首次页请求即探测：200 进入图片型路径，404/415 回退 PDF.js
-  const progress = await fetchProgress()
+  // 首次尺寸请求即探测：200 进入图片型路径，404/415 回退 PDF.js
   const probePage = progress?.page_number ?? 1
   try {
     const probe = await probePageImage(fileId, probePage)
@@ -880,6 +918,7 @@ onMounted(() => {
           :src="pageImageUrl(fileId, pageNumber)"
           :style="pageStyle(pageNumber)"
           class="reader-page-image"
+          :class="{ 'reader-page-image--loading': !isPageLoaded(pageNumber) }"
           :alt="`第 ${pageNumber} 页`"
           @load="onPageLoad(pageNumber, $event)"
         >
@@ -915,6 +954,7 @@ onMounted(() => {
             v-if="imageMode && windowPages.includes(index + 1)"
             :src="pageImageUrl(fileId, index + 1)"
             class="reader-page-image"
+            :class="{ 'reader-page-image--loading': !isPageLoaded(index + 1) }"
             :alt="`第 ${index + 1} 页`"
             @load="onPageLoad(index + 1, $event)"
           >
@@ -985,6 +1025,11 @@ onMounted(() => {
   max-height: 100%;
   object-fit: contain;
   box-shadow: 0 2px 12px rgba(0, 0, 0, 0.25);
+}
+
+/* 当前页图片出图前显示主题背景色，避免转圈结束后白屏闪烁 */
+.reader-page-image--loading {
+  background: rgb(var(--v-theme-surface));
 }
 
 .reader-pages {

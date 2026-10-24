@@ -1,12 +1,13 @@
 /**
  * 页面图片探测与尺寸读取。
  *
- * 阅读器首次打开直接请求当前进度页：200 表示图片型 PDF，404/415 表示
- * 需要回退 PDF.js。探测请求与页面尺寸读取共用同一响应，避免额外接口。
+ * 阅读器首次打开请求当前进度页的尺寸端点：200 表示图片型 PDF，404/415
+ * 表示需要回退 PDF.js。尺寸直接读取服务端返回的宽高元数据，不下载图片
+ * 字节，也不在客户端 decode 整图，避免手机打开阅读器时额外耗时。
  */
 
 import { ApiError } from '@/api/client'
-import { filePageImageUrl } from '@/api/files'
+import { filePageImageSizeUrl, filePageImageUrl } from '@/api/files'
 import type { PageBaseSize } from './types'
 
 /** 页面图片地址；页码从 1 开始。 */
@@ -18,34 +19,35 @@ export type PageImageProbe =
   | { kind: 'image'; size: PageBaseSize }
   | { kind: 'fallback' }
 
-/** 从 Blob 加载图片并读取原始像素尺寸。 */
-function blobImageSize(blob: Blob): Promise<PageBaseSize> {
-  const objectUrl = URL.createObjectURL(blob)
-  return new Promise<PageBaseSize>((resolve, reject) => {
-    const image = new Image()
-    image.onload = () => {
-      URL.revokeObjectURL(objectUrl)
-      const size = { width: image.naturalWidth, height: image.naturalHeight }
-      if (size.width <= 0 || size.height <= 0) {
-        reject(new ApiError(422, 'PAGE_IMAGE_INVALID', '页面图片尺寸无效'))
-        return
-      }
-      resolve(size)
-    }
-    image.onerror = () => {
-      URL.revokeObjectURL(objectUrl)
-      reject(new ApiError(422, 'PAGE_IMAGE_INVALID', '页面图片无法解码'))
-    }
-    image.src = objectUrl
-  })
+/** 解析尺寸端点的 JSON 响应；非法尺寸明确报错，避免以 0 尺寸进入布局。 */
+async function readPageSize(response: Response): Promise<PageBaseSize> {
+  const payload = (await response.json()) as Partial<PageBaseSize>
+  const width = payload.width
+  const height = payload.height
+  if (
+    typeof width !== 'number' ||
+    typeof height !== 'number' ||
+    !Number.isInteger(width) ||
+    !Number.isInteger(height) ||
+    width <= 0 ||
+    height <= 0
+  ) {
+    throw new ApiError(422, 'PAGE_IMAGE_INVALID', '页面图片尺寸无效')
+  }
+  return { width, height }
 }
 
+/** 请求指定页尺寸；非 2xx 统一抛出 ApiError 并保留原始状态码。 */
 async function fetchImageSize(url: string): Promise<PageBaseSize> {
   const response = await fetch(url, { credentials: 'same-origin' })
   if (!response.ok) {
-    throw new ApiError(response.status, 'PAGE_IMAGE_FAILED', '页面图片加载失败')
+    throw new ApiError(
+      response.status,
+      response.status === 401 ? 'AUTH_REQUIRED' : 'PAGE_IMAGE_FAILED',
+      '页面图片尺寸加载失败',
+    )
   }
-  return blobImageSize(await response.blob())
+  return readPageSize(response)
 }
 
 /**
@@ -58,7 +60,7 @@ export async function probePageImage(
   fileId: number,
   pageNumber: number,
 ): Promise<PageImageProbe> {
-  const response = await fetch(pageImageUrl(fileId, pageNumber), {
+  const response = await fetch(filePageImageSizeUrl(fileId, pageNumber), {
     credentials: 'same-origin',
   })
   if (response.status === 404 || response.status === 415) {
@@ -70,7 +72,7 @@ export async function probePageImage(
   if (!response.ok) {
     throw new ApiError(response.status, 'PAGE_IMAGE_FAILED', '页面图片加载失败')
   }
-  return { kind: 'image', size: await blobImageSize(await response.blob()) }
+  return { kind: 'image', size: await readPageSize(response) }
 }
 
 /** 读取指定页原图尺寸；失败返回 null（仅用于占位尺寸兜底）。 */
@@ -79,7 +81,7 @@ export async function loadPageImageSize(
   pageNumber: number,
 ): Promise<PageBaseSize | null> {
   try {
-    return await fetchImageSize(pageImageUrl(fileId, pageNumber))
+    return await fetchImageSize(filePageImageSizeUrl(fileId, pageNumber))
   } catch (error) {
     if (error instanceof ApiError && error.status === 401) throw error
     return null
