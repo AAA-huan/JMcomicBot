@@ -5,7 +5,7 @@ import { errorMessage } from '@/api/client'
 import { getReaderSettings, updateReaderSettings } from '@/api/reader'
 import { getOptionFile, listSettings, updateOptionFile, updateSetting } from '@/api/settings'
 import EmptyState from '@/components/EmptyState.vue'
-import type { ReadingSettings } from '@/reader/types'
+import { PREFETCH_OPTIONS, type ReadingSettings } from '@/reader/types'
 import type { SettingValue, SettingView } from '@/types/api'
 import {
   SETTING_EFFECT_COLORS,
@@ -71,7 +71,8 @@ const readerDirty = computed(() => {
     form.continuous !== loaded.continuous ||
     form.click_to_turn !== loaded.click_to_turn ||
     form.reverse_click !== loaded.reverse_click ||
-    form.dark_background !== loaded.dark_background
+    form.dark_background !== loaded.dark_background ||
+    form.prefetch_pages !== loaded.prefetch_pages
   )
 })
 
@@ -228,6 +229,7 @@ async function saveReader(): Promise<void> {
       click_to_turn: form.click_to_turn,
       reverse_click: form.reverse_click,
       dark_background: form.dark_background,
+      prefetch_pages: form.prefetch_pages,
     })
     readerForm.value = { ...updated }
     readerLoaded.value = { ...updated }
@@ -373,6 +375,19 @@ onMounted(() => {
           density="compact"
           hide-details
         />
+        <v-select
+          v-model="readerForm.prefetch_pages"
+          :items="PREFETCH_OPTIONS"
+          label="预加载页数"
+          color="primary"
+          density="compact"
+          variant="outlined"
+          hide-details
+          class="mt-2"
+        />
+        <p class="text-caption text-medium-emphasis mt-1 mb-0">
+          连续模式当前页前后保留的页数，越大越流畅但更耗内存；手机建议 1-2
+        </p>
       </v-card-text>
       <v-card-actions>
         <v-spacer />

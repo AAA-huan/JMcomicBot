@@ -60,7 +60,7 @@ const MODE_OPTIONS: ModeOption[] = [
 ]
 
 const PREFETCH_ITEMS = PREFETCH_OPTIONS.map((value) => ({
-  title: value === 0 ? '仅当前页' : `${value} 页`,
+  title: `${value} 页`,
   value,
 }))
 const PREFETCH_HINT = '连续模式当前页前后保留的页数，越大越流畅但更耗内存；手机建议 1-2'
@@ -230,7 +230,12 @@ function zoomLabel(): string {
         </v-list>
       </v-menu>
 
-      <v-menu v-model="modeMenuOpen" :attach="menuAttach" location="bottom end">
+      <v-menu
+        v-model="modeMenuOpen"
+        :attach="menuAttach"
+        :close-on-content-click="false"
+        location="bottom end"
+      >
         <template #activator="{ props: menuProps }">
           <v-btn
             v-bind="menuProps"
@@ -253,7 +258,12 @@ function zoomLabel(): string {
         </v-list>
       </v-menu>
 
-      <v-menu v-model="settingsMenuOpen" :attach="menuAttach" location="bottom end">
+      <v-menu
+        v-model="settingsMenuOpen"
+        :attach="menuAttach"
+        :close-on-content-click="false"
+        location="bottom end"
+      >
         <template #activator="{ props: menuProps }">
           <v-btn
             v-bind="menuProps"
@@ -330,6 +340,8 @@ function zoomLabel(): string {
       v-else
       v-model="menuOpen"
       :attach="menuAttach"
+      :close-on-content-click="false"
+      max-width="340"
       location="bottom end"
     >
       <template #activator="{ props: menuProps }">

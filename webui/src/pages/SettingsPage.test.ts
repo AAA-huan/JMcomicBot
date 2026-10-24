@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { createVuetify } from 'vuetify'
+import { VSelect } from 'vuetify/components'
 
 vi.mock('@/api/settings', () => ({
   getOptionFile: vi.fn(),
@@ -267,7 +268,7 @@ function readerSwitches(wrapper: ReturnType<typeof mount>) {
   return inputs
 }
 
-it('阅读偏好加载后仅在有改动时允许保存五项设置', async () => {
+it('阅读偏好加载后仅在有改动时允许保存六项设置', async () => {
   vi.stubGlobal('visualViewport', undefined)
   vi.mocked(listSettings).mockResolvedValue({ items: [] })
   vi.mocked(getOptionFile).mockResolvedValue({ content: '' })
@@ -318,10 +319,49 @@ it('阅读偏好加载后仅在有改动时允许保存五项设置', async () =
     click_to_turn: true,
     reverse_click: true,
     dark_background: true,
+    prefetch_pages: 1,
   })
   expect(wrapper.text()).toContain('阅读偏好已保存')
   expect(wrapper.text()).toContain('无需重启')
   // 保存成功后恢复干净状态，按钮再次禁用
+  expect(findEnabledButtonByText('保存阅读偏好')).toBeUndefined()
+  wrapper.unmount()
+  vi.unstubAllGlobals()
+})
+
+it('预加载页数下拉提供 1-4 档，修改后标记脏并随保存提交', async () => {
+  vi.stubGlobal('visualViewport', undefined)
+  vi.mocked(listSettings).mockResolvedValue({ items: [] })
+  vi.mocked(getOptionFile).mockResolvedValue({ content: '' })
+
+  const wrapper = mount(SettingsPage, {
+    attachTo: document.body,
+    global: { plugins: [createVuetify()] },
+  })
+  await flushPromises()
+
+  const select = wrapper.findComponent(VSelect)
+  expect(select.props('label')).toBe('预加载页数')
+  expect(select.props('items')).toEqual([1, 2, 3, 4])
+  expect(wrapper.text()).toContain('连续模式当前页前后保留的页数')
+  expect(wrapper.text()).toContain('手机建议 1-2')
+  expect(findEnabledButtonByText('保存阅读偏好')).toBeUndefined()
+
+  await select.vm.$emit('update:modelValue', 3)
+  await flushPromises()
+  expect(findEnabledButtonByText('保存阅读偏好')).toBeDefined()
+
+  findEnabledButtonByText('保存阅读偏好').click()
+  await flushPromises()
+
+  expect(updateReaderSettings).toHaveBeenCalledExactlyOnceWith({
+    reading_mode: 'normal',
+    continuous: false,
+    click_to_turn: false,
+    reverse_click: false,
+    dark_background: false,
+    prefetch_pages: 3,
+  })
   expect(findEnabledButtonByText('保存阅读偏好')).toBeUndefined()
   wrapper.unmount()
   vi.unstubAllGlobals()
@@ -360,6 +400,7 @@ it('关闭点击翻页时自动关闭反转并提交两项', async () => {
     click_to_turn: false,
     reverse_click: false,
     dark_background: false,
+    prefetch_pages: 1,
   })
   wrapper.unmount()
   vi.unstubAllGlobals()
