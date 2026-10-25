@@ -3,7 +3,9 @@
 from collections.abc import Callable
 from threading import Lock, Thread
 from time import monotonic, sleep
-from typing import Any
+from typing import Any, List, Tuple
+
+import socket
 
 import uvicorn
 from fastapi import FastAPI
@@ -11,6 +13,22 @@ from fastapi import FastAPI
 from src.logging.logger_config import logger
 
 ServerFactory = Callable[[uvicorn.Config], uvicorn.Server]
+
+LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
+ANY_INTERFACE_HOSTS = {"0.0.0.0", "::"}
+
+
+def detect_lan_ip() -> str | None:
+    """探测本机局域网出口 IP，无法确定路由时返回 None。"""
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        # UDP connect 不真正发包，只借路由选择确定本机出口 IP
+        sock.connect(("8.8.8.8", 80))
+        return sock.getsockname()[0]
+    except OSError:
+        return None
+    finally:
+        sock.close()
 
 
 class WebServer:
@@ -53,6 +71,27 @@ class WebServer:
         except BaseException as error:  # pylint: disable=broad-exception-caught
             self._run_error = error
 
+    def _access_urls(self) -> List[Tuple[str, str]]:
+        """按监听地址生成带用途标签的访问链接。"""
+        local_url = f"http://127.0.0.1:{self.port}"
+        if self.host in LOOPBACK_HOSTS:
+            return [("本地访问", local_url)]
+        if self.host in ANY_INTERFACE_HOSTS:
+            lan_ip = detect_lan_ip()
+            if lan_ip is None:
+                self.logger.warning("未能探测到局域网 IP，请手动查询本机 IP")
+                return [
+                    ("本地访问", local_url),
+                    ("监听地址", f"http://0.0.0.0:{self.port}"),
+                ]
+            # 绑定全部网卡时，本机和局域网设备都能访问
+            return [
+                ("本地访问", local_url),
+                ("局域网访问", f"http://{lan_ip}:{self.port}"),
+            ]
+        # 绑定指定网卡时直接使用配置中的地址
+        return [("监听地址", f"http://{self.host}:{self.port}")]
+
     def start(self, timeout: float = 5.0) -> None:
         """启动服务并等待监听成功，失败或超时会明确抛错。"""
         if timeout <= 0:
@@ -72,7 +111,8 @@ class WebServer:
         deadline = monotonic() + timeout
         while monotonic() < deadline:
             if self._server.started:
-                self.logger.info(f"WebUI 已启动: http://{self.host}:{self.port}")
+                for label, url in self._access_urls():
+                    self.logger.info(f"WebUI 已启动（{label}）: {url}")
                 return
             if not self._thread.is_alive():
                 if self._run_error is not None:
