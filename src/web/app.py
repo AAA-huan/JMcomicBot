@@ -15,6 +15,7 @@ from src.web.api import create_api_router
 from src.web.dependencies import WebDependencies
 from src.web.errors import ApiError, install_error_handlers
 from src.web.events.broadcaster import StatusBroadcaster
+from src.web.middleware.access_log import AccessLogMiddleware
 from src.web.security import (
     LoginRateLimiter,
     WebSecurityMiddleware,
@@ -82,6 +83,8 @@ def create_web_app(
         allowed_origins=allowed_origins,
         allow_any_host=allow_any_host,
     )
+    # 后注册为外层，能记录所有 /api/ 请求（含被安全 middleware 拒绝的 400/403）
+    app.add_middleware(AccessLogMiddleware)
     install_error_handlers(app)
     app.include_router(
         create_api_router(
