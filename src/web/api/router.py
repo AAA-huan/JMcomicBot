@@ -31,6 +31,7 @@ from .common import SESSION_COOKIE_NAME, build_authenticate
 from .document_routes import create_document_router
 from .file_routes import create_file_router
 from .jm_favorite_routes import create_jm_favorite_router
+from .jm_search_routes import create_jm_search_router
 from .maintenance_routes import create_maintenance_router
 from .manga_routes import create_manga_router
 from .permission_routes import create_permission_router
@@ -178,6 +179,7 @@ def create_api_router(  # pylint: disable=too-many-locals
     router.include_router(create_file_router(dependencies, authenticate))
     router.include_router(create_task_router(dependencies, authenticate))
     router.include_router(create_jm_favorite_router(dependencies, authenticate))
+    router.include_router(create_jm_search_router(dependencies, authenticate))
     router.include_router(create_audit_router(dependencies, authenticate))
     router.include_router(create_permission_router(dependencies, authenticate))
     router.include_router(create_reader_router(dependencies, authenticate))

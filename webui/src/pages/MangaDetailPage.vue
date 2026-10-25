@@ -129,6 +129,16 @@ async function submitEdit(): Promise<void> {
   }
 }
 
+/** 跳转到同作者搜索页，并携带来源漫画 ID 便于返回定位。 */
+function searchSameAuthor(): void {
+  const current = manga.value
+  if (!current || !current.author) return
+  void router.push({
+    name: 'author-search',
+    query: { author: current.author, from: String(current.id) },
+  })
+}
+
 async function handleDownload(): Promise<void> {
   actionError.value = ''
   notice.value = ''
@@ -294,6 +304,16 @@ onMounted(load)
             @click="openEdit"
           >
             编辑元数据
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            size="small"
+            density="comfortable"
+            prepend-icon="mdi-account-search"
+            :disabled="!manga.author"
+            @click="searchSameAuthor"
+          >
+            查询同作者
           </v-btn>
           <v-btn
             variant="tonal"

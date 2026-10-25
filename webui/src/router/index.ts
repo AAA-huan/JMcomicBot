@@ -42,6 +42,13 @@ const router = createRouter({
       meta: { title: '漫画详情' },
     },
     {
+      // 仅从漫画详情页跳转，不在侧栏菜单中展示
+      path: '/search-author',
+      name: 'author-search',
+      component: () => import('@/pages/AuthorSearchPage.vue'),
+      meta: { title: '同作者搜索' },
+    },
+    {
       path: '/reader/:fileId',
       name: 'reader',
       component: () => import('@/reader/PdfReader.vue'),

@@ -5,13 +5,17 @@ import { beforeEach, expect, it, vi } from 'vitest'
 import { createVuetify } from 'vuetify'
 import { VBtn } from 'vuetify/components'
 
+const routerMocks = vi.hoisted(() => ({
+  push: vi.fn(),
+  replace: vi.fn(),
+}))
 vi.mock('vue-router', () => ({
   useRoute: () => ({
     params: { mangaId: '100' },
     query: {},
     fullPath: '/library/100',
   }),
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => routerMocks,
 }))
 vi.mock('@/api/files', () => ({
   fileDownloadUrl: (fileId: number) => `/api/v1/files/${fileId}/content`,
@@ -90,15 +94,53 @@ it('操作按钮无前置空白，小尺寸平铺并保留换行兜底', async (
   )
 
   const buttons = actions.findAllComponents(VBtn)
-  expect(buttons).toHaveLength(3)
+  expect(buttons).toHaveLength(4)
   expect(buttons[0].text()).toBe('编辑元数据')
-  expect(buttons[1].text()).toBe('请求下载')
-  expect(buttons[2].text()).toBe('删除漫画')
+  expect(buttons[1].text()).toBe('查询同作者')
+  expect(buttons[2].text()).toBe('请求下载')
+  expect(buttons[3].text()).toBe('删除漫画')
   for (const button of buttons) {
     expect(button.props('size')).toBe('small')
     expect(button.props('density')).toBe('comfortable')
   }
   // flex-wrap 保留为极窄屏兜底，正常手机宽度下由 small 尺寸保证一行
   expect(actions.classes()).toContain('flex-wrap')
+  wrapper.unmount()
+})
+
+it('查询同作者按钮携带作者和来源漫画跳转', async () => {
+  const wrapper = mount(MangaDetailPage, {
+    attachTo: document.body,
+    global: { plugins: [createVuetify()] },
+  })
+  await flushPromises()
+
+  const button = wrapper
+    .findAllComponents(VBtn)
+    .find((item) => item.text() === '查询同作者')!
+  expect(button.props('disabled')).toBe(false)
+  await button.trigger('click')
+
+  expect(routerMocks.push).toHaveBeenCalledWith({
+    name: 'author-search',
+    query: { author: '作者', from: '100' },
+  })
+  wrapper.unmount()
+})
+
+it('作者为空时禁用查询同作者按钮', async () => {
+  vi.mocked(getManga).mockResolvedValue({ ...mangaFixture(), author: '' })
+  const wrapper = mount(MangaDetailPage, {
+    attachTo: document.body,
+    global: { plugins: [createVuetify()] },
+  })
+  await flushPromises()
+
+  const button = wrapper
+    .findAllComponents(VBtn)
+    .find((item) => item.text() === '查询同作者')!
+  expect(button.props('disabled')).toBe(true)
+  await button.trigger('click')
+  expect(routerMocks.push).not.toHaveBeenCalled()
   wrapper.unmount()
 })
