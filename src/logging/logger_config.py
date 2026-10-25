@@ -32,6 +32,7 @@ MODULE_COLORS_HEX: Dict[str, Tuple[str, str]] = {
     "src.database.repositories": ("[database]", "#808080"),  # 灰色
     "src.database.repositories.audit_event_repository": ("[audit]", "#00C853"),  # 绿色
     "src.web.security": ("[webui]", "#00C853"),  # 绿色
+    "src.web.middleware.access_log": ("[access]", "#00E5FF"),  # 青色
     "src.utils.helpers": ("[utils]", "#808080"),  # 灰色
     "src.utils.batch": ("[batch]", "#808080"),  # 灰色
 }
