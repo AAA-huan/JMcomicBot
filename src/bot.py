@@ -59,6 +59,7 @@ from src.service import (
 from src.service.admin_qq_service import AdminQQService
 from src.service.favorite_service import FavoriteService
 from src.service.jm_favorite_service import JmFavoriteService
+from src.service.jm_search_service import JmSearchService
 from src.service.query_service import (
     AuditQueryService,
     MangaQueryService,
@@ -316,6 +317,8 @@ class MangaBot:
         self.jm_favorite_service = JmFavoriteService(
             JmFavoriteRepository(self.database_manager)
         )
+        # JM 远程作者搜索：仅查询站点数据，不写入本地漫画库
+        self.jm_search_service = JmSearchService()
         self.admin_qq_service = AdminQQService(
             self.web_admin_repo, self.permission_manager, self.audit_event_repo
         )
@@ -459,6 +462,7 @@ class MangaBot:
                         favorite_service=self.favorite_service,
                         admin_qq_service=self.admin_qq_service,
                         jm_favorite_service=self.jm_favorite_service,
+                        jm_search_service=self.jm_search_service,
                     ),
                     web_host=web_host,
                     web_port=int(self.config_manager.config_dict["WEBUI_PORT"]),

@@ -52,6 +52,7 @@ from src.service import (
 from src.service.admin_qq_service import AdminQQService
 from src.service.favorite_service import FavoriteService
 from src.service.jm_favorite_service import JmFavoriteService
+from src.service.jm_search_service import JmSearchService
 from src.service.query_service import (
     AuditQueryService,
     MangaQueryService,
@@ -335,6 +336,7 @@ def build_web_context(  # pylint: disable=too-many-locals
         page_image_service=PageImageService(),
         favorite_service=FavoriteService(FavoriteRepository(db_manager), audit_repo),
         jm_favorite_service=JmFavoriteService(JmFavoriteRepository(db_manager)),
+        jm_search_service=JmSearchService(),
         admin_qq_service=AdminQQService(
             WebAdminRepository(db_manager), permission_manager, audit_repo
         ),
