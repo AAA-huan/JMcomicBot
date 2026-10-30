@@ -406,6 +406,8 @@ class CommandExecutor:
                 )
                 if request_result.skipped_blacklisted:
                     manga_blocks.append(f"• {manga_id} — 🚫 已被拉黑，跳过下载")
+                elif request_result.skipped_downloaded:
+                    manga_blocks.append(f"• {manga_id} — ✅ 已下载，跳过重复下载")
                 elif request_result.duplicate_count:
                     manga_blocks.append(f"• {manga_id} — 已在下载队列中")
 

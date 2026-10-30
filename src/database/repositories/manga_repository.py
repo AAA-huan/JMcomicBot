@@ -242,6 +242,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
         chapter_count: int,
         page_count: int,
         status: str = "downloaded",
+        refresh_downloaded_at: bool = False,
     ) -> Manga:
         """插入或更新漫画元数据
 
@@ -252,6 +253,8 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             chapter_count: 章节数
             page_count: 总页数
             status: 下载状态
+            refresh_downloaded_at: 真实重新下载时刷新下载完成时间；
+                扫描目录等仅同步元数据的场景保持默认 False
 
         Returns:
             Manga: 已保存的漫画记录
@@ -271,8 +274,11 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             manga.chapter_count = chapter_count
             manga.page_count = page_count
             manga.status = status
-            if status == "downloaded" and previous_status == "favorited":
-                # 收藏导入时还没有真实下载，完成下载后以本次完成时间替换入库时间
+            if status == "downloaded" and (
+                refresh_downloaded_at or previous_status == "favorited"
+            ):
+                # 收藏导入时还没有真实下载，完成下载后以本次完成时间替换入库时间；
+                # 已下载漫画本体丢失后重新下载同样属于真实下载，需要刷新下载时间
                 manga.downloaded_at = utc_now()
             manga.updated_at = utc_now()
             session.commit()
@@ -490,6 +496,46 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
                 .order_by(MangaFile.created_at)
             )
             return list(session.scalars(stmt).all())
+
+    def is_downloaded(self, manga_id: str) -> bool:
+        """判断漫画是否已下载且本地 PDF 文件实际存在。"""
+        return self.are_downloaded([manga_id]).get(manga_id, False)
+
+    def are_downloaded(self, manga_ids: List[str]) -> Dict[str, bool]:
+        """批量判断漫画是否已下载，文件记录必须为 ready 且路径实际存在。
+
+        本体丢失（文件不存在或漫画状态非 downloaded）返回 False，调用方
+        据此允许重新下载，不会被误判为已完成。
+        """
+        if not manga_ids:
+            return {}
+        if self.download_root is None:
+            raise ValueError("判断漫画是否已下载前必须配置下载根目录")
+        unique_ids = list(dict.fromkeys(manga_ids))
+        with self._get_session() as session:
+            mangas = session.scalars(
+                select(Manga)
+                .where(Manga.id.in_(unique_ids))
+                .options(selectinload(Manga.files))
+            ).all()
+        states = {manga_id: False for manga_id in unique_ids}
+        root = self.download_root
+        for manga in mangas:
+            if manga.status != "downloaded":
+                continue
+            for manga_file in manga.files:
+                if manga_file.status != "ready" or not manga_file.relative_path:
+                    continue
+                file_path = (root / manga_file.relative_path).resolve()
+                try:
+                    file_path.relative_to(root)
+                except ValueError:
+                    # 登记路径越界时按文件不可用处理，避免误判为已下载
+                    continue
+                if file_path.is_file():
+                    states[manga.id] = True
+                    break
+        return states
 
     def list_verifiable_files(self) -> List[MangaFile]:
         """查询参与校验的 PDF 文件记录（排除正在删除或已删除）。"""

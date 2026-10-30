@@ -120,7 +120,7 @@ export interface SettingView {
 export interface DownloadRequestItem {
   manga_id: string
   /** accepted 表示已接收等待后台入队；queued 为同步入队结果。 */
-  status: 'accepted' | 'queued' | 'duplicate'
+  status: 'accepted' | 'queued' | 'duplicate' | 'already_downloaded'
   task_id: string | null
 }
 
@@ -129,6 +129,7 @@ export interface DownloadRequestResult {
   queued_count: number
   duplicate_count: number
   skipped_blacklisted: string[]
+  skipped_downloaded: string[]
 }
 
 export interface MangaBlacklistItem {

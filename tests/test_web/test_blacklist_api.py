@@ -60,7 +60,11 @@ def test_single_blacklist_flow_and_download_skip(db_manager) -> None:
     """单条拉黑、列表、列表项状态、下载跳过与解除形成闭环。"""
     root = Path(db_manager.db_dir).parent
     pdf_path = _add_manga(db_manager, root, "100", "会被拉黑")
-    _add_manga(db_manager, root, "101", "正常漫画")
+    # 101 用于验证拉黑场景下仍可正常入队，必须是未下载状态，
+    # 否则会被“已下载跳过”逻辑拦截而不是进入下载队列。
+    MangaRepository(db_manager, download_root=str(root)).upsert(
+        "101", "正常漫画", "作者", 1, 10, status="favorited"
+    )
 
     client, context = _make_client(db_manager)
     with client:

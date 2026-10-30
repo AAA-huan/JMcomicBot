@@ -327,6 +327,33 @@ class OperationTaskRepository(BaseRepository):
             session.refresh(task)
             return task
 
+    def cancel_recovery(self, task_id: str) -> OperationTask:
+        """取消启动恢复阶段的遗留下载任务（queued/interrupted → cancelled）。
+
+        该转换只供恢复询问拒绝时使用，不放开通用 update_state 的状态机。
+        """
+        now = utc_now()
+        with self._get_session() as session:
+            task = session.get(OperationTask, task_id)
+            if task is None:
+                raise ValueError(f"任务不存在: {task_id}")
+            if task.task_type != "download":
+                raise ValueError(f"非下载任务不支持取消恢复: {task_id}")
+            if task.status not in ("queued", "interrupted"):
+                raise ValueError(
+                    f"任务状态 {task.status} 不允许取消恢复（仅排队/中断可取消）"
+                )
+            task.status = "cancelled"
+            task.stage = "cancelled"
+            task.progress = None
+            task.error_code = "RECOVERY_CANCELLED"
+            task.error_message = "用户取消了启动恢复"
+            task.finished_at = now
+            task.updated_at = now
+            session.commit()
+            session.refresh(task)
+            return task
+
     @staticmethod
     def _expired_condition(now: datetime, retention_days: int):
         """构造终态且超过保留期的任务过滤条件。"""

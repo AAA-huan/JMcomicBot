@@ -17,6 +17,7 @@ def test_webui_config_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
         "WEBUI_HOST",
         "WEBUI_PORT",
         "WEBUI_SESSION_HOURS",
+        "RECOVERY_PROMPT_TIMEOUT_SECONDS",
     ):
         monkeypatch.delenv(name, raising=False)
     manager = ConfigManager()
@@ -27,6 +28,7 @@ def test_webui_config_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
     assert manager.get("WEBUI_HOST") == "127.0.0.1"
     assert manager.get("WEBUI_PORT") == 7999
     assert manager.get("WEBUI_SESSION_HOURS") == 24
+    assert manager.get("RECOVERY_PROMPT_TIMEOUT_SECONDS") == 180
 
 
 def test_webui_config_accepts_explicit_values(
@@ -36,6 +38,7 @@ def test_webui_config_accepts_explicit_values(
     monkeypatch.setenv("WEBUI_HOST", "0.0.0.0")
     monkeypatch.setenv("WEBUI_PORT", "8088")
     monkeypatch.setenv("WEBUI_SESSION_HOURS", "48")
+    monkeypatch.setenv("RECOVERY_PROMPT_TIMEOUT_SECONDS", "60")
     manager = ConfigManager()
 
     manager.load_config()
@@ -44,6 +47,7 @@ def test_webui_config_accepts_explicit_values(
     assert manager.get("WEBUI_HOST") == "0.0.0.0"
     assert manager.get("WEBUI_PORT") == 8088
     assert manager.get("WEBUI_SESSION_HOURS") == 48
+    assert manager.get("RECOVERY_PROMPT_TIMEOUT_SECONDS") == 60
 
 
 def test_webui_dev_origins_are_optional_and_validated(
@@ -77,6 +81,7 @@ def test_webui_dev_origins_are_optional_and_validated(
         ("WEBUI_PORT", "0", "必须位于 1 到 65535 之间"),
         ("WEBUI_PORT", "abc", "必须是整数"),
         ("WEBUI_SESSION_HOURS", "721", "必须位于 1 到 720 之间"),
+        ("RECOVERY_PROMPT_TIMEOUT_SECONDS", "0", "必须位于 1 到 3600 之间"),
     ),
 )
 def test_webui_config_rejects_invalid_values(

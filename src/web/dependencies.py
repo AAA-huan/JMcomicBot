@@ -1,6 +1,7 @@
 """Web API 应用服务依赖集合。"""
 
 from dataclasses import dataclass
+from typing import Callable, Optional
 
 from src.download.progress import DownloadProgressTracker
 from src.service import (
@@ -19,9 +20,11 @@ from src.service import (
 )
 from src.service.admin_qq_service import AdminQQService
 from src.service.favorite_service import FavoriteService
+from src.service.jm_collect_service import JmCollectService
 from src.service.jm_favorite_service import JmFavoriteService
 from src.service.jm_search_service import JmSearchService
 from src.service.option_file_service import OptionFileService
+from src.service.recovery_prompt import RecoveryPrompt
 from src.service.query_service import (
     AuditQueryService,
     MangaQueryService,
@@ -60,3 +63,5 @@ class WebDependencies:  # pylint: disable=too-many-instance-attributes
     admin_qq_service: AdminQQService
     jm_favorite_service: JmFavoriteService
     jm_search_service: JmSearchService
+    jm_collect_service: JmCollectService
+    recovery_prompt_provider: Callable[[], Optional[RecoveryPrompt]]

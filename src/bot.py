@@ -1,11 +1,13 @@
 """JMComic QQ 机器人的组件组装与运行入口"""
 
-from typing import Any, Dict, Optional
+from typing import Any, Dict, List, Optional
 
 import platform
+import select
 import signal
 import sys
 import threading
+import time
 
 from src.command.executor import CommandExecutor
 from src.config.manager import ConfigManager
@@ -58,6 +60,7 @@ from src.service import (
 )
 from src.service.admin_qq_service import AdminQQService
 from src.service.favorite_service import FavoriteService
+from src.service.jm_collect_service import JmCollectService
 from src.service.jm_favorite_service import JmFavoriteService
 from src.service.jm_search_service import JmSearchService
 from src.service.query_service import (
@@ -65,6 +68,8 @@ from src.service.query_service import (
     MangaQueryService,
     TaskQueryService,
 )
+from src.service.recovery_prompt import RecoveryPrompt
+from src.service.results import TaskResult
 from src.service.system_service import SystemService
 from src.service.web_auth_service import WebAuthService
 from src.utils.helpers import cleanup_failed_downloads
@@ -75,7 +80,7 @@ from src.web.events.bus import WebEventBus
 from src.websocket.client import WebSocketClient
 
 
-class MangaBot:
+class MangaBot:  # pylint: disable=too-many-instance-attributes
     """JMComic QQ机器人主类，整合所有功能模块"""
 
     VERSION = "3.2.5"
@@ -87,6 +92,10 @@ class MangaBot:
         self._shutdown_event: threading.Event = threading.Event()
         self._close_lock: threading.Lock = threading.Lock()
         self._resources_closed: bool = False
+        # 中断恢复询问：启动时只检测任务，等 Web/终端通道就绪后再决定
+        self.recovery_prompt: Optional[RecoveryPrompt] = None
+        self._pending_recovery_tasks: List[TaskResult] = []
+        self._recovery_thread: Optional[threading.Thread] = None
         self._started_at = utc_now()
         # 一键重启标记：close() 完成后由 main 判断是否拉起新进程
         self.restart_requested: bool = False
@@ -206,38 +215,16 @@ class MangaBot:
             progress_tracker=self.download_progress_tracker,
             settings_service=self.settings_service,
         )
-        # 启动续传：运行中任务已在上方标记中断，这里复用原记录转回排队；
-        # 排队任务直接装入内存队列，避免重启后旧记录永久占位
+        # 启动续传：运行中任务已在上方标记中断，这里只把原记录合并为待恢复
+        # 列表；实际入队推迟到 WebUI/终端询问通道就绪之后
         interrupted_by_id = {task.id: task for task in interrupted_download_tasks}
-        recovery_tasks = [
+        self._pending_recovery_tasks = [
             interrupted_by_id.get(task.id, task) for task in legacy_download_tasks
         ]
-        if recovery_tasks:
-            recovery_result = self.download_manager.recover_tasks(recovery_tasks)
-            recovery_summary = (
-                f"启动恢复 {recovery_result.recovered_count} 个下载任务"
-                f"（其中中断续传 {recovery_result.resumed_count} 个）"
-            )
-            if recovery_result.skipped_count or recovery_result.aborted:
-                logger.warning(
-                    f"{recovery_summary}，跳过 {recovery_result.skipped_count} 个"
-                )
-            else:
-                logger.info(recovery_summary)
-            self.audit_event_repo.record(
-                event_type="bot.tasks_recovered",
-                source="system",
-                result=(
-                    "failed"
-                    if recovery_result.aborted
-                    else ("partial" if recovery_result.skipped_count else "succeeded")
-                ),
-                target_type="bot",
-                target_id="self",
-                metadata={
-                    "recovered_count": recovery_result.recovered_count,
-                    "resumed_count": recovery_result.resumed_count,
-                },
+        if self._pending_recovery_tasks:
+            logger.info(
+                f"检测到 {len(self._pending_recovery_tasks)} 个遗留下载任务，"
+                "等待恢复询问"
             )
         # 漫画黑名单先于删除服务构造；删除联动通过 provider 延迟取得 MangaService
         self.manga_blacklist_service = MangaBlacklistService(
@@ -254,6 +241,7 @@ class MangaBot:
             self.download_manager,
             self.operation_task_service,
             blacklist_service=self.manga_blacklist_service,
+            downloaded_checker=self.manga_repo,
         )
         self.scan_service = ScanService(
             self.manga_repo,
@@ -319,6 +307,10 @@ class MangaBot:
         )
         # JM 远程作者搜索：仅查询站点数据，不写入本地漫画库
         self.jm_search_service = JmSearchService()
+        # JM 收藏入库：联网取信息后以收藏态保存，不下载漫画本体
+        self.jm_collect_service = JmCollectService(
+            self.manga_repo, self.tag_repo, self.favorite_repo
+        )
         self.admin_qq_service = AdminQQService(
             self.web_admin_repo, self.permission_manager, self.audit_event_repo
         )
@@ -463,6 +455,8 @@ class MangaBot:
                         admin_qq_service=self.admin_qq_service,
                         jm_favorite_service=self.jm_favorite_service,
                         jm_search_service=self.jm_search_service,
+                        jm_collect_service=self.jm_collect_service,
+                        recovery_prompt_provider=lambda: self.recovery_prompt,
                     ),
                     web_host=web_host,
                     web_port=int(self.config_manager.config_dict["WEBUI_PORT"]),
@@ -553,12 +547,148 @@ class MangaBot:
         except Exception as error:  # pylint: disable=broad-exception-caught
             logger.error(f"过期数据清理失败: {error}")
 
+    def _start_recovery_prompt(self) -> None:
+        """在独立线程中等待恢复决定，避免阻塞 WebSocket 与主循环启动。"""
+        if not self._pending_recovery_tasks:
+            return
+        if self._recovery_thread is not None and self._recovery_thread.is_alive():
+            return
+        self._recovery_thread = threading.Thread(
+            target=self._handle_recovery_prompt,
+            daemon=True,
+            name="recovery-prompt",
+        )
+        self._recovery_thread.start()
+
+    def _handle_recovery_prompt(self) -> None:
+        """按可用渠道询问是否恢复；无渠道时默认继续，超时默认取消。"""
+        tasks = self._pending_recovery_tasks
+        if not tasks:
+            return
+        timeout = int(
+            self.config_manager.config_dict["RECOVERY_PROMPT_TIMEOUT_SECONDS"]
+        )
+        prompt = RecoveryPrompt(len(tasks), timeout_seconds=timeout)
+        self.recovery_prompt = prompt
+        try:
+            tty_available = sys.stdin.isatty()
+            webui_available = self.web_server is not None
+            if not tty_available and not webui_available:
+                # 无任何询问渠道时保持原行为，避免静默丢弃遗留任务
+                logger.info("当前无终端或 WebUI 询问渠道，默认恢复下载任务")
+                decision = "continue"
+            else:
+                if tty_available:
+                    self._start_terminal_recovery_prompt(prompt)
+                decision = prompt.wait()
+        finally:
+            self.recovery_prompt = None
+            self._pending_recovery_tasks = []
+        if decision == "continue":
+            self._recover_download_tasks(tasks)
+        else:
+            self._cancel_recovery_tasks(tasks)
+
+    def _start_terminal_recovery_prompt(self, prompt: RecoveryPrompt) -> None:
+        """终端读取放到单独线程，与 WebUI 渠道共享同一个决定。"""
+        threading.Thread(
+            target=self._terminal_recovery_loop,
+            args=(prompt,),
+            daemon=True,
+            name="recovery-terminal",
+        ).start()
+
+    def _terminal_recovery_loop(self, prompt: RecoveryPrompt) -> None:
+        """读取终端 y/n；无输入或 EOF 时交由 WebUI 或超时处理。"""
+        print(
+            f"检测到 {prompt.task_count} 个中断下载任务，是否继续？"
+            f"(y/n，{prompt.timeout_seconds} 秒内无响应默认取消)"
+        )
+        try:
+            if platform.system() == "Linux":
+                while prompt.is_pending():
+                    remaining = min(1.0, float(prompt.remaining_seconds()))
+                    ready, _, _ = select.select(
+                        [sys.stdin], [], [], max(remaining, 0.1)
+                    )
+                    if not ready:
+                        continue
+                    line = sys.stdin.readline().strip().lower()
+                    if not line:
+                        return
+                    prompt.resolve("continue" if line.startswith("y") else "cancel")
+                    return
+            else:
+                import msvcrt  # pylint: disable=import-error,import-outside-toplevel
+
+                msvcrt_module: Any = msvcrt
+                while prompt.is_pending():
+                    if msvcrt_module.kbhit():
+                        key = msvcrt_module.getwch().lower()
+                        prompt.resolve("continue" if key == "y" else "cancel")
+                        return
+                    time.sleep(0.1)
+        except (EOFError, OSError, ValueError) as error:
+            logger.warning(f"终端恢复询问不可用，交由其他渠道处理: {error}")
+
+    def _recover_download_tasks(self, tasks: List[TaskResult]) -> None:
+        """把待恢复任务重新入队，并记录启动恢复审计。"""
+        recovery_result = self.download_manager.recover_tasks(tasks)
+        recovery_summary = (
+            f"启动恢复 {recovery_result.recovered_count} 个下载任务"
+            f"（其中中断续传 {recovery_result.resumed_count} 个）"
+        )
+        if recovery_result.skipped_count or recovery_result.aborted:
+            logger.warning(
+                f"{recovery_summary}，跳过 {recovery_result.skipped_count} 个"
+            )
+        else:
+            logger.info(recovery_summary)
+        self.audit_event_repo.record(
+            event_type="bot.tasks_recovered",
+            source="system",
+            result=(
+                "failed"
+                if recovery_result.aborted
+                else ("partial" if recovery_result.skipped_count else "succeeded")
+            ),
+            target_type="bot",
+            target_id="self",
+            metadata={
+                "recovered_count": recovery_result.recovered_count,
+                "resumed_count": recovery_result.resumed_count,
+            },
+        )
+
+    def _cancel_recovery_tasks(self, tasks: List[TaskResult]) -> None:
+        """用户拒绝恢复时取消遗留任务、写审计并清理临时下载目录。"""
+        cancelled_count = 0
+        for task in tasks:
+            try:
+                self.operation_task_service.cancel_recovery(task.id)
+            except ValueError as error:
+                logger.warning(f"取消遗留下载任务失败（{task.id}）: {error}")
+                continue
+            cancelled_count += 1
+            self.audit_event_repo.record(
+                event_type="bot.recovery_cancelled",
+                source="system",
+                result="succeeded",
+                target_type="manga" if task.manga_id else "task",
+                target_id=task.manga_id or task.id,
+                metadata={"reason": "user_cancelled"},
+            )
+        logger.info(f"已按用户选择取消 {cancelled_count} 个遗留下载任务")
+        self._cleanup_download_directory()
+
     def run(self) -> None:
         """运行机器人主函数"""
         logger.info("JMComic下载机器人启动中...")
 
         if self.web_server is not None:
             self.web_server.start()
+        # 询问在后台线程等待，WebSocket 连接与其他启动步骤不被 3 分钟倒计时阻塞
+        self._start_recovery_prompt()
         self.connect_websocket()
         self.start_reconnect_manager()
         self.start_cleanup_scheduler()

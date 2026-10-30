@@ -7,6 +7,7 @@ import { createVuetify } from 'vuetify'
 vi.mock('@/api/jmSearch', () => ({
   searchAuthorByAuthor: vi.fn(),
   getJmAlbumDetail: vi.fn(),
+  favoriteJmAlbums: vi.fn(),
 }))
 vi.mock('@/api/tasks', () => ({
   requestDownloads: vi.fn(),
@@ -17,17 +18,39 @@ vi.mock('@/utils/clipboard', () => ({
 
 import { ApiError } from '@/api/client'
 import {
+  favoriteJmAlbums,
   getJmAlbumDetail,
   searchAuthorByAuthor,
 } from '@/api/jmSearch'
-import type { JmAlbumDetail, JmAuthorSearchResult, JmSearchAlbum } from '@/api/jmSearch'
+import type {
+  JmAlbumDetail,
+  JmAuthorSearchResult,
+  JmLocalStatus,
+  JmSearchAlbum,
+} from '@/api/jmSearch'
 import { requestDownloads } from '@/api/tasks'
 import AuthorSearchPage from '@/pages/AuthorSearchPage.vue'
 import { copyText } from '@/utils/clipboard'
 
+function localStatus(overrides: Partial<JmLocalStatus> = {}): JmLocalStatus {
+  return { exists: false, status: null, favorited: false, downloaded: false, ...overrides }
+}
+
 const albums: JmSearchAlbum[] = [
-  { album_id: '100', title: '漫画一', author: '测试作者', tags: ['恋爱'] },
-  { album_id: '200', title: '漫画二', author: '测试作者', tags: [] },
+  {
+    album_id: '100',
+    title: '漫画一',
+    author: '测试作者',
+    tags: ['恋爱'],
+    local: localStatus(),
+  },
+  {
+    album_id: '200',
+    title: '漫画二',
+    author: '测试作者',
+    tags: [],
+    local: localStatus(),
+  },
 ]
 
 const detail: JmAlbumDetail = {
@@ -37,6 +60,7 @@ const detail: JmAlbumDetail = {
   tags: ['恋爱', '校园'],
   page_count: 88,
   chapter_ids: ['1001', '1002'],
+  local: localStatus(),
 }
 
 function searchResult(
@@ -92,13 +116,22 @@ describe('AuthorSearchPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
     document.body.innerHTML = ''
+    // 列表对象会被收藏操作原地更新，每个用例开始前恢复初始本地状态
+    for (const album of albums) album.local = localStatus()
+    detail.local = localStatus()
     vi.mocked(searchAuthorByAuthor).mockResolvedValue(searchResult())
     vi.mocked(getJmAlbumDetail).mockResolvedValue(detail)
+    vi.mocked(favoriteJmAlbums).mockResolvedValue({
+      collected_count: 1,
+      already_count: 0,
+      failed: [],
+    })
     vi.mocked(requestDownloads).mockResolvedValue({
       items: [],
       queued_count: 1,
       duplicate_count: 0,
       skipped_blacklisted: [],
+      skipped_downloaded: [],
     })
     vi.mocked(copyText).mockResolvedValue(true)
   })
@@ -171,7 +204,13 @@ describe('AuthorSearchPage', () => {
       searchResult({
         page: 2,
         results: [
-          { album_id: '300', title: '漫画三', author: '测试作者', tags: ['校园'] },
+          {
+            album_id: '300',
+            title: '漫画三',
+            author: '测试作者',
+            tags: ['校园'],
+            local: localStatus(),
+          },
         ],
       }),
     )
@@ -208,6 +247,103 @@ describe('AuthorSearchPage', () => {
     download!.click()
     await flushPromises()
     expect(requestDownloads).toHaveBeenCalledWith(['100'])
+    wrapper.unmount()
+  })
+
+  it('单本收藏调用接口并显示已收藏状态', async () => {
+    const { wrapper } = await mountPage()
+
+    await wrapper.find('[aria-label="收藏 漫画一"]').trigger('click')
+    await flushPromises()
+
+    expect(favoriteJmAlbums).toHaveBeenCalledWith(['100'])
+    expect(wrapper.text()).toContain('已收藏 1 本')
+    const button = wrapper.find('[aria-label="收藏 漫画一"]')
+    expect(button.text()).toContain('已收藏')
+    expect(button.attributes()).toHaveProperty('disabled')
+    wrapper.unmount()
+  })
+
+  it('收藏选中漫画并汇总已在本地数量', async () => {
+    vi.mocked(favoriteJmAlbums).mockResolvedValue({
+      collected_count: 1,
+      already_count: 1,
+      failed: [],
+    })
+    const { wrapper } = await mountPage()
+
+    await buttonWithText(wrapper, '全选').trigger('click')
+    await buttonWithText(wrapper, '收藏选中').trigger('click')
+    await flushPromises()
+
+    expect(favoriteJmAlbums).toHaveBeenCalledWith(['100', '200'])
+    expect(wrapper.text()).toContain('已收藏 1 本，1 本已在本地')
+    wrapper.unmount()
+  })
+
+  it('收藏失败时保留原状态并展示中文原因', async () => {
+    vi.mocked(favoriteJmAlbums).mockResolvedValue({
+      collected_count: 0,
+      already_count: 0,
+      failed: [{ album_id: '200', error: '漫画不存在或已下架' }],
+    })
+    const { wrapper } = await mountPage()
+
+    await wrapper.find('[aria-label="收藏 漫画二"]').trigger('click')
+    await flushPromises()
+
+    expect(wrapper.text()).toContain('200: 漫画不存在或已下架')
+    expect(wrapper.find('[aria-label="收藏 漫画二"]').text()).toContain('收藏')
+    wrapper.unmount()
+  })
+
+  it('已下载漫画禁用下载并在详情中跳转本地页面', async () => {
+    const downloaded = localStatus({
+      exists: true,
+      status: 'downloaded',
+      favorited: true,
+      downloaded: true,
+    })
+    vi.mocked(searchAuthorByAuthor).mockResolvedValue(
+      searchResult({
+        results: [
+          { ...albums[0], local: downloaded },
+          albums[1],
+        ],
+      }),
+    )
+    vi.mocked(getJmAlbumDetail).mockResolvedValue({ ...detail, local: downloaded })
+    const { wrapper, router } = await mountPage()
+    const push = vi.spyOn(router, 'push')
+
+    expect(wrapper.text()).toContain('已下载')
+    expect(
+      wrapper.find('[aria-label="下载 漫画一"]').attributes(),
+    ).toHaveProperty('disabled')
+
+    await wrapper.find('[aria-label="查看 漫画一 的详情"]').trigger('click')
+    await flushPromises()
+    const dialogText = document.body.textContent ?? ''
+    expect(dialogText).toContain('已下载')
+    expect(dialogText).toContain('查看本地详情')
+    const download = document.querySelector<HTMLButtonElement>(
+      '[aria-label="下载详情漫画"]',
+    )
+    expect(download).not.toBeNull()
+    expect(download!.disabled).toBe(true)
+
+    const localDetail = document.querySelector<HTMLButtonElement>(
+      '[aria-label="查看本地详情"]',
+    )
+    localDetail!.click()
+    await flushPromises()
+    expect(push).toHaveBeenCalledWith({
+      name: 'manga-detail',
+      params: { mangaId: '100' },
+    })
+    await (push.mock.results[0]!.value as Promise<unknown>)
+    expect(router.currentRoute.value.name).toBe('manga-detail')
+    expect(router.currentRoute.value.params.mangaId).toBe('100')
     wrapper.unmount()
   })
 
