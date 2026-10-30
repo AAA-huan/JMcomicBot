@@ -147,6 +147,8 @@ async function handleDownload(): Promise<void> {
     const result = await requestDownloads([mangaId])
     if (result.skipped_blacklisted.length > 0) {
       notice.value = '该漫画已被拉黑，下载请求已跳过'
+    } else if (result.skipped_downloaded.length > 0) {
+      notice.value = '该漫画已下载，本次请求已跳过'
     } else if (result.duplicate_count > 0) {
       notice.value = '该漫画已有进行中的下载任务'
     } else {

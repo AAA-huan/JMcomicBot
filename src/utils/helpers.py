@@ -85,7 +85,12 @@ def cleanup_failed_downloads(download_path: str) -> int:
         item_path = os.path.join(download_path, item)
 
         if os.path.isdir(item_path):
-            if re.match(r"^\d+", item):
+            if item == "temp":
+                # 中断时下载线程的 finally 不会执行，启动时整体清理图片临时目录
+                logger.info("清理中断下载遗留的临时目录: temp")
+                shutil.rmtree(item_path, ignore_errors=True)
+                cleaned_count += 1
+            elif re.match(r"^\d+", item):
                 pdf_file = os.path.join(download_path, f"{item}.pdf")
                 if not os.path.exists(pdf_file):
                     logger.info(f"清理下载失败的漫画文件夹: {item}")

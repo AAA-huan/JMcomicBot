@@ -283,6 +283,11 @@ async function requestDownloadIds(ids: string[]): Promise<void> {
         `${result.skipped_blacklisted.length} 个已被拉黑跳过（${result.skipped_blacklisted.join('、')}）`,
       )
     }
+    if (result.skipped_downloaded.length > 0) {
+      parts.push(
+        `${result.skipped_downloaded.length} 个已下载跳过（${result.skipped_downloaded.join('、')}）`,
+      )
+    }
     if (result.duplicate_count > 0) {
       const duplicates = result.items
         .filter((item) => item.status === 'duplicate')

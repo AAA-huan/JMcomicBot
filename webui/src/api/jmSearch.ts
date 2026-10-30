@@ -2,11 +2,19 @@
 
 import { apiRequest } from './client'
 
+export interface JmLocalStatus {
+  exists: boolean
+  status: string | null
+  favorited: boolean
+  downloaded: boolean
+}
+
 export interface JmSearchAlbum {
   album_id: string
   title: string
   author: string
   tags: string[]
+  local: JmLocalStatus
 }
 
 export interface JmAuthorSearchResult {
@@ -24,6 +32,18 @@ export interface JmAlbumDetail {
   tags: string[]
   page_count: number
   chapter_ids: string[]
+  local: JmLocalStatus
+}
+
+export interface JmFavoriteFailure {
+  album_id: string
+  error: string
+}
+
+export interface JmFavoriteResult {
+  collected_count: number
+  already_count: number
+  failed: JmFavoriteFailure[]
 }
 
 /** 按作者搜索 JM 漫画，页码从 1 开始。 */
@@ -39,4 +59,12 @@ export function searchAuthorByAuthor(
 /** 读取远程漫画概要，不下载也不写入本地漫画库。 */
 export function getJmAlbumDetail(albumId: string): Promise<JmAlbumDetail> {
   return apiRequest<JmAlbumDetail>(`/jm/album/${encodeURIComponent(albumId)}`)
+}
+
+/** 收藏远程漫画：联网存信息入库，不下载漫画本体。 */
+export function favoriteJmAlbums(albumIds: string[]): Promise<JmFavoriteResult> {
+  return apiRequest<JmFavoriteResult>('/jm/albums/favorite', {
+    method: 'POST',
+    body: { album_ids: albumIds },
+  })
 }

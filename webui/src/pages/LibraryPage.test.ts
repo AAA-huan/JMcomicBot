@@ -131,7 +131,7 @@ describe('LibraryPage', () => {
       pages: 1,
     })
     vi.mocked(requestDownloads).mockResolvedValue({
-      items: [], queued_count: 1, duplicate_count: 0, skipped_blacklisted: [],
+      items: [], queued_count: 1, duplicate_count: 0, skipped_blacklisted: [], skipped_downloaded: [],
     })
 
     const { wrapper } = await mountPage('/library?status=favorited')

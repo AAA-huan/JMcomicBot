@@ -32,6 +32,13 @@ class FakeAlbumDetail:
     tags: List[str]
     page_count: int
     episode_list: List[Tuple[str, str, str, str]] = field(default_factory=list)
+    name: str = ""
+    authors: List[str] = field(default_factory=list)
+    description: str = ""
+    pub_date: str = "0"
+    update_date: str = "0"
+    works: List[str] = field(default_factory=list)
+    actors: List[str] = field(default_factory=list)
 
 
 class FakeClient:

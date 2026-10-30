@@ -81,6 +81,8 @@ def test_shutdown_request_unblocks_main_loop(db_manager) -> None:
     """关闭请求应立即唤醒主循环，不再依赖一秒轮询"""
     bot = object.__new__(MangaBot)
     bot._shutdown_event = threading.Event()
+    bot._pending_recovery_tasks = []
+    bot._recovery_thread = None
     bot.audit_event_repo = AuditEventRepository(db_manager)
     bot.web_server = None
     bot.connect_websocket = lambda: None

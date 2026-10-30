@@ -540,6 +540,7 @@ class DownloadManager:
                         author=album_author,
                         chapter_count=chapter_count,
                         page_count=total_pages,
+                        refresh_downloaded_at=True,
                     )
                     self.manga_repo.add_file(
                         manga_id=manga_id,

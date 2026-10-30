@@ -67,6 +67,7 @@ describe('DownloadPage', () => {
       queued_count: 1,
       duplicate_count: 1,
       skipped_blacklisted: [],
+      skipped_downloaded: [],
     })
     const wrapper = mountPage()
     await flushPromises()
@@ -92,6 +93,7 @@ describe('DownloadPage', () => {
       queued_count: 1,
       duplicate_count: 0,
       skipped_blacklisted: ['100'],
+      skipped_downloaded: [],
     })
     const wrapper = mountPage()
     await flushPromises()

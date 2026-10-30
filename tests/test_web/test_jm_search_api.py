@@ -42,6 +42,16 @@ def test_jm_search_endpoints_require_login(db_manager) -> None:
             == 401
         )
         assert client.get("/api/v1/jm/album/100").status_code == 401
+        # 提供匹配的 CSRF 令牌，确保断言的是会话鉴权而不是中间件拦截
+        client.cookies.set("jmbot_csrf", "not-logged-in")
+        assert (
+            client.post(
+                "/api/v1/jm/albums/favorite",
+                json={"album_ids": ["100"]},
+                headers={"X-CSRF-Token": "not-logged-in"},
+            ).status_code
+            == 401
+        )
 
 
 def test_search_author_validates_parameters(db_manager) -> None:
@@ -82,12 +92,24 @@ def test_search_author_returns_page_structure(db_manager) -> None:
                 "title": "漫画一",
                 "author": "测试作者",
                 "tags": ["恋爱"],
+                "local": {
+                    "exists": False,
+                    "status": None,
+                    "favorited": False,
+                    "downloaded": False,
+                },
             },
             {
                 "album_id": "200",
                 "title": "漫画二",
                 "author": "测试作者",
                 "tags": [],
+                "local": {
+                    "exists": False,
+                    "status": None,
+                    "favorited": False,
+                    "downloaded": False,
+                },
             },
         ],
         "page": 2,
@@ -136,6 +158,12 @@ def test_album_detail_returns_summary_and_maps_errors(db_manager) -> None:
         "tags": ["恋爱"],
         "page_count": 88,
         "chapter_ids": ["1001"],
+        "local": {
+            "exists": False,
+            "status": None,
+            "favorited": False,
+            "downloaded": False,
+        },
     }
     assert fake.detail_calls[0] == "100"
     assert invalid.status_code == 400
