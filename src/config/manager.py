@@ -220,6 +220,13 @@ class ConfigManager:
             1,
             24 * 30,
         )
+        recovery_prompt_timeout = _parse_int_config(
+            "RECOVERY_PROMPT_TIMEOUT_SECONDS",
+            self._get_env("RECOVERY_PROMPT_TIMEOUT_SECONDS"),
+            180,
+            1,
+            3600,
+        )
         # 开发环境额外允许的页面来源（Vite 开发服务器），生产默认留空
         webui_dev_origins_raw = self._get_env("WEBUI_DEV_ORIGINS", "") or ""
         webui_dev_origins = self._parse_id_list(webui_dev_origins_raw)
@@ -245,6 +252,7 @@ class ConfigManager:
             "WEBUI_HOST": webui_host,
             "WEBUI_PORT": webui_port,
             "WEBUI_SESSION_HOURS": webui_session_hours,
+            "RECOVERY_PROMPT_TIMEOUT_SECONDS": recovery_prompt_timeout,
             "WEBUI_DEV_ORIGINS": self._get_env("WEBUI_DEV_ORIGINS", ""),
         }
 

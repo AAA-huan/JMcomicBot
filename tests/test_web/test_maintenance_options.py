@@ -58,6 +58,13 @@ def test_verify_all_and_conflict_checks(db_manager):
         path = root / f"{manga_id}.pdf"
         path.write_bytes(b"%PDF")
         mangas.add_file(manga_id, str(path))
+    # 300 是本体丢失的漫画：首次校验会把文件标记为缺失，允许重新下载；
+    # 用它创建活动下载任务，验证“全部校验”也能发现下载冲突。
+    mangas.upsert("300", "校验测试", "", 1, 1)
+    missing_path = root / "300.pdf"
+    missing_path.write_bytes(b"%PDF")
+    mangas.add_file("300", str(missing_path))
+    missing_path.unlink()
     client, context = create_client_for(db_manager)
     with client:
         setup_and_login(client)
@@ -68,9 +75,9 @@ def test_verify_all_and_conflict_checks(db_manager):
         assert result.status_code == 200
         assert result.json()["ready_count"] == 2
         client.post(
-            "/api/v1/tasks/downloads", json={"manga_ids": ["100"]}, headers=headers
+            "/api/v1/tasks/downloads", json={"manga_ids": ["300"]}, headers=headers
         )
-        wait_for_queued_downloads(context.download_queue, ["100"])
+        wait_for_queued_downloads(context.download_queue, ["300"])
         assert (
             client.post(
                 "/api/v1/maintenance/verify", json={}, headers=headers

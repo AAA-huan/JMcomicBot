@@ -34,6 +34,18 @@ class DownloadNotifier(Protocol):
         raise NotImplementedError
 
 
+class DownloadedChecker(Protocol):
+    """下载入口共用的本地已下载判定，避免服务直接依赖具体仓储。"""
+
+    def is_downloaded(self, manga_id: str) -> bool:
+        """判断漫画是否已下载且本地文件实际存在。"""
+        raise NotImplementedError
+
+    def are_downloaded(self, manga_ids: List[str]) -> Dict[str, bool]:
+        """批量判断漫画是否已下载，返回与请求 ID 对应的状态映射。"""
+        raise NotImplementedError
+
+
 class DownloadQueueGateway(Protocol):
     """下载应用服务依赖的最小队列能力。"""
 

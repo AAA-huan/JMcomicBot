@@ -312,6 +312,30 @@ def test_requeue_rejects_active_download_for_same_manga(
         operation_task_service.requeue(failed.id)
 
 
+def test_cancel_recovery_cancels_interrupted_task(
+    operation_task_service, operation_task_repo, task_event_repo
+) -> None:
+    """拒绝启动恢复时，中断任务转为取消并记录事件。"""
+    context = OperationContext.qq("10001")
+    task = operation_task_service.create("download", context, manga_id="602")
+    operation_task_service.start(task.id, "downloading")
+    operation_task_service.recover_interrupted()
+
+    result = operation_task_service.cancel_recovery(task.id)
+
+    stored = operation_task_repo.get(task.id)
+    assert result.status == "cancelled"
+    assert stored is not None
+    assert stored.stage == "cancelled"
+    assert stored.error_code == "RECOVERY_CANCELLED"
+    events = task_event_repo.list(task.id)
+    assert events[-1].event_type == "download.cancelled"
+    assert json.loads(events[-1].metadata_json) == {"reason": "recovery_cancelled"}
+
+    with pytest.raises(ValueError, match="不允许取消恢复"):
+        operation_task_service.cancel_recovery(task.id)
+
+
 def test_recovery_audit_metadata_is_whitelisted(audit_event_repo) -> None:
     """启动恢复汇总审计应允许记录恢复与续传数量。"""
     event = audit_event_repo.record(

@@ -284,8 +284,10 @@ async function batchRetry(): Promise<void> {
   try {
     const result = await retryTasks(targets.map((task) => task.id))
     const succeeded = result.items.filter((item) => item.status === 'requeued').length
-    const failed = result.failed_count
-    actionNotice.value = `已重新入队 ${succeeded} 个任务${failed > 0 ? `，${failed} 个失败` : ''}`
+    const downloaded = result.items.filter((item) => item.status === 'already_downloaded').length
+    const failed = result.failed_count - downloaded
+    const downloadedNotice = downloaded > 0 ? `，${downloaded} 个已下载跳过` : ''
+    actionNotice.value = `已重新入队 ${succeeded} 个任务${downloadedNotice}${failed > 0 ? `，${failed} 个失败` : ''}`
     selected.value = []
     await load()
   } catch (err) {

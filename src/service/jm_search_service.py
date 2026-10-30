@@ -18,13 +18,20 @@ class SearchPage(Protocol):
 
 
 class AlbumDetail(Protocol):
-    """仅使用漫画概要中需要展示的字段。"""
+    """仅使用漫画概要与站点快照中需要展示的字段。"""
 
     album_id: str
+    name: str
     title: str
     author: str
+    authors: List[str]
     tags: List[str]
+    description: str
     page_count: int
+    pub_date: str
+    update_date: str
+    works: List[str]
+    actors: List[str]
     episode_list: List[Tuple[str, ...]]
 
 

@@ -51,6 +51,7 @@ from src.service import (
 )
 from src.service.admin_qq_service import AdminQQService
 from src.service.favorite_service import FavoriteService
+from src.service.jm_collect_service import JmCollectService
 from src.service.jm_favorite_service import JmFavoriteService
 from src.service.jm_search_service import JmSearchService
 from src.service.query_service import (
@@ -58,6 +59,7 @@ from src.service.query_service import (
     MangaQueryService,
     TaskQueryService,
 )
+from src.service.recovery_prompt import RecoveryPrompt
 from src.service.results import DownloadRequestItem
 from src.service.settings_service import EFFECT_IMMEDIATE, SETTING_DEFINITIONS
 from src.service.system_service import SystemService
@@ -173,6 +175,7 @@ class WebTestContext:
         reconnect_calls: List[bool],
         restart_calls: List[object],
         applied_settings: Dict[str, object],
+        recovery_prompt_holder: Dict[str, Optional[RecoveryPrompt]],
     ) -> None:
         self.dependencies = dependencies
         self.download_queue = download_queue
@@ -181,6 +184,8 @@ class WebTestContext:
         self.reconnect_calls = reconnect_calls
         self.restart_calls = restart_calls
         self.applied_settings = applied_settings
+        # 恢复询问由测试按需注入，未注入时端点返回 pending=false
+        self.recovery_prompt_holder = recovery_prompt_holder
 
 
 def build_web_context(  # pylint: disable=too-many-locals
@@ -193,9 +198,11 @@ def build_web_context(  # pylint: disable=too-many-locals
     reconnect_calls: List[bool] = []
     restart_calls: List[object] = []
     applied_settings: Dict[str, object] = {}
+    recovery_prompt_holder: Dict[str, Optional[RecoveryPrompt]] = {}
 
     manga_repo = MangaRepository(db_manager, download_root=str(download_root))
     tag_repo = MangaTagRepository(db_manager)
+    favorite_repo = FavoriteRepository(db_manager)
     operation_task_repo = OperationTaskRepository(db_manager)
     audit_repo = AuditEventRepository(db_manager)
     event_bus = WebEventBus()
@@ -295,7 +302,10 @@ def build_web_context(  # pylint: disable=too-many-locals
         manga_service=manga_service,
         manga_blacklist_service=blacklist_service,
         download_service=DownloadQueueService(
-            download_queue, task_service, blacklist_service=blacklist_service
+            download_queue,
+            task_service,
+            blacklist_service=blacklist_service,
+            downloaded_checker=manga_repo,
         ),
         permission_service=PermissionService(
             permission_manager,
@@ -334,9 +344,11 @@ def build_web_context(  # pylint: disable=too-many-locals
             ReadingSettingRepository(db_manager), audit_repo
         ),
         page_image_service=PageImageService(),
-        favorite_service=FavoriteService(FavoriteRepository(db_manager), audit_repo),
+        favorite_service=FavoriteService(favorite_repo, audit_repo),
         jm_favorite_service=JmFavoriteService(JmFavoriteRepository(db_manager)),
         jm_search_service=JmSearchService(),
+        jm_collect_service=JmCollectService(manga_repo, tag_repo, favorite_repo),
+        recovery_prompt_provider=lambda: recovery_prompt_holder.get("prompt"),
         admin_qq_service=AdminQQService(
             WebAdminRepository(db_manager), permission_manager, audit_repo
         ),
@@ -358,6 +370,7 @@ def build_web_context(  # pylint: disable=too-many-locals
         reconnect_calls=reconnect_calls,
         restart_calls=restart_calls,
         applied_settings=applied_settings,
+        recovery_prompt_holder=recovery_prompt_holder,
     )
 
 

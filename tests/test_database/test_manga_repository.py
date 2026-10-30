@@ -1,10 +1,12 @@
 """漫画元数据仓储的测试"""
 
-import pytest
-from sqlalchemy import text
+from datetime import datetime
 
+import pytest
+from sqlalchemy import text, update
+
+from src.database.models import Manga, MangaFile
 from src.database.repositories.manga_repository import MangaRepository
-from src.database.models import Manga
 
 
 class TestManga:
@@ -44,6 +46,72 @@ class TestManga:
         loaded = manga_repo.get("12")
         assert loaded is not None
         assert loaded.title == "新标题"
+
+    def test_upsert_refresh_downloaded_at_for_real_redownload(
+        self, manga_repo: MangaRepository
+    ) -> None:
+        """真实重下刷新下载时间，首次入库时间保持不变。"""
+        manga_repo.upsert("17", "旧标题", "作者", 1, 10)
+        original = manga_repo.get("17")
+        assert original is not None
+        old_downloaded_at = datetime(2020, 1, 1)
+        old_created_at = original.created_at
+        with manga_repo._get_session() as session:
+            session.execute(
+                update(Manga)
+                .where(Manga.id == "17")
+                .values(downloaded_at=old_downloaded_at)
+            )
+            session.commit()
+
+        manga_repo.upsert("17", "新标题", "作者", 2, 20, refresh_downloaded_at=True)
+
+        loaded = manga_repo.get("17")
+        assert loaded is not None
+        assert loaded.downloaded_at != old_downloaded_at
+        assert loaded.created_at == old_created_at
+
+    def test_upsert_default_does_not_refresh_downloaded_at(
+        self, manga_repo: MangaRepository
+    ) -> None:
+        """扫描目录等默认同步不误刷已下载漫画的下载时间。"""
+        manga_repo.upsert("18", "标题", "作者", 1, 10)
+        old_downloaded_at = datetime(2020, 1, 1)
+        with manga_repo._get_session() as session:
+            session.execute(
+                update(Manga)
+                .where(Manga.id == "18")
+                .values(downloaded_at=old_downloaded_at)
+            )
+            session.commit()
+
+        manga_repo.upsert("18", "新标题", "作者", 2, 20)
+
+        loaded = manga_repo.get("18")
+        assert loaded is not None
+        assert loaded.downloaded_at == old_downloaded_at
+
+    def test_upsert_favorited_to_downloaded_still_refreshes_downloaded_at(
+        self, manga_repo: MangaRepository
+    ) -> None:
+        """收藏转下载仍按真实下载完成时间刷新，保持原有兼容行为。"""
+        manga_repo.upsert("19", "收藏标题", "", 0, 0, status="favorited")
+        original = manga_repo.get("19")
+        assert original is not None
+        old_downloaded_at = datetime(2020, 1, 1)
+        with manga_repo._get_session() as session:
+            session.execute(
+                update(Manga)
+                .where(Manga.id == "19")
+                .values(downloaded_at=old_downloaded_at)
+            )
+            session.commit()
+
+        manga_repo.upsert("19", "下载标题", "作者", 2, 20)
+
+        loaded = manga_repo.get("19")
+        assert loaded is not None
+        assert loaded.downloaded_at != old_downloaded_at
 
     def test_favorited_manga_completed_download_updates_metadata(
         self, manga_repo: MangaRepository
@@ -163,6 +231,57 @@ class TestManga:
         assert files[0].file_size_bytes == pdf.stat().st_size
         assert files[0].page_count == 7
         assert files[0].status == "ready"
+
+    def test_is_downloaded_requires_ready_file_on_disk(
+        self, manga_repo: MangaRepository, tmp_path
+    ) -> None:
+        """仅下载完成且 PDF 文件实际存在时判定为已下载。"""
+        pdf = tmp_path / "31.pdf"
+        pdf.write_bytes(b"%PDF")
+        manga_repo.upsert("31", "标题", "", 1, 10, status="downloaded")
+        manga_repo.add_file("31", str(pdf))
+
+        assert manga_repo.is_downloaded("31") is True
+
+        pdf.unlink()
+        assert manga_repo.is_downloaded("31") is False
+
+    def test_is_downloaded_rejects_favorited_and_missing_file_status(
+        self, manga_repo: MangaRepository, tmp_path
+    ) -> None:
+        """收藏态、本体丢失态即使残留文件记录也允许重新下载。"""
+        favorited_file = tmp_path / "32.pdf"
+        favorited_file.write_bytes(b"%PDF")
+        manga_repo.upsert("32", "收藏", "", 0, 0, status="favorited")
+        manga_repo.add_file("32", str(favorited_file))
+
+        missing_file = tmp_path / "33.pdf"
+        missing_file.write_bytes(b"%PDF")
+        manga_repo.upsert("33", "丢失", "", 1, 10, status="missing_file")
+        manga_repo.add_file("33", str(missing_file))
+
+        assert manga_repo.is_downloaded("32") is False
+        assert manga_repo.is_downloaded("33") is False
+
+    def test_are_downloaded_batches_and_defaults_to_false(
+        self, manga_repo: MangaRepository, tmp_path
+    ) -> None:
+        """批量查询去重保序，缺失记录与非 ready 文件均返回 False。"""
+        ready_pdf = tmp_path / "34.pdf"
+        ready_pdf.write_bytes(b"%PDF")
+        manga_repo.upsert("34", "可读", "", 1, 10, status="downloaded")
+        manga_repo.add_file("34", str(ready_pdf))
+
+        corrupted_pdf = tmp_path / "35.pdf"
+        corrupted_pdf.write_bytes(b"%PDF")
+        manga_repo.upsert("35", "损坏", "", 1, 10, status="downloaded")
+        corrupted_file = manga_repo.add_file("35", str(corrupted_pdf))
+        manga_repo.update_file_status(corrupted_file.id, "corrupted")
+
+        states = manga_repo.are_downloaded(["34", "35", "36"])
+
+        assert states == {"34": True, "35": False, "36": False}
+        assert manga_repo.are_downloaded([]) == {}
 
     def test_get_all(self, manga_repo: MangaRepository) -> None:
         manga_repo.upsert(

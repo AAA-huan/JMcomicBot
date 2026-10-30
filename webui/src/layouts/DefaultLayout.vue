@@ -5,6 +5,12 @@ import { useRoute, useRouter } from 'vue-router'
 
 import { EventClient } from '@/api/events'
 import { emitConnection, emitEvent } from '@/api/eventStream'
+import { errorMessage } from '@/api/client'
+import {
+  getRecoveryStatus,
+  resolveRecovery,
+  type RecoveryStatus,
+} from '@/api/system'
 import { useAuthStore } from '@/stores/auth'
 import { useSystemStore } from '@/stores/system'
 import { useThemeStore } from '@/stores/theme'
@@ -40,6 +46,14 @@ const system = useSystemStore()
 const theme = useThemeStore()
 
 const drawer = ref(false)
+
+// 启动恢复询问：仅在有待处理任务时显示横幅，任一渠道操作后消失
+const recovery = ref<RecoveryStatus | null>(null)
+const recoveryRemaining = ref(0)
+const recoveryBusy = ref(false)
+const recoveryError = ref('')
+let recoveryPollTimer: number | null = null
+let recoveryTickTimer: number | null = null
 
 // 桌面端侧栏常驻展开，移动端默认收起并按需打开
 watch(
@@ -80,6 +94,7 @@ const themeLabel = (): string =>
 
 onMounted(async () => {
   await system.refresh()
+  startRecoveryPolling()
   eventClient = new EventClient({
     onEvent: (event) => {
       system.applyEvent(event)
@@ -101,6 +116,7 @@ onMounted(async () => {
 })
 
 onBeforeUnmount(() => {
+  stopRecoveryPolling()
   eventClient?.disconnect()
   eventClient = null
   system.eventsConnected = false
@@ -116,6 +132,64 @@ async function handleLogout(): Promise<void> {
     auth.clearSession()
   }
   await router.replace({ name: 'login' })
+}
+
+/** 轮询启动恢复询问状态，本地每秒递减倒计时避免界面停滞。 */
+function startRecoveryPolling(): void {
+  void refreshRecoveryStatus()
+  recoveryPollTimer = window.setInterval(refreshRecoveryStatus, 3000)
+  recoveryTickTimer = window.setInterval(() => {
+    if (recovery.value !== null && recoveryRemaining.value > 0) {
+      recoveryRemaining.value -= 1
+      if (recoveryRemaining.value <= 0) recovery.value = null
+    }
+  }, 1000)
+}
+
+function stopRecoveryPolling(): void {
+  if (recoveryPollTimer !== null) {
+    clearInterval(recoveryPollTimer)
+    recoveryPollTimer = null
+  }
+  if (recoveryTickTimer !== null) {
+    clearInterval(recoveryTickTimer)
+    recoveryTickTimer = null
+  }
+}
+
+async function refreshRecoveryStatus(): Promise<void> {
+  try {
+    const status = await getRecoveryStatus()
+    if (status.pending) {
+      recovery.value = status
+      recoveryRemaining.value = status.remaining_seconds
+    } else {
+      recovery.value = null
+    }
+  } catch {
+    // 状态查询失败不应干扰主界面，下次轮询继续尝试
+  }
+}
+
+/** 提交恢复决定，失败时在横幅内提示中文错误。 */
+async function decideRecovery(action: 'continue' | 'cancel'): Promise<void> {
+  recoveryBusy.value = true
+  recoveryError.value = ''
+  try {
+    await resolveRecovery(action)
+    recovery.value = null
+  } catch (err) {
+    recoveryError.value = errorMessage(err)
+  } finally {
+    recoveryBusy.value = false
+  }
+}
+
+/** 将剩余秒数格式化为 mm:ss。 */
+function formatRecoveryRemaining(seconds: number): string {
+  const minutes = Math.floor(seconds / 60)
+  const remaining = seconds % 60
+  return `${String(minutes).padStart(2, '0')}:${String(remaining).padStart(2, '0')}`
 }
 </script>
 
@@ -199,6 +273,41 @@ async function handleLogout(): Promise<void> {
     </v-app-bar>
 
     <v-main>
+      <v-alert
+        v-if="recovery"
+        type="warning"
+        variant="tonal"
+        prominent
+        density="comfortable"
+        class="mb-0"
+      >
+        <div class="d-flex flex-wrap align-center ga-2">
+          <v-icon>mdi-progress-alert</v-icon>
+          <span>
+            检测到 {{ recovery.task_count }} 个中断下载任务，是否继续？剩余
+            {{ formatRecoveryRemaining(recoveryRemaining) }}
+          </span>
+          <v-spacer />
+          <v-btn
+            size="small"
+            color="primary"
+            variant="tonal"
+            :loading="recoveryBusy"
+            @click="decideRecovery('continue')"
+          >
+            继续
+          </v-btn>
+          <v-btn
+            size="small"
+            variant="text"
+            :disabled="recoveryBusy"
+            @click="decideRecovery('cancel')"
+          >
+            取消
+          </v-btn>
+        </div>
+        <div v-if="recoveryError" class="text-caption mt-1">{{ recoveryError }}</div>
+      </v-alert>
       <v-container fluid class="pa-3 pa-md-6">
         <slot />
       </v-container>

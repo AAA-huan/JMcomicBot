@@ -46,7 +46,7 @@ describe('JM 收藏导入页', () => {
     })
     vi.mocked(loginJmAccount).mockResolvedValue(account)
     vi.mocked(logoutJmAccount).mockResolvedValue({ connected: false })
-    vi.mocked(requestJmDownloads).mockResolvedValue({ items: [], queued_count: 1, duplicate_count: 0, skipped_blacklisted: [] })
+    vi.mocked(requestJmDownloads).mockResolvedValue({ items: [], queued_count: 1, duplicate_count: 0, skipped_blacklisted: [], skipped_downloaded: [] })
     vi.mocked(importJmFavoritesToLibrary).mockResolvedValue({ imported_count: 1, already_count: 0 })
     vi.mocked(startJmImport).mockResolvedValue(job)
   })

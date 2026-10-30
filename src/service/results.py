@@ -84,6 +84,7 @@ class DownloadRequestResult:
 
     items: Tuple[DownloadRequestItem, ...]
     skipped_blacklisted: Tuple[str, ...] = ()
+    skipped_downloaded: Tuple[str, ...] = ()
 
     @property
     def queued_items(self) -> Tuple[DownloadRequestItem, ...]:
@@ -94,6 +95,11 @@ class DownloadRequestResult:
     def duplicate_items(self) -> Tuple[DownloadRequestItem, ...]:
         """因已存在活动任务而未重复入队的条目。"""
         return tuple(item for item in self.items if item.status == "duplicate")
+
+    @property
+    def already_downloaded_items(self) -> Tuple[DownloadRequestItem, ...]:
+        """本地已下载、无需重新入队的条目。"""
+        return tuple(item for item in self.items if item.status == "already_downloaded")
 
     @property
     def queued_count(self) -> int:
@@ -110,18 +116,25 @@ class DownloadRequestResult:
         """因命中漫画黑名单而跳过的请求数量。"""
         return len(self.skipped_blacklisted)
 
+    @property
+    def skipped_downloaded_count(self) -> int:
+        """因本地已下载而跳过的请求数量。"""
+        return len(self.skipped_downloaded)
+
 
 @dataclass(frozen=True)
 class DownloadPrepareResult:
     """批量下载请求的同步预检结果，实际入队由后台任务完成。
 
-    items 中 pending 项状态为 accepted，duplicate 项携带既有任务 ID；
+    items 中 pending 项状态为 accepted，duplicate 项携带既有任务 ID，
+    already_downloaded 项为本地已存在可读文件的漫画；
     pending_ids 与 accepted 项一一对应，保持请求顺序。
     """
 
     items: Tuple[DownloadRequestItem, ...]
     pending_ids: Tuple[str, ...]
     skipped_blacklisted: Tuple[str, ...] = ()
+    skipped_downloaded: Tuple[str, ...] = ()
 
     @property
     def accepted_items(self) -> Tuple[DownloadRequestItem, ...]:
@@ -132,6 +145,11 @@ class DownloadPrepareResult:
     def duplicate_items(self) -> Tuple[DownloadRequestItem, ...]:
         """因已有活动任务而未接收的条目。"""
         return tuple(item for item in self.items if item.status == "duplicate")
+
+    @property
+    def already_downloaded_items(self) -> Tuple[DownloadRequestItem, ...]:
+        """本地已下载、无需入队的条目。"""
+        return tuple(item for item in self.items if item.status == "already_downloaded")
 
     @property
     def accepted_count(self) -> int:
@@ -147,6 +165,11 @@ class DownloadPrepareResult:
     def skipped_count(self) -> int:
         """因命中漫画黑名单而跳过的请求数量。"""
         return len(self.skipped_blacklisted)
+
+    @property
+    def skipped_downloaded_count(self) -> int:
+        """因本地已下载而跳过的请求数量。"""
+        return len(self.skipped_downloaded)
 
 
 @dataclass(frozen=True)

@@ -88,6 +88,23 @@ class _BlacklistService:
         return manga_id in self.blacklisted_ids
 
 
+class _DownloadedChecker:
+    """按预设状态返回本地已下载判断的测试检查器。"""
+
+    def __init__(self, downloaded_ids: Optional[List[str]] = None) -> None:
+        self.downloaded_ids = set(downloaded_ids or [])
+        self.checked_batches: List[List[str]] = []
+        self.checked_ids: List[str] = []
+
+    def is_downloaded(self, manga_id: str) -> bool:
+        self.checked_ids.append(manga_id)
+        return manga_id in self.downloaded_ids
+
+    def are_downloaded(self, manga_ids: List[str]) -> Dict[str, bool]:
+        self.checked_batches.append(list(manga_ids))
+        return {manga_id: manga_id in self.downloaded_ids for manga_id in manga_ids}
+
+
 class _DownloadQueue:
     """记录取消与入队调用的测试队列。"""
 
@@ -150,12 +167,14 @@ def _build_service(
     download_queue: _DownloadQueue,
     task_service: Optional[_TaskService] = None,
     blacklist_service: Optional[_BlacklistService] = None,
+    downloaded_checker: Optional[_DownloadedChecker] = None,
 ) -> DownloadQueueService:
     """构造绑定测试队列与测试任务服务的下载服务。"""
     return DownloadQueueService(
         download_queue,
         task_service=task_service or _TaskService(),  # type: ignore[arg-type]
         blacklist_service=blacklist_service,  # type: ignore[arg-type]
+        downloaded_checker=downloaded_checker,  # type: ignore[arg-type]
     )
 
 
@@ -261,6 +280,54 @@ def test_request_returns_in_memory_duplicate_status() -> None:
     assert download_queue.requested_manga_ids == []
 
 
+def test_request_skips_downloaded_and_marks_result() -> None:
+    """本地已下载的漫画不再入队，并单独汇总跳过列表。"""
+    download_queue = _DownloadQueue([])
+    checker = _DownloadedChecker(["100"])
+    service = _build_service(download_queue, downloaded_checker=checker)
+
+    result = service.request(["100", "101"], OperationContext.qq("10001"))
+
+    assert result.skipped_downloaded == ("100",)
+    assert result.skipped_downloaded_count == 1
+    assert [(item.manga_id, item.status) for item in result.items] == [
+        ("100", "already_downloaded"),
+        ("101", "queued"),
+    ]
+    assert download_queue.requested_manga_ids == ["101"]
+    assert checker.checked_batches == [["100", "101"]]
+
+
+def test_request_active_task_precedes_downloaded_check() -> None:
+    """活动任务优先于已下载状态，避免把进行中的任务误报为跳过。"""
+    download_queue = _DownloadQueue([])
+    task_service = _TaskService(active_task_ids={"100": "active-100"})
+    service = _build_service(
+        download_queue,
+        task_service,
+        downloaded_checker=_DownloadedChecker(["100"]),
+    )
+
+    result = service.request(["100"], OperationContext.qq("10001"))
+
+    assert result.items[0].status == "duplicate"
+    assert result.items[0].task_id == "active-100"
+    assert result.skipped_downloaded == ()
+
+
+def test_request_allows_redownload_when_local_file_lost() -> None:
+    """检查器判定文件缺失时仍按正常请求入队，支持重新下载。"""
+    download_queue = _DownloadQueue([])
+    checker = _DownloadedChecker([])
+    service = _build_service(download_queue, downloaded_checker=checker)
+
+    result = service.request(["100"], OperationContext.qq("10001"))
+
+    assert result.items[0].status == "queued"
+    assert result.skipped_downloaded == ()
+    assert download_queue.requested_manga_ids == ["100"]
+
+
 def test_prepare_returns_pending_duplicates_and_blacklisted() -> None:
     """预检批量查询活动任务，返回待入队、重复与黑名单跳过三类结果。"""
     download_queue = _DownloadQueue(["300"])
@@ -298,6 +365,38 @@ def test_enqueue_pending_requests_each_manga_in_order() -> None:
 
     assert download_queue.requested_manga_ids == ["100", "101"]
     assert result.queued_count == 2
+
+
+def test_prepare_excludes_downloaded_from_pending() -> None:
+    """预检阶段已下载漫画标记为 already_downloaded，不进入待入队列表。"""
+    service = _build_service(
+        _DownloadQueue([]),
+        downloaded_checker=_DownloadedChecker(["100"]),
+    )
+
+    result = service.prepare(["100", "101"])
+
+    assert result.pending_ids == ("101",)
+    assert result.already_downloaded_items[0].manga_id == "100"
+    assert result.skipped_downloaded == ("100",)
+    assert result.accepted_count == 1
+
+
+def test_enqueue_pending_skips_downloaded_again() -> None:
+    """后台入队前二次检查，预检后下载完成的漫画不再重复入队。"""
+    download_queue = _DownloadQueue([])
+    service = _build_service(
+        download_queue,
+        downloaded_checker=_DownloadedChecker(["100"]),
+    )
+
+    result = service.enqueue_pending(
+        ["100", "101"], OperationContext.web("1", "127.0.0.1")
+    )
+
+    assert result.items[0].status == "already_downloaded"
+    assert result.skipped_downloaded == ("100",)
+    assert download_queue.requested_manga_ids == ["101"]
 
 
 def test_pause_resume_are_forwarded_and_idempotent() -> None:
@@ -447,6 +546,26 @@ def test_retry_tasks_rejects_wrong_status_and_not_found() -> None:
         "task-missing": "not_found",
     }
     assert result.succeeded_count == 0
+
+
+def test_retry_tasks_skips_already_downloaded_without_requeue() -> None:
+    """失败任务对应的漫画已重新下载时，不改变任务状态并返回跳过。"""
+    task_service = _TaskService()
+    task_service.add_task("task-failed", "download", "failed", "100")
+    checker = _DownloadedChecker(["100"])
+    service = _build_service(
+        _DownloadQueue([]), task_service, downloaded_checker=checker
+    )
+
+    result = service.retry_tasks(
+        ["task-failed"], OperationContext.web("1", "127.0.0.1")
+    )
+
+    assert result.items[0].status == "already_downloaded"
+    assert result.succeeded_count == 0
+    assert result.failed_count == 1
+    assert task_service.task_snapshots["task-failed"].status == "failed"
+    assert checker.checked_ids == ["100"]
 
 
 def test_retry_tasks_returns_duplicate_on_active_conflict() -> None:

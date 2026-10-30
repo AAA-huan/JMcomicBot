@@ -160,6 +160,7 @@ def create_jm_favorite_router(
             "queued_count": result.queued_count,
             "duplicate_count": result.duplicate_count,
             "skipped_blacklisted": list(result.skipped_blacklisted),
+            "skipped_downloaded": list(result.skipped_downloaded),
         }
 
     return router

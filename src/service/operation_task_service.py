@@ -232,6 +232,17 @@ class OperationTaskService:
         self.event_repo.append(task_id, f"{task.task_type}.cancelled", "cancelled")
         return self._publish_task(self._to_result(task))
 
+    def cancel_recovery(self, task_id: str) -> TaskResult:
+        """取消启动恢复阶段的遗留下载任务，并记录任务事件。"""
+        task = self.task_repo.cancel_recovery(task_id)
+        self.event_repo.append(
+            task_id,
+            f"{task.task_type}.cancelled",
+            "cancelled",
+            metadata={"reason": "recovery_cancelled"},
+        )
+        return self._publish_task(self._to_result(task))
+
     def requeue(self, task_id: str, reason: str = "") -> TaskResult:
         """将失败/中断的下载任务重新入队（复用原任务记录）。
 

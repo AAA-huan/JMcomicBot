@@ -9,6 +9,35 @@ if TYPE_CHECKING:
     from .manga_scanner import MangaScanEntry
 
 
+def build_remote_metadata(album: Any) -> Dict[str, Any]:
+    """从 jmcomic album 详情构造站点快照，供扫描与未下载收藏共用。
+
+    album 为 jmcomic 的漫画详情对象，字段映射保持扫描脚本既有格式；
+    章节列表只记录站点提供的编号、序号和标题，不下载图片。
+    """
+    chapters: List[Dict[str, Any]] = [
+        {"id": chapter[0], "index": int(chapter[1]), "title": chapter[2]}
+        for chapter in album.episode_list
+    ]
+    return {
+        "source": "jmcomic",
+        "fetched_at": utc_now().isoformat(),
+        "title": album.name,
+        "authors": album.authors,
+        "tags": album.tags,
+        "description": album.description,
+        "chapter_count": len(album.episode_list),
+        "page_count": album.page_count if album.page_count > 0 else None,
+        "pub_date": album.pub_date if album.pub_date not in ("", "0") else None,
+        "update_date": (
+            album.update_date if album.update_date not in ("", "0") else None
+        ),
+        "works": album.works,
+        "actors": album.actors,
+        "chapters": chapters,
+    }
+
+
 def enrich_entries(
     entries: List["MangaScanEntry"],
     option: Optional[Any],
@@ -32,27 +61,8 @@ def enrich_entries(
             entry.enrich_error = str(error)
             logger.warning(f"漫画 {entry.manga_id} 联网补全失败: {error}")
             continue
-        chapters: List[Dict[str, Any]] = [
-            {"id": chapter[0], "index": int(chapter[1]), "title": chapter[2]}
-            for chapter in album.episode_list
-        ]
-        entry.remote_metadata = {
-            "source": "jmcomic",
-            "fetched_at": utc_now().isoformat(),
-            "title": album.name,
-            "authors": album.authors,
-            "tags": album.tags,
-            "description": album.description,
-            "chapter_count": len(album),
-            "page_count": album.page_count if album.page_count > 0 else None,
-            "pub_date": album.pub_date if album.pub_date not in ("", "0") else None,
-            "update_date": (
-                album.update_date if album.update_date not in ("", "0") else None
-            ),
-            "works": album.works,
-            "actors": album.actors,
-            "chapters": chapters,
-        }
+        entry.remote_metadata = build_remote_metadata(album)
+        chapters: List[Dict[str, Any]] = entry.remote_metadata["chapters"]
         if album.name:
             entry.title = album.name
         entry.author = ",".join(album.authors)

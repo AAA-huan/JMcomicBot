@@ -3,6 +3,7 @@
 from typing import List, Optional
 
 from src.service.contracts import (
+    DownloadedChecker,
     DownloadNotifier,
     DownloadQueueGateway,
     MangaBlacklistService,
@@ -31,10 +32,12 @@ class DownloadQueueService:
         download_queue: DownloadQueueGateway,
         task_service: TaskService,
         blacklist_service: Optional[MangaBlacklistService] = None,
+        downloaded_checker: Optional[DownloadedChecker] = None,
     ) -> None:
         self.download_queue = download_queue
         self.task_service = task_service
         self.blacklist_service = blacklist_service
+        self.downloaded_checker = downloaded_checker
 
     def pause(self) -> bool:
         """暂停下载队列，返回状态是否发生变化。"""
@@ -96,10 +99,13 @@ class DownloadQueueService:
             and self.blacklist_service.is_blacklisted(manga_id)
         )
         skipped_set = set(skipped_blacklisted)
+        candidates = [
+            manga_id for manga_id in normalized_ids if manga_id not in skipped_set
+        ]
+        # 本地已下载先批量判定；活动任务仍优先于已下载状态
+        downloaded_ids = self._find_downloaded_ids(candidates)
         items: List[DownloadRequestItem] = []
-        for manga_id in normalized_ids:
-            if manga_id in skipped_set:
-                continue
+        for manga_id in candidates:
             # 数据库中的活动任务优先：即使内存队列因重启丢失，也不能重复建任务
             active_task = self.task_service.find_active_download(manga_id)
             if active_task is not None:
@@ -121,11 +127,25 @@ class DownloadQueueService:
                     )
                 )
                 continue
+            if manga_id in downloaded_ids:
+                items.append(
+                    DownloadRequestItem(
+                        manga_id=manga_id,
+                        status="already_downloaded",
+                        task_id=None,
+                    )
+                )
+                continue
             items.append(
                 self.download_queue.request_download(manga_id, context, notifier)
             )
         return DownloadRequestResult(
-            items=tuple(items), skipped_blacklisted=skipped_blacklisted
+            items=tuple(items),
+            skipped_blacklisted=skipped_blacklisted,
+            # 仅统计实际因已下载而跳过的条目，活动任务重复项不算跳过
+            skipped_downloaded=tuple(
+                item.manga_id for item in items if item.status == "already_downloaded"
+            ),
         )
 
     def prepare(self, manga_ids: List[str]) -> DownloadPrepareResult:
@@ -146,6 +166,7 @@ class DownloadQueueService:
             manga_id for manga_id in normalized_ids if manga_id not in skipped_set
         ]
         active_tasks = self.task_service.find_active_downloads(candidates)
+        downloaded_ids = self._find_downloaded_ids(candidates)
         items: List[DownloadRequestItem] = []
         pending_ids: List[str] = []
         for manga_id in candidates:
@@ -169,6 +190,15 @@ class DownloadQueueService:
                     )
                 )
                 continue
+            if manga_id in downloaded_ids:
+                items.append(
+                    DownloadRequestItem(
+                        manga_id=manga_id,
+                        status="already_downloaded",
+                        task_id=None,
+                    )
+                )
+                continue
             pending_ids.append(manga_id)
             items.append(
                 DownloadRequestItem(
@@ -181,6 +211,10 @@ class DownloadQueueService:
             items=tuple(items),
             pending_ids=tuple(pending_ids),
             skipped_blacklisted=skipped_blacklisted,
+            # 仅统计实际因已下载而跳过的条目，活动任务重复项不算跳过
+            skipped_downloaded=tuple(
+                item.manga_id for item in items if item.status == "already_downloaded"
+            ),
         )
 
     def enqueue_pending(
@@ -192,14 +226,32 @@ class DownloadQueueService:
         """把预检通过的漫画逐个加入下载队列，供后台任务调用。
 
         内存队列与任务服务仍会二次去重；并发请求或预检后状态变化时，
-        返回状态为 duplicate，不会重复创建活动任务。
+        返回状态为 duplicate，不会重复创建活动任务。入队前再次检查本地
+        已下载，避免预检后下载完成仍被重复入队。
         """
         normalized_ids = self._normalize_manga_ids(manga_ids)
-        items = [
-            self.download_queue.request_download(manga_id, context, notifier)
-            for manga_id in normalized_ids
-        ]
-        return DownloadRequestResult(items=tuple(items))
+        downloaded_ids = self._find_downloaded_ids(normalized_ids)
+        skipped_downloaded = tuple(
+            manga_id for manga_id in normalized_ids if manga_id in downloaded_ids
+        )
+        items: List[DownloadRequestItem] = []
+        for manga_id in normalized_ids:
+            if manga_id in downloaded_ids:
+                items.append(
+                    DownloadRequestItem(
+                        manga_id=manga_id,
+                        status="already_downloaded",
+                        task_id=None,
+                    )
+                )
+                continue
+            items.append(
+                self.download_queue.request_download(manga_id, context, notifier)
+            )
+        return DownloadRequestResult(
+            items=tuple(items),
+            skipped_downloaded=skipped_downloaded,
+        )
 
     def cancel_task(self, task_id: str) -> TaskCancellationResult:
         """取消尚未开始的下载任务；重启后遗留的排队记录会被直接标记取消。"""
@@ -269,6 +321,16 @@ class DownloadQueueService:
                     )
                 )
                 continue
+            # 用户可能已手动重新下载成功；已下载时不再重试失败/中断任务
+            if self._is_downloaded(task.manga_id):
+                items.append(
+                    BatchTaskItem(
+                        task_id=task_id,
+                        status="already_downloaded",
+                        manga_id=task.manga_id,
+                    )
+                )
+                continue
             try:
                 self.task_service.requeue(task_id, reason="manual_retry")
             except ValueError:
@@ -301,6 +363,19 @@ class DownloadQueueService:
                 self.task_service.cancel(task.id)
                 cancelled_count += 1
         return cancelled_count
+
+    def _find_downloaded_ids(self, manga_ids: List[str]) -> set[str]:
+        """批量找出本地已下载且文件存在的漫画 ID。"""
+        if self.downloaded_checker is None or not manga_ids:
+            return set()
+        states = self.downloaded_checker.are_downloaded(manga_ids)
+        return {manga_id for manga_id in manga_ids if states.get(manga_id, False)}
+
+    def _is_downloaded(self, manga_id: str) -> bool:
+        """判断单个漫画是否已下载；未注入检查器时不做拦截。"""
+        if self.downloaded_checker is None:
+            return False
+        return self.downloaded_checker.is_downloaded(manga_id)
 
     @staticmethod
     def _normalize_manga_ids(manga_ids: List[str]) -> List[str]:

@@ -109,7 +109,10 @@ def test_manga_patch_delete_flow_with_audit(db_manager) -> None:
 def test_manga_delete_conflict_and_batch_delete(db_manager) -> None:
     """正在下载的漫画删除应 409；批量删除返回逐项结果。"""
     root = Path(db_manager.db_dir).parent
-    _add_manga(db_manager, root, "200")
+    # 200 需要创建下载任务后验证删除冲突，必须是未下载状态；
+    # 已下载漫画会被下载入口按“已下载跳过”处理，不会产生活动任务。
+    manga_repo = MangaRepository(db_manager, download_root=str(root))
+    manga_repo.upsert("200", "旧标题", "旧作者", 1, 10, status="favorited")
     _add_manga(db_manager, root, "300")
 
     client, context = _make_client(db_manager)
@@ -139,7 +142,8 @@ def test_manga_delete_conflict_and_batch_delete(db_manager) -> None:
     assert payload["items"][0]["manga_id"] == "300"
     assert payload["items"][0]["succeeded"] is True
     assert payload["items"][1]["error_code"] == "download_conflict"
-    assert (root / "200-旧标题(1章).pdf").exists() is True
+    # 冲突删除不得删除漫画记录或文件；300 正常删除后文件应消失
+    assert manga_repo.get("200") is not None
     assert (root / "300-旧标题(1章).pdf").exists() is False
 
 

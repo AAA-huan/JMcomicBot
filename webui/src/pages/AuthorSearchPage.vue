@@ -4,7 +4,11 @@ import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 
 import { errorMessage } from '@/api/client'
-import { getJmAlbumDetail, searchAuthorByAuthor } from '@/api/jmSearch'
+import {
+  favoriteJmAlbums,
+  getJmAlbumDetail,
+  searchAuthorByAuthor,
+} from '@/api/jmSearch'
 import type { JmAlbumDetail, JmSearchAlbum } from '@/api/jmSearch'
 import { requestDownloads } from '@/api/tasks'
 import EmptyState from '@/components/EmptyState.vue'
@@ -22,6 +26,7 @@ const pageCount = ref(0)
 const pageSize = ref(20)
 const total = ref(0)
 const loading = ref(false)
+const favoriting = ref(false)
 const error = ref('')
 const actionError = ref('')
 const actionNotice = ref('')
@@ -102,6 +107,11 @@ async function requestDownloadIds(ids: string[]): Promise<void> {
         `${result.skipped_blacklisted.length} 个已被拉黑跳过（${result.skipped_blacklisted.join('、')}）`,
       )
     }
+    if (result.skipped_downloaded.length > 0) {
+      parts.push(
+        `${result.skipped_downloaded.length} 个已下载跳过（${result.skipped_downloaded.join('、')}）`,
+      )
+    }
     if (result.duplicate_count > 0) {
       const duplicates = result.items
         .filter((item) => item.status === 'duplicate')
@@ -115,6 +125,68 @@ async function requestDownloadIds(ids: string[]): Promise<void> {
   } catch (err) {
     actionError.value = errorMessage(err)
   }
+}
+
+/** 收藏选中漫画：联网存入本地库并标记管理员收藏，不下载本体。 */
+async function favoriteAlbums(ids: string[]): Promise<void> {
+  actionError.value = ''
+  actionNotice.value = ''
+  if (ids.length === 0) {
+    actionError.value = '请选择至少一个漫画'
+    return
+  }
+  if (ids.length > 100) {
+    actionError.value = '单次最多收藏 100 个漫画'
+    return
+  }
+  favoriting.value = true
+  try {
+    const result = await favoriteJmAlbums(ids)
+    const failedIds = new Set(result.failed.map((item) => item.album_id))
+    // 只更新成功项，失败项保留原状态等待用户重试
+    for (const album of albums.value) {
+      if (!ids.includes(album.album_id) || failedIds.has(album.album_id)) continue
+      album.local.exists = true
+      album.local.favorited = true
+      if (!album.local.status) album.local.status = 'favorited'
+    }
+    if (detail.value && ids.includes(detail.value.album_id) && !failedIds.has(detail.value.album_id)) {
+      detail.value.local.exists = true
+      detail.value.local.favorited = true
+      if (!detail.value.local.status) detail.value.local.status = 'favorited'
+    }
+    const parts: string[] = []
+    if (result.collected_count > 0) parts.push(`已收藏 ${result.collected_count} 本`)
+    if (result.already_count > 0) parts.push(`${result.already_count} 本已在本地`)
+    if (result.failed.length > 0) {
+      parts.push(
+        `${result.failed.length} 本收藏失败（${result.failed.map((item) => `${item.album_id}: ${item.error}`).join('；')}）`,
+      )
+    }
+    actionNotice.value = parts.join('，') || '没有需要收藏的漫画'
+    selected.value = []
+  } catch (err) {
+    actionError.value = errorMessage(err)
+  } finally {
+    favoriting.value = false
+  }
+}
+
+/** 本地状态标签：已下载优先，文件丢失单独提示。 */
+function localStatusLabel(local: JmSearchAlbum['local']): string | null {
+  if (local.downloaded) return '已下载'
+  if (local.status === 'missing_file' || local.status === 'downloaded') return '文件缺失'
+  if (local.favorited || local.status === 'favorited') return '已收藏'
+  if (local.exists) return '本地已有'
+  return null
+}
+
+/** 关闭远程详情并跳转本地漫画详情页。 */
+function openLocalDetail(): void {
+  if (!detail.value) return
+  const albumId = detail.value.album_id
+  detailDialog.value = false
+  void router.push({ name: 'manga-detail', params: { mangaId: albumId } })
 }
 
 async function copySelectedIds(): Promise<void> {
@@ -228,6 +300,15 @@ watch(
           </v-btn>
           <v-btn
             variant="tonal"
+            prepend-icon="mdi-star"
+            :disabled="selectedCount === 0 || favoriting"
+            :loading="favoriting"
+            @click="favoriteAlbums(selected)"
+          >
+            收藏选中
+          </v-btn>
+          <v-btn
+            variant="tonal"
             prepend-icon="mdi-download"
             :disabled="selectedCount === 0"
             @click="requestDownloadIds(selected)"
@@ -291,6 +372,15 @@ watch(
                 >
                   {{ album.title }}
                 </a>
+                <v-chip
+                  v-if="localStatusLabel(album.local)"
+                  size="x-small"
+                  class="ml-2"
+                  :color="album.local.downloaded ? 'success' : 'warning'"
+                  variant="tonal"
+                >
+                  {{ localStatusLabel(album.local) }}
+                </v-chip>
               </td>
               <td class="text-no-wrap">{{ album.album_id }}</td>
               <td>
@@ -309,11 +399,22 @@ watch(
                 <v-btn
                   size="small"
                   variant="text"
-                  prepend-icon="mdi-download"
+                  :prepend-icon="album.local.downloaded ? 'mdi-check' : 'mdi-download'"
+                  :disabled="album.local.downloaded"
                   :aria-label="`下载 ${album.title}`"
                   @click="requestDownloadIds([album.album_id])"
                 >
-                  下载
+                  {{ album.local.downloaded ? '已下载' : '下载' }}
+                </v-btn>
+                <v-btn
+                  size="small"
+                  variant="text"
+                  :prepend-icon="album.local.favorited ? 'mdi-star' : 'mdi-star-outline'"
+                  :disabled="album.local.favorited"
+                  :aria-label="`收藏 ${album.title}`"
+                  @click="favoriteAlbums([album.album_id])"
+                >
+                  {{ album.local.favorited ? '已收藏' : '收藏' }}
                 </v-btn>
                 <v-btn
                   size="small"
@@ -351,6 +452,15 @@ watch(
             </v-list-item-title>
             <v-list-item-subtitle class="text-wrap">
               ID {{ album.album_id }}
+              <v-chip
+                v-if="localStatusLabel(album.local)"
+                size="x-small"
+                class="ml-2"
+                :color="album.local.downloaded ? 'success' : 'warning'"
+                variant="tonal"
+              >
+                {{ localStatusLabel(album.local) }}
+              </v-chip>
             </v-list-item-subtitle>
             <div class="mt-1">
               <v-chip
@@ -367,11 +477,20 @@ watch(
             <template #append>
               <div class="d-flex flex-column">
                 <v-btn
-                  icon="mdi-download"
+                  :icon="album.local.downloaded ? 'mdi-check' : 'mdi-download'"
                   size="small"
                   variant="text"
+                  :disabled="album.local.downloaded"
                   :aria-label="`下载 ${album.title}`"
                   @click="requestDownloadIds([album.album_id])"
+                />
+                <v-btn
+                  :icon="album.local.favorited ? 'mdi-star' : 'mdi-star-outline'"
+                  size="small"
+                  variant="text"
+                  :disabled="album.local.favorited"
+                  :aria-label="`收藏 ${album.title}`"
+                  @click="favoriteAlbums([album.album_id])"
                 />
                 <v-btn
                   icon="mdi-information-outline"
@@ -436,6 +555,16 @@ watch(
                 <div class="text-caption text-medium-emphasis">总页数</div>
                 <div class="text-body-1">{{ detail.page_count }}</div>
               </v-col>
+              <v-col v-if="localStatusLabel(detail.local)" cols="12">
+                <div class="text-caption text-medium-emphasis">本地状态</div>
+                <v-chip
+                  size="small"
+                  :color="detail.local.downloaded ? 'success' : 'warning'"
+                  variant="tonal"
+                >
+                  {{ localStatusLabel(detail.local) }}
+                </v-chip>
+              </v-col>
               <v-col cols="12">
                 <div class="text-caption text-medium-emphasis">标签</div>
                 <div>
@@ -474,14 +603,24 @@ watch(
           <v-spacer />
           <v-btn variant="text" @click="detailDialog = false">关闭</v-btn>
           <v-btn
+            v-if="detail?.local.exists"
             variant="tonal"
             color="primary"
-            prepend-icon="mdi-download"
-            :disabled="!detail"
+            prepend-icon="mdi-bookshelf"
+            aria-label="查看本地详情"
+            @click="openLocalDetail"
+          >
+            查看本地详情
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            color="primary"
+            :prepend-icon="detail?.local.downloaded ? 'mdi-check' : 'mdi-download'"
+            :disabled="!detail || detail.local.downloaded"
             aria-label="下载详情漫画"
             @click="downloadDetail"
           >
-            下载
+            {{ detail?.local.downloaded ? '已下载' : '下载' }}
           </v-btn>
         </v-card-actions>
       </v-card>

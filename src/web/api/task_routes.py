@@ -40,7 +40,8 @@ def _enqueue_pending_in_background(
         )
         logger.info(
             f"后台批量入队完成：入队 {result.queued_count} 个，"
-            f"重复 {result.duplicate_count} 个"
+            f"重复 {result.duplicate_count} 个，"
+            f"已下载跳过 {result.skipped_downloaded_count} 个"
         )
     # 后台线程边界必须记录异常，否则用户只会看到任务没有出现
     # pylint: disable-next=broad-exception-caught
@@ -128,6 +129,7 @@ def create_task_router(
             "queued_count": prepared.accepted_count,
             "duplicate_count": prepared.duplicate_count,
             "skipped_blacklisted": list(prepared.skipped_blacklisted),
+            "skipped_downloaded": list(prepared.skipped_downloaded),
         }
 
     @router.post("/tasks/pause")
