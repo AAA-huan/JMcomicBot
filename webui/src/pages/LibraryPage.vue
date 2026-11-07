@@ -46,14 +46,23 @@ const statusOptions = [
   { value: 'deleted', title: '已删除' },
 ]
 const sortOptions = [
-  { value: 'read_at_desc', title: '阅读时间（新→旧）' },
-  { value: 'downloaded_at_desc', title: '下载时间（新→旧）' },
-  { value: 'downloaded_at_asc', title: '下载时间（旧→新）' },
-  { value: 'title_asc', title: '标题（A→Z）' },
-  { value: 'title_desc', title: '标题（Z→A）' },
-  { value: 'id_asc', title: '漫画 ID（升序）' },
-  { value: 'id_desc', title: '漫画 ID（降序）' },
+  { value: 'downloaded_at', title: '下载时间' },
+  { value: 'read_at', title: '阅读时间' },
+  { value: 'title', title: '标题' },
+  { value: 'id', title: '漫画 ID' },
+  { value: 'author', title: '作者' },
 ]
+
+// 旧版把字段与方向合并成单一枚举值（如 downloaded_at_desc），兼容链接时拆分为新格式
+const legacySortValues: Record<string, { sort: string; order: 'asc' | 'desc' }> = {
+  read_at_desc: { sort: 'read_at', order: 'desc' },
+  downloaded_at_desc: { sort: 'downloaded_at', order: 'desc' },
+  downloaded_at_asc: { sort: 'downloaded_at', order: 'asc' },
+  title_asc: { sort: 'title', order: 'asc' },
+  title_desc: { sort: 'title', order: 'desc' },
+  id_asc: { sort: 'id', order: 'asc' },
+  id_desc: { sort: 'id', order: 'desc' },
+}
 
 const mangas = ref<Manga[]>([])
 const total = ref(0)
@@ -74,12 +83,53 @@ const filters = reactive({
   keyword: '',
   scope: 'keyword' as SearchScope,
   status: '',
-  sort: 'downloaded_at_desc',
+  sort: 'downloaded_at',
+  order: 'desc' as 'asc' | 'desc',
   page: 1,
   pageSize: 20,
   favoriteOnly: false,
   collection: 'local' as 'local' | 'favorites' | 'history' | 'blacklist_only',
 })
+
+/** 各分组的默认排序字段：历史按阅读时间，其余按下载时间。 */
+function defaultSortField(collection: string): string {
+  return collection === 'history' ? 'read_at' : 'downloaded_at'
+}
+
+/**
+ * 从 URL 解析排序字段与方向。
+ *
+ * 旧链接的组合值（如 downloaded_at_desc）拆分为新格式；
+ * 未知值回落分组默认并标记需要规范化 URL，不向后端透传旧格式。
+ */
+function readSortQuery(query: Record<string, unknown>): boolean {
+  const rawSort = typeof query.sort === 'string' ? query.sort : ''
+  const legacy = legacySortValues[rawSort]
+  if (legacy) {
+    filters.sort = legacy.sort
+    filters.order = legacy.order
+    return true
+  }
+  const knownField = sortOptions.some((option) => option.value === rawSort)
+  if (!rawSort || !knownField) {
+    filters.sort = defaultSortField(filters.collection)
+    filters.order = query.order === 'asc' ? 'asc' : 'desc'
+    return rawSort !== '' && !knownField
+  }
+  filters.sort = rawSort
+  filters.order = query.order === 'asc' ? 'asc' : 'desc'
+  return false
+}
+
+/** 倒序开关：开=desc、关=asc，与排序字段分离。 */
+const orderDesc = computed({
+  get: () => filters.order === 'desc',
+  set: (value: boolean) => { filters.order = value ? 'desc' : 'asc' },
+})
+
+function applyOrderChange(): void {
+  updateQuery({ order: filters.order, page: 1 })
+}
 
 interface LibraryListCache {
   key: string
@@ -143,8 +193,8 @@ function toggleSelectAll(): void {
     : mangas.value.map((manga) => manga.id)
 }
 
-/** 从 URL 查询参数恢复筛选条件，保证刷新后视图不丢失。 */
-function readQuery(): void {
+/** 从 URL 查询参数恢复筛选条件，保证刷新后视图不丢失；返回排序参数是否需要规范化。 */
+function readQuery(): boolean {
   const query = route.query
   const rawTag = typeof query.tag === 'string' ? query.tag : ''
   const rawSearch = typeof query.search === 'string' ? query.search : ''
@@ -160,8 +210,7 @@ function readQuery(): void {
     : query.collection === 'favorites' || query.favorite_only === 'true' ? 'favorites' : 'local'
   filters.favoriteOnly = filters.collection === 'favorites'
   filters.status = typeof query.status === 'string' ? query.status : ''
-  filters.sort = typeof query.sort === 'string' ? query.sort
-    : filters.collection === 'history' ? 'read_at_desc' : 'downloaded_at_desc'
+  const sortNeedsNormalize = readSortQuery(query)
   const page = Number.parseInt(typeof query.page === 'string' ? query.page : '1', 10)
   filters.page = Number.isFinite(page) && page > 0 ? page : 1
   const size = Number.parseInt(
@@ -169,6 +218,7 @@ function readQuery(): void {
     10,
   )
   filters.pageSize = pageSizeOptions.includes(size) ? size : 20
+  return sortNeedsNormalize
 }
 
 /** 当前查询参数的稳定字符串，用于判断模块级缓存是否可复用。 */
@@ -191,6 +241,7 @@ async function load(options: { silent?: boolean } = {}): Promise<void> {
       status: filters.status || undefined,
       tag: filters.scope === 'tag' ? filters.keyword || undefined : undefined,
       sort: filters.sort,
+      order: filters.order,
       favorite_only: filters.favoriteOnly || undefined,
       history_only: filters.collection === 'history' || undefined,
       blacklist_only: filters.collection === 'blacklist_only' || undefined,
@@ -227,7 +278,8 @@ function switchCollection(
   updateQuery({
     collection: collection === 'local' ? undefined : collection,
     favorite_only: undefined,
-    sort: collection === 'history' ? 'read_at_desc' : 'downloaded_at_desc',
+    sort: defaultSortField(collection),
+    order: 'desc',
     page: 1,
   })
 }
@@ -468,7 +520,11 @@ async function confirmBatchDelete(): Promise<void> {
 watch(
   () => route.query,
   () => {
-    readQuery()
+    if (readQuery()) {
+      // 旧格式排序参数：先规范化 URL（不向后端透传旧值），下一轮再正常加载
+      updateQuery({ sort: filters.sort, order: filters.order })
+      return
+    }
     if (libraryListCache.key !== '' && libraryListCache.key === queryKey()) {
       // 缓存命中：先渲染旧数据消除等待感，再后台刷新保持一致
       mangas.value = libraryListCache.items
@@ -502,7 +558,7 @@ watch(
     <v-card class="mb-4">
       <v-card-text class="pb-2">
         <v-row dense>
-          <v-col cols="12" md="4">
+          <v-col cols="12" md="3">
             <v-text-field
               v-model="filters.keyword"
               label="搜索关键字"
@@ -530,13 +586,24 @@ watch(
               @update:model-value="updateQuery({ status: filters.status || undefined, page: 1 })"
             />
           </v-col>
-          <v-col cols="6" md="2">
+          <v-col cols="12" md="3" class="d-flex align-center ga-2">
             <v-select
               v-model="filters.sort"
               :items="sortOptions"
               label="排序"
               hide-details
-              @update:model-value="updateQuery({ sort: filters.sort, page: 1 })"
+              class="flex-grow-1"
+              style="min-width: 0"
+              @update:model-value="updateQuery({ sort: filters.sort, order: filters.order, page: 1 })"
+            />
+            <v-switch
+              v-model="orderDesc"
+              label="倒序"
+              color="primary"
+              density="compact"
+              hide-details
+              class="flex-shrink-0"
+              @update:model-value="applyOrderChange"
             />
           </v-col>
           <v-col cols="6" md="2" class="d-flex ga-2 align-center">

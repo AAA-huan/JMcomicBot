@@ -161,7 +161,8 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
         search: Optional[str] = None,
         status: Optional[str] = None,
         tag: Optional[str] = None,
-        sort: str = "downloaded_at_desc",
+        sort: str = "downloaded_at",
+        order: str = "desc",
         favorite_owner_id: Optional[str] = None,
         history_only: bool = False,
         blacklist_only: bool = False,
@@ -178,17 +179,24 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             .correlate(Manga)
             .scalar_subquery()
         )
-        sort_columns = {
-            "read_at_desc": (last_read.desc(), numeric_id),
-            "downloaded_at_desc": (Manga.downloaded_at.desc(), numeric_id),
-            "downloaded_at_asc": (Manga.downloaded_at, numeric_id),
-            "title_asc": (Manga.title, numeric_id),
-            "title_desc": (Manga.title.desc(), numeric_id),
-            "id_asc": (numeric_id, Manga.id),
-            "id_desc": (numeric_id.desc(), Manga.id),
+        # 排序字段与方向分离：字段决定主排序列，方向统一控制主、次排序键升降。
+        # 作者按整串比较（作者字段是逗号分隔多作者串，不拆分单个作者）。
+        sort_fields = {
+            "read_at": last_read,
+            "downloaded_at": Manga.downloaded_at,
+            "title": Manga.title,
+            "id": numeric_id,
+            "author": Manga.author,
         }
-        if sort not in sort_columns:
-            raise ValueError(f"不支持的漫画排序方式: {sort}")
+        if sort not in sort_fields:
+            raise ValueError(f"不支持的漫画排序字段: {sort}")
+        if order not in {"asc", "desc"}:
+            raise ValueError(f"不支持的漫画排序方向: {order}")
+        primary = sort_fields[sort]
+        if order == "desc":
+            sort_columns = (primary.desc(), numeric_id.desc())
+        else:
+            sort_columns = (primary, numeric_id)
         base_statement = self._build_query(search, status, tag, blacklist_only)
         if history_only:
             base_statement = base_statement.where(last_read.is_not(None))
@@ -210,7 +218,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             )
             statement = (
                 base_statement.options(selectinload(Manga.files))
-                .order_by(*sort_columns[sort])
+                .order_by(*sort_columns)
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )

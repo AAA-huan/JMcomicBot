@@ -111,7 +111,8 @@ describe('LibraryPage', () => {
       expect.objectContaining({
         page: 1,
         page_size: 20,
-        sort: 'downloaded_at_desc',
+        sort: 'downloaded_at',
+        order: 'desc',
       }),
     )
     expect(wrapper.text()).toContain('测试漫画')
@@ -232,12 +233,12 @@ describe('LibraryPage', () => {
       pages: 1,
     })
 
-    const { wrapper } = await mountPage('/library?status=downloaded&sort=id_asc')
+    const { wrapper } = await mountPage('/library?status=downloaded&sort=id&order=asc')
     const detailLink = wrapper.find('a[href*="/library/100"]')
 
     expect(detailLink.exists()).toBe(true)
     expect(detailLink.attributes('href')).toContain('status=downloaded')
-    expect(detailLink.attributes('href')).toContain('sort=id_asc')
+    expect(detailLink.attributes('href')).toContain('sort=id')
   })
 
   it('收藏成功切换按钮，失败保留原状态，取消后切回收藏', async () => {
@@ -268,8 +269,8 @@ describe('LibraryPage', () => {
     vi.mocked(listMangas).mockResolvedValueOnce({ items: [manga], page: 1, page_size: 20, total: 1, pages: 1 })
     vi.mocked(listMangas).mockResolvedValue({ items: [], page: 1, page_size: 20, total: 0, pages: 0 })
     vi.mocked(setFavorite).mockResolvedValue({ manga_id: '100', is_favorite: false, changed: true })
-    const { wrapper } = await mountPage('/library?favorite_only=true&sort=id_asc')
-    expect(listMangas).toHaveBeenCalledWith(expect.objectContaining({ favorite_only: true, sort: 'id_asc' }))
+    const { wrapper } = await mountPage('/library?favorite_only=true&sort=id&order=asc')
+    expect(listMangas).toHaveBeenCalledWith(expect.objectContaining({ favorite_only: true, sort: 'id', order: 'asc' }))
     await wrapper.find('[aria-label="取消收藏"]').trigger('click')
     await flushPromises()
     expect(wrapper.text()).toContain('没有找到漫画')
@@ -277,19 +278,33 @@ describe('LibraryPage', () => {
     wrapper.unmount()
   })
 
+  it('旧版组合排序值自动规范化为字段加方向并更新 URL', async () => {
+    vi.mocked(listMangas).mockResolvedValue({ items: [], page: 1, page_size: 20, total: 0, pages: 0 })
+
+    const { wrapper, router } = await mountPage('/library?sort=downloaded_at_desc&page=2')
+    await vi.waitFor(() => expect(listMangas).toHaveBeenCalledTimes(1))
+
+    expect(listMangas).toHaveBeenCalledWith(
+      expect.objectContaining({ sort: 'downloaded_at', order: 'desc', page: 2 }),
+    )
+    // 旧值不向后端透传，URL 被改写为新格式
+    expect(router.currentRoute.value.query).toMatchObject({ sort: 'downloaded_at', order: 'desc', page: '2' })
+    wrapper.unmount()
+  })
+
   it('切换收藏、历史和本地时更新请求并重置分页排序', async () => {
     vi.mocked(listMangas).mockResolvedValue({ items: [], page: 1, page_size: 20, total: 0, pages: 0 })
-    const { wrapper, router } = await mountPage('/library?page=3&sort=id_asc')
+    const { wrapper, router } = await mountPage('/library?page=3&sort=id&order=desc')
     const tab = (text: string) => wrapper.findAll('[role="tab"]').find((item) => item.text().includes(text))!
     expect(wrapper.text()).toContain('封面预览')
     expect(wrapper.text()).not.toContain('仅看收藏')
     await tab('收藏').trigger('click')
     await vi.waitFor(() => expect(listMangas).toHaveBeenLastCalledWith(expect.objectContaining({ favorite_only: true, page: 1 })))
     await tab('历史').trigger('click')
-    await vi.waitFor(() => expect(listMangas).toHaveBeenLastCalledWith(expect.objectContaining({ history_only: true, favorite_only: undefined, sort: 'read_at_desc', page: 1 })))
+    await vi.waitFor(() => expect(listMangas).toHaveBeenLastCalledWith(expect.objectContaining({ history_only: true, favorite_only: undefined, sort: 'read_at', order: 'desc', page: 1 })))
     expect(router.currentRoute.value.query.collection).toBe('history')
     await tab('本地').trigger('click')
-    await vi.waitFor(() => expect(listMangas).toHaveBeenLastCalledWith(expect.objectContaining({ history_only: undefined, favorite_only: undefined, sort: 'downloaded_at_desc' })))
+    await vi.waitFor(() => expect(listMangas).toHaveBeenLastCalledWith(expect.objectContaining({ history_only: undefined, favorite_only: undefined, sort: 'downloaded_at', order: 'desc' })))
     wrapper.unmount()
   })
 

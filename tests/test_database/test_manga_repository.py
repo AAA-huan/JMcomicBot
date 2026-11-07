@@ -204,7 +204,13 @@ class TestManga:
         tag_repo.add("恋爱", "21")
 
         matched, total = manga_repo.search(
-            page=1, page_size=20, search=None, status=None, tag="恋爱", sort="id_asc"
+            page=1,
+            page_size=20,
+            search=None,
+            status=None,
+            tag="恋爱",
+            sort="id",
+            order="asc",
         )
 
         assert total == 1

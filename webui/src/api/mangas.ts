@@ -19,7 +19,10 @@ export interface MangaListQuery {
   search?: string
   status?: string
   tag?: string
+  /** 排序字段名：downloaded_at / read_at / title / id / author。 */
   sort?: string
+  /** 排序方向，与字段分离；默认 desc（倒序）。 */
+  order?: 'asc' | 'desc'
 }
 
 export function listMangas(query: MangaListQuery = {}): Promise<PageResult<Manga>> {

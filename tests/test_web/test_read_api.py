@@ -3,7 +3,13 @@
 from datetime import timedelta
 from starlette.testclient import TestClient
 
-from src.database.models import MangaFile, OperationTask, ReadingProgress, utc_now
+from src.database.models import (
+    Manga,
+    MangaFile,
+    OperationTask,
+    ReadingProgress,
+    utc_now,
+)
 from src.database.repositories import (
     MangaRepository,
     MangaTagRepository,
@@ -72,7 +78,7 @@ def test_manga_read_api_supports_paging_search_tag_and_sort(db_manager) -> None:
 
         response = client.get(
             "/api/v1/mangas",
-            params={"search": "漫画", "tag": "冒险", "sort": "id_asc"},
+            params={"search": "漫画", "tag": "冒险", "sort": "id", "order": "asc"},
         )
         detail = client.get("/api/v1/mangas/100")
         missing = client.get("/api/v1/mangas/999")
@@ -87,6 +93,41 @@ def test_manga_read_api_supports_paging_search_tag_and_sort(db_manager) -> None:
     assert detail.json()["title"] == "苹果漫画"
     assert "relative_path" not in detail.text
     assert missing.status_code == 404
+
+
+def test_manga_sort_fields_and_order_switch(db_manager) -> None:
+    """排序为字段 + 统一倒序开关：默认下载时间新→旧，切换开关顺序立即反转。"""
+    repository = MangaRepository(db_manager, download_root=db_manager.db_dir)
+    earlier = repository.upsert("100", "B漫画", "作者乙", 2, 20)
+    later = repository.upsert("200", "A漫画", "作者甲", 3, 30)
+    # 手动拉开下载时间，避免两条记录时间戳相同
+    with db_manager.get_session() as session:
+        session.get(Manga, earlier.id).downloaded_at = utc_now() - timedelta(days=5)
+        session.get(Manga, later.id).downloaded_at = utc_now() - timedelta(days=1)
+        session.commit()
+
+    with _create_client(db_manager) as client:
+        _setup_and_login(client)
+        default_order = client.get("/api/v1/mangas")
+        asc_order = client.get("/api/v1/mangas", params={"order": "asc"})
+        title_desc = client.get(
+            "/api/v1/mangas", params={"sort": "title", "order": "desc"}
+        )
+        author_asc = client.get(
+            "/api/v1/mangas", params={"sort": "author", "order": "asc"}
+        )
+        invalid_field = client.get(
+            "/api/v1/mangas", params={"sort": "downloaded_at_desc"}
+        )
+
+    assert default_order.status_code == 200
+    assert [item["id"] for item in default_order.json()["items"]] == ["200", "100"]
+    assert [item["id"] for item in asc_order.json()["items"]] == ["100", "200"]
+    # 标题按字符串比较：A < B，倒序即 B 在前
+    assert [item["id"] for item in title_desc.json()["items"]] == ["100", "200"]
+    # 作者按整串比较：作者甲(U+7532) > 作者乙(U+4E59)，升序即作者乙在前
+    assert [item["id"] for item in author_asc.json()["items"]] == ["100", "200"]
+    assert invalid_field.status_code == 400
 
 
 def test_task_read_api_supports_filters_and_details(db_manager) -> None:
@@ -174,7 +215,8 @@ def test_history_uses_read_time_and_pagination(db_manager) -> None:
             "/api/v1/mangas",
             params={
                 "history_only": True,
-                "sort": "read_at_desc",
+                "sort": "read_at",
+                "order": "desc",
                 "page_size": 1,
             },
         )
@@ -185,7 +227,8 @@ def test_history_uses_read_time_and_pagination(db_manager) -> None:
             "/api/v1/mangas",
             params={
                 "history_only": True,
-                "sort": "read_at_desc",
+                "sort": "read_at",
+                "order": "desc",
                 "page_size": 1,
                 "page": 2,
             },
@@ -195,7 +238,8 @@ def test_history_uses_read_time_and_pagination(db_manager) -> None:
             "/api/v1/mangas",
             params={
                 "history_only": True,
-                "sort": "read_at_desc",
+                "sort": "read_at",
+                "order": "desc",
                 "search": "200",
             },
         )
