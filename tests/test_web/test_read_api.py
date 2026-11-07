@@ -185,6 +185,29 @@ def test_task_read_api_supports_filters_and_details(db_manager) -> None:
     assert invalid.status_code == 400
 
 
+def test_task_read_api_supports_send_type_filter(db_manager) -> None:
+    """任务列表支持按新增的 send 类型过滤，验证迁移扩展的 CHECK 约束与类型白名单。"""
+    task_repository = OperationTaskRepository(db_manager)
+    sent = task_repository.create(
+        "send",
+        "qq",
+        requested_by="10001",
+        manga_id="100",
+        summary="发送 100-测试.pdf 至 私聊 10001",
+    )
+
+    with _create_client(db_manager) as client:
+        _setup_and_login(client)
+        filtered = client.get("/api/v1/tasks", params={"task_type": "send"})
+        detail = client.get(f"/api/v1/tasks/{sent.id}")
+
+    assert filtered.status_code == 200
+    assert [item["id"] for item in filtered.json()["items"]] == [sent.id]
+    assert filtered.json()["items"][0]["summary"] == "发送 100-测试.pdf 至 私聊 10001"
+    assert detail.status_code == 200
+    assert detail.json()["task_type"] == "send"
+
+
 def test_task_read_api_supports_created_at_filters(db_manager) -> None:
     """任务列表支持按创建时间区间筛选，时间格式非法时返回 400。"""
     task_repository = OperationTaskRepository(db_manager)

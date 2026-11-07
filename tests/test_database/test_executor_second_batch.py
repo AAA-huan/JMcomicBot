@@ -89,7 +89,7 @@ def _build_executor(  # pylint: disable=too-many-arguments
 
     return CommandExecutor(
         message_sender=message_sender,
-        file_sender=file_sender or (lambda *_args: None),
+        file_sender=file_sender or (lambda *_args, **_kwargs: None),
         download_manager=download_manager,
         config={"MANGA_DOWNLOAD_PATH": download_path, "FILE_SEND_BATCH_SIZE": 10},
         self_id_getter=lambda: "bot",
@@ -215,9 +215,15 @@ def test_chapter_count_messages_prefer_database(
     sent_files: List[str] = []
 
     def file_sender(
-        user_id: str, file_path: str, group_id: Optional[str], private: bool
+        user_id: str,
+        file_path: str,
+        group_id: Optional[str],
+        private: bool,
+        *,
+        source: str,
+        requested_by: Optional[str],
     ) -> None:
-        del user_id, group_id, private
+        del user_id, group_id, private, source, requested_by
         sent_files.append(file_path)
 
     executor = _build_executor(

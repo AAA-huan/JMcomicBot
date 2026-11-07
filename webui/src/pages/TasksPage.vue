@@ -49,6 +49,7 @@ const typeOptions = [
   { value: 'backup', title: '备份' },
   { value: 'verify', title: '校验' },
   { value: 'blacklist', title: '黑名单' },
+  { value: 'send', title: '发送' },
 ]
 const statusOptions = [
   { value: '', title: '全部状态' },

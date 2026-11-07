@@ -71,10 +71,7 @@ def test_data_import_validate_and_apply_flow(db_manager, tmp_path) -> None:
             headers=headers,
         )
         assert preview.status_code == 200
-        assert (
-            preview.json()["schema_revision"]
-            == "0030_add_reading_setting_prefetch_pages"
-        )
+        assert preview.json()["schema_revision"] == "0031_operation_task_send_type"
         assert preview.json()["table_counts"]["manga"] == 1
         assert preview.json()["path_warnings"] == []
 

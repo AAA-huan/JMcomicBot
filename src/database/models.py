@@ -404,7 +404,7 @@ class OperationTask(Base):
     __table_args__ = (
         CheckConstraint(
             "task_type IN ('download', 'scan', 'repair', 'delete', 'backup', "
-            "'verify', 'blacklist')",
+            "'verify', 'blacklist', 'send')",
             name="ck_operation_task_type",
         ),
         CheckConstraint(

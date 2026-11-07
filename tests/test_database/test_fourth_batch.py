@@ -43,7 +43,7 @@ def test_list_help_uses_real_page_example(tmp_path) -> None:
         message_sender=lambda _user, message, _group, _private: messages.append(
             message
         ),
-        file_sender=lambda *_args: None,
+        file_sender=lambda *_args, **_kwargs: None,
         download_manager=download_manager,
         config={"MANGA_DOWNLOAD_PATH": str(tmp_path)},
         self_id_getter=lambda: "bot",

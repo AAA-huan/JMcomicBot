@@ -16,7 +16,16 @@ from src.database.models import OperationTask, TaskEvent, utc_now
 
 from ._base import BaseRepository
 
-_TASK_TYPES = {"download", "scan", "repair", "delete", "backup", "verify", "blacklist"}
+_TASK_TYPES = {
+    "download",
+    "scan",
+    "repair",
+    "delete",
+    "backup",
+    "verify",
+    "blacklist",
+    "send",
+}
 _TASK_SOURCES = {"qq", "web", "system"}
 _TASK_STATUSES = {
     "queued",
@@ -63,6 +72,8 @@ _TASK_SUMMARIES = {
     "backup": "备份数据库",
     "verify": "校验漫画文件",
     "blacklist": "漫画黑名单",
+    # 发送任务由 MessageManager 传入含文件名与目标的具体摘要，此处仅作缺省
+    "send": "发送漫画文件",
 }
 
 
@@ -146,16 +157,22 @@ class OperationTaskRepository(BaseRepository):
         source: str,
         requested_by: str = "",
         manga_id: Optional[str] = None,
+        summary: Optional[str] = None,
     ) -> OperationTask:
-        """创建排队中的任务。"""
+        """创建排队中的任务；summary 缺省按任务类型生成，传入则覆盖（如发送任务含文件名）。"""
         if task_type not in _TASK_TYPES:
             raise ValueError(f"不支持的任务类型: {task_type}")
         if source not in _TASK_SOURCES:
             raise ValueError(f"不支持的任务来源: {source}")
         now = utc_now()
-        summary = _TASK_SUMMARIES[task_type]
-        if manga_id is not None and task_type in {"download", "delete", "blacklist"}:
-            summary = f"{summary} {manga_id}"
+        if summary is None:
+            summary = _TASK_SUMMARIES[task_type]
+            if manga_id is not None and task_type in {
+                "download",
+                "delete",
+                "blacklist",
+            }:
+                summary = f"{summary} {manga_id}"
         task = OperationTask(
             id=str(uuid4()),
             task_type=task_type,

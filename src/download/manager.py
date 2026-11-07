@@ -37,10 +37,13 @@ class QQDownloadNotifier:
     """把下载过程通知转发到 QQ 消息与文件发送器的适配器。"""
 
     message_sender: Callable[[str, str, Optional[str], bool], None]
-    file_sender: Optional[Callable[[str, str, Optional[str], bool], None]]
+    # 文件发送器额外接受关键字参数 source/requested_by，用于任务记录归属
+    file_sender: Optional[Callable[..., None]]
     user_id: str
     group_id: Optional[str]
     private: bool
+    # 发送任务归属：沿用触发本次发送的下载来源
+    source: str = "qq"
 
     def message(self, text: str) -> None:
         """发送下载过程文本消息。"""
@@ -50,7 +53,14 @@ class QQDownloadNotifier:
         """发送下载完成的 PDF 文件；未配置文件发送器时明确报错。"""
         if self.file_sender is None:
             raise RuntimeError("未配置文件发送器，无法发送下载文件")
-        self.file_sender(self.user_id, file_path, self.group_id, self.private)
+        self.file_sender(
+            self.user_id,
+            file_path,
+            self.group_id,
+            self.private,
+            source=self.source,
+            requested_by=self.user_id,
+        )
 
 
 @dataclass(frozen=True)
@@ -137,7 +147,7 @@ class DownloadManager:
         logger_instance: Any,
         config: Dict[str, Any],
         message_sender: Callable[[str, str, Optional[str], bool], None],
-        file_sender: Optional[Callable[[str, str, Optional[str], bool], None]] = None,
+        file_sender: Optional[Callable[..., None]] = None,
         manga_repo: Optional[MangaRepository] = None,
         task_log_repo: Optional[TaskLogRepository] = None,
         tag_repo: Optional[MangaTagRepository] = None,
@@ -694,6 +704,8 @@ class DownloadManager:
             user_id=user_id,
             group_id=group_id,
             private=private,
+            # 发送记录来源沿用本次下载的来源
+            source=context.source,
         )
         result = self.request_download(manga_id, context, notifier)
         if result.status == "duplicate":

@@ -200,6 +200,7 @@ class MangaBot:  # pylint: disable=too-many-instance-attributes
             ws_client=self.ws_client,
             task_log_repo=self.task_log_repo,
             settings_service=self.settings_service,
+            operation_task_service=self.operation_task_service,
         )
 
         self.download_manager = DownloadManager(

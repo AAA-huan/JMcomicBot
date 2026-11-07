@@ -4,13 +4,19 @@ from threading import Lock
 from types import SimpleNamespace
 from typing import Any, Dict, List
 
+import pytest
 import queue
 import threading
 import time
 
 from src.command.executor import CommandExecutor
+from src.database.repositories import (
+    AuditEventRepository,
+    OperationTaskRepository,
+    TaskEventRepository,
+)
 from src.message.manager import MessageManager, SendTask
-from src.service import DownloadQueueService
+from src.service import DownloadQueueService, OperationTaskService
 
 
 class _PermissionManager:
@@ -45,7 +51,7 @@ def _build_executor(download_path: str, messages: List[str]) -> CommandExecutor:
     download_manager = _DownloadManager()
     return CommandExecutor(
         message_sender=message_sender,
-        file_sender=lambda *_args: None,
+        file_sender=lambda *_args, **_kwargs: None,
         download_manager=download_manager,
         config={
             "MANGA_DOWNLOAD_PATH": download_path,
@@ -268,3 +274,120 @@ def test_send_queue_pause_blocks_and_resume_continues(tmp_path) -> None:
     assert outcome.get("done") is True
     assert len(sent) == 1
     manager.stop(timeout=3)
+
+
+def _build_message_manager_with_tasks(db_manager) -> MessageManager:
+    """构造注入真实 OperationTaskService 的消息管理器，不启动后台线程。"""
+    task_service = OperationTaskService(
+        OperationTaskRepository(db_manager),
+        TaskEventRepository(db_manager),
+        AuditEventRepository(db_manager),
+    )
+    manager = MessageManager(config={})
+    manager.operation_task_service = task_service
+    manager.task_log_repo = None
+    return manager
+
+
+def test_send_task_persists_operation_task_on_enqueue(
+    db_manager, tmp_path, monkeypatch
+) -> None:
+    """入队发送任务时在 operation_task 创建 send 记录，含文件名摘要与漫画 ID。"""
+    monkeypatch.setattr(MessageManager, "_start_file_queue_worker", lambda self: None)
+    manager = _build_message_manager_with_tasks(db_manager)
+    service = manager.operation_task_service
+
+    pdf = tmp_path / "350123-标题(2章).pdf"
+    pdf.write_bytes(b"%PDF")
+    task = SendTask(
+        user_id="10001",
+        file_path=str(pdf),
+        group_id=None,
+        private=True,
+        source="qq",
+        requested_by="10001",
+    )
+    manager._enqueue_file_task(task)
+
+    assert task.operation_task_id is not None
+    stored = service.get(task.operation_task_id)
+    assert stored.task_type == "send"
+    assert stored.status == "queued"
+    assert stored.manga_id == "350123"
+    assert stored.source == "qq"
+    assert "发送 350123-标题(2章).pdf 至 私聊 10001" == stored.summary
+
+
+def test_send_task_lifecycle_updates_operation_task(
+    db_manager, tmp_path, monkeypatch
+) -> None:
+    """发送成功时 operation_task 记录 running → succeeded。"""
+    monkeypatch.setattr(MessageManager, "_start_file_queue_worker", lambda self: None)
+    manager = _build_message_manager_with_tasks(db_manager)
+    service = manager.operation_task_service
+
+    pdf = tmp_path / "350124-标题(1章).pdf"
+    pdf.write_bytes(b"%PDF")
+    task = SendTask(
+        user_id="10001",
+        file_path=str(pdf),
+        group_id=None,
+        private=False,
+        source="qq",
+        requested_by="10001",
+    )
+    manager._enqueue_file_task(task)
+    task_id = task.operation_task_id
+
+    # 群聊来源，模拟发送成功（绕过真实 WebSocket）
+    monkeypatch.setattr(manager, "_send_file_with_retry", lambda _task: None)
+    manager._process_send_task(task)
+
+    assert service.get(task_id).status == "succeeded"
+    assert "群聊" in service.get(task_id).summary
+
+
+def test_send_task_failure_marks_operation_task_failed(
+    db_manager, tmp_path, monkeypatch
+) -> None:
+    """发送抛异常时 operation_task 记录置为 failed 并保留错误信息。"""
+    monkeypatch.setattr(MessageManager, "_start_file_queue_worker", lambda self: None)
+    manager = _build_message_manager_with_tasks(db_manager)
+    service = manager.operation_task_service
+
+    pdf = tmp_path / "350125-标题(1章).pdf"
+    pdf.write_bytes(b"%PDF")
+    task = SendTask(
+        user_id="10001",
+        file_path=str(pdf),
+        group_id=None,
+        private=True,
+        source="qq",
+        requested_by="10001",
+    )
+    manager._enqueue_file_task(task)
+    task_id = task.operation_task_id
+
+    def _boom(_task):
+        raise RuntimeError("WebSocket连接未建立")
+
+    monkeypatch.setattr(manager, "_send_file_with_retry", _boom)
+    manager._process_send_task(task)
+
+    result = service.get(task_id)
+    assert result.status == "failed"
+    assert result.error_code == "SEND_FAILED"
+
+
+def test_send_operation_task_skipped_without_service(tmp_path, monkeypatch) -> None:
+    """未注入任务服务时发送流程照常工作，不创建任何任务记录。"""
+    monkeypatch.setattr(MessageManager, "_start_file_queue_worker", lambda self: None)
+    manager = MessageManager(config={})
+    assert manager.operation_task_service is None
+
+    pdf = tmp_path / "350126-标题(1章).pdf"
+    pdf.write_bytes(b"%PDF")
+    task = SendTask(user_id="10001", file_path=str(pdf), group_id=None, private=True)
+    manager._enqueue_file_task(task)
+
+    assert task.operation_task_id is None
