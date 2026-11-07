@@ -40,6 +40,7 @@ const pageSizeOptions = [20, 50, 100]
 const statusOptions = [
   { value: '', title: '全部状态' },
   { value: 'downloaded', title: '已下载' },
+  { value: 'downloaded_unfavorited', title: '已下载未收藏' },
   { value: 'favorited', title: '已收藏未下载' },
   { value: 'missing_file', title: '文件缺失' },
   { value: 'invalid', title: '无效记录' },
@@ -95,6 +96,18 @@ const filters = reactive({
 function defaultSortField(collection: string): string {
   return collection === 'history' ? 'read_at' : 'downloaded_at'
 }
+
+/**
+ * 状态下拉的实际选项：「已下载未收藏」与收藏筛选互斥，
+ * 收藏分组下置灰禁止选择，其余选项原样。
+ */
+const statusItems = computed(() =>
+  statusOptions.map((option) => ({
+    ...option,
+    disabled:
+      option.value === 'downloaded_unfavorited' && filters.collection === 'favorites',
+  })),
+)
 
 /**
  * 从 URL 解析排序字段与方向。
@@ -210,6 +223,13 @@ function readQuery(): boolean {
     : query.collection === 'favorites' || query.favorite_only === 'true' ? 'favorites' : 'local'
   filters.favoriteOnly = filters.collection === 'favorites'
   filters.status = typeof query.status === 'string' ? query.status : ''
+  // 手拼链接可能同时带上收藏分组与「已下载未收藏」，两者互斥：
+  // 状态回落为全部并标记规范化，不向后端透传互斥组合。
+  const statusNeedsNormalize =
+    filters.favoriteOnly && filters.status === 'downloaded_unfavorited'
+  if (statusNeedsNormalize) {
+    filters.status = ''
+  }
   const sortNeedsNormalize = readSortQuery(query)
   const page = Number.parseInt(typeof query.page === 'string' ? query.page : '1', 10)
   filters.page = Number.isFinite(page) && page > 0 ? page : 1
@@ -218,7 +238,7 @@ function readQuery(): boolean {
     10,
   )
   filters.pageSize = pageSizeOptions.includes(size) ? size : 20
-  return sortNeedsNormalize
+  return sortNeedsNormalize || statusNeedsNormalize
 }
 
 /** 当前查询参数的稳定字符串，用于判断模块级缓存是否可复用。 */
@@ -521,8 +541,12 @@ watch(
   () => route.query,
   () => {
     if (readQuery()) {
-      // 旧格式排序参数：先规范化 URL（不向后端透传旧值），下一轮再正常加载
-      updateQuery({ sort: filters.sort, order: filters.order })
+      // 旧格式排序或互斥状态参数：先规范化 URL（不向后端透传非法值），下一轮再正常加载
+      updateQuery({
+        sort: filters.sort,
+        order: filters.order,
+        status: filters.status || undefined,
+      })
       return
     }
     if (libraryListCache.key !== '' && libraryListCache.key === queryKey()) {
@@ -580,7 +604,7 @@ watch(
           <v-col cols="6" md="2">
             <v-select
               v-model="filters.status"
-              :items="statusOptions"
+              :items="statusItems"
               label="状态"
               hide-details
               @update:model-value="updateQuery({ status: filters.status || undefined, page: 1 })"

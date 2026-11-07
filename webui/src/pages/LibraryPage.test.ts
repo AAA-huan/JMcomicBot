@@ -292,6 +292,35 @@ describe('LibraryPage', () => {
     wrapper.unmount()
   })
 
+  it('已下载未收藏伪状态直接透传给后端', async () => {
+    vi.mocked(listMangas).mockResolvedValue({ items: [], page: 1, page_size: 20, total: 0, pages: 0 })
+
+    const { wrapper, router } = await mountPage('/library?status=downloaded_unfavorited')
+
+    expect(listMangas).toHaveBeenCalledWith(
+      expect.objectContaining({ status: 'downloaded_unfavorited', favorite_only: undefined }),
+    )
+    // 正常组合下 URL 保持不变，伪状态可收藏页签之外的分组自由组合
+    expect(router.currentRoute.value.query.status).toBe('downloaded_unfavorited')
+    wrapper.unmount()
+  })
+
+  it('收藏分组下的互斥伪状态链接回落全部状态并改写 URL', async () => {
+    vi.mocked(listMangas).mockResolvedValue({ items: [], page: 1, page_size: 20, total: 0, pages: 0 })
+
+    const { wrapper, router } = await mountPage(
+      '/library?collection=favorites&status=downloaded_unfavorited',
+    )
+    await vi.waitFor(() => expect(listMangas).toHaveBeenCalledTimes(1))
+
+    // 互斥组合不向后端透传：状态清空、保留收藏筛选，URL 移除 status
+    expect(listMangas).toHaveBeenCalledWith(
+      expect.objectContaining({ favorite_only: true, status: undefined }),
+    )
+    expect(router.currentRoute.value.query.status).toBeUndefined()
+    wrapper.unmount()
+  })
+
   it('切换收藏、历史和本地时更新请求并重置分页排序', async () => {
     vi.mocked(listMangas).mockResolvedValue({ items: [], page: 1, page_size: 20, total: 0, pages: 0 })
     const { wrapper, router } = await mountPage('/library?page=3&sort=id&order=desc')

@@ -164,6 +164,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
         sort: str = "downloaded_at",
         order: str = "desc",
         favorite_owner_id: Optional[str] = None,
+        unfavorite_owner_id: Optional[str] = None,
         history_only: bool = False,
         blacklist_only: bool = False,
     ) -> tuple[List[Manga], int]:
@@ -197,6 +198,9 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             sort_columns = (primary.desc(), numeric_id.desc())
         else:
             sort_columns = (primary, numeric_id)
+        # 「已收藏」与「未收藏」两个方向互斥，同时传入视为非法组合，不做兜底。
+        if favorite_owner_id is not None and unfavorite_owner_id is not None:
+            raise ValueError("收藏筛选与未收藏筛选不能同时使用")
         base_statement = self._build_query(search, status, tag, blacklist_only)
         if history_only:
             base_statement = base_statement.where(last_read.is_not(None))
@@ -207,6 +211,17 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
                     MangaFavorite.manga_id == Manga.id,
                     MangaFavorite.owner_type == "web_admin",
                     MangaFavorite.owner_id == favorite_owner_id,
+                )
+                .exists()
+            )
+        if unfavorite_owner_id is not None:
+            # 未收藏判定同样按管理员隔离，与上面的 EXISTS 写法对称取反。
+            base_statement = base_statement.where(
+                ~select(MangaFavorite.manga_id)
+                .where(
+                    MangaFavorite.manga_id == Manga.id,
+                    MangaFavorite.owner_type == "web_admin",
+                    MangaFavorite.owner_id == unfavorite_owner_id,
                 )
                 .exists()
             )

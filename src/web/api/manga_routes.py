@@ -100,6 +100,11 @@ def create_manga_router(
         history_only: bool = False,
         blacklist_only: bool = False,
     ) -> dict[str, object]:
+        # 伪状态「已下载未收藏」在路由层拆解为 已下载 + 未收藏筛选，
+        # 不进入仓储状态白名单，其余非法状态仍由白名单校验拒绝为 400。
+        unfavorite_only = manga_status == "downloaded_unfavorited"
+        if unfavorite_only:
+            manga_status = "downloaded"
         try:
             return asdict(
                 dependencies.manga_query_service.list(
@@ -111,6 +116,7 @@ def create_manga_router(
                     sort,
                     order,
                     favorite_only=favorite_only,
+                    unfavorite_only=unfavorite_only,
                     history_only=history_only,
                     blacklist_only=blacklist_only,
                     admin_id=authenticated.admin_id,

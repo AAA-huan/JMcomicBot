@@ -195,6 +195,7 @@ class MangaQueryService:
         sort: str,
         order: str = "desc",
         favorite_only: bool = False,
+        unfavorite_only: bool = False,
         admin_id: int = 1,
         history_only: bool = False,
         blacklist_only: bool = False,
@@ -209,6 +210,7 @@ class MangaQueryService:
             sort,
             order,
             favorite_owner_id=str(admin_id) if favorite_only else None,
+            unfavorite_owner_id=str(admin_id) if unfavorite_only else None,
             history_only=history_only,
             blacklist_only=blacklist_only,
         )

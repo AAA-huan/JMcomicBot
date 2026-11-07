@@ -130,6 +130,39 @@ def test_manga_sort_fields_and_order_switch(db_manager) -> None:
     assert invalid_field.status_code == 400
 
 
+def test_manga_filter_downloaded_unfavorited(db_manager) -> None:
+    """伪状态已下载未收藏：只含已下载且当前管理员未收藏的漫画；与收藏筛选互斥返回 400。"""
+    repository = MangaRepository(db_manager, download_root=db_manager.db_dir)
+    repository.upsert("100", "收藏的漫画", "作者甲", 2, 20)
+    repository.upsert("200", "未收藏的漫画", "作者乙", 3, 30)
+
+    with _create_client(db_manager) as client:
+        _setup_and_login(client)
+        headers = {"X-CSRF-Token": client.cookies["jmbot_csrf"]}
+        assert (
+            client.put("/api/v1/mangas/100/favorite", headers=headers).status_code
+            == 200
+        )
+        filtered = client.get(
+            "/api/v1/mangas", params={"status": "downloaded_unfavorited"}
+        )
+        conflict = client.get(
+            "/api/v1/mangas",
+            params={"status": "downloaded_unfavorited", "favorite_only": "true"},
+        )
+        searched = client.get(
+            "/api/v1/mangas",
+            params={"status": "downloaded_unfavorited", "search": "未收藏"},
+        )
+
+    assert filtered.status_code == 200
+    assert [item["id"] for item in filtered.json()["items"]] == ["200"]
+    assert conflict.status_code == 400
+    # 伪状态可与搜索组合，拆解逻辑不受影响
+    assert searched.status_code == 200
+    assert [item["id"] for item in searched.json()["items"]] == ["200"]
+
+
 def test_task_read_api_supports_filters_and_details(db_manager) -> None:
     task_repository = OperationTaskRepository(db_manager)
     wanted = task_repository.create("download", "qq", manga_id="100")
