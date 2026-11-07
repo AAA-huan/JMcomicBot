@@ -1,11 +1,17 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 
 import { errorMessage } from '@/api/client'
 import { setFavorite } from '@/api/favorites'
 import { fileDownloadUrl, getReadingProgress } from '@/api/files'
+import {
+  addFolderMangas,
+  createFolder,
+  listFolders,
+  removeFolderMangas,
+} from '@/api/folders'
 import {
   blacklistManga,
   deleteManga,
@@ -19,7 +25,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import MangaCover from '@/components/MangaCover.vue'
 import { useCoverPreview } from '@/stores/coverPreview'
 import { useToast } from '@/stores/toast'
-import type { Manga, MangaFile, ReadingProgress } from '@/types/api'
+import type { Folder, Manga, MangaFile, ReadingProgress } from '@/types/api'
 import { formatBytes, formatDateTime, parseTags } from '@/utils/format'
 import {
   colorOf,
@@ -60,6 +66,97 @@ const favoriteBusy = ref(false)
 const blacklistDialog = ref(false)
 const blacklistLoading = ref(false)
 const blacklistMode = ref<'add' | 'remove'>('add')
+
+// 加入文件夹菜单：菜单打开时按需加载文件夹清单
+const folderMenu = ref(false)
+const folderOptions = ref<Folder[]>([])
+const folderBusy = ref(false)
+const folderCreateDialog = ref(false)
+const folderNameInput = ref('')
+const folderCreateLoading = ref(false)
+
+/** 漫画是否已在指定文件夹内。 */
+function inFolder(folderId: number): boolean {
+  return (manga.value?.folder_ids ?? []).includes(folderId)
+}
+
+async function loadFolderOptions(): Promise<void> {
+  folderBusy.value = true
+  try {
+    folderOptions.value = await listFolders()
+  } catch (err) {
+    toast.error(errorMessage(err))
+  } finally {
+    folderBusy.value = false
+  }
+}
+
+watch(folderMenu, (open) => {
+  if (open) void loadFolderOptions()
+})
+
+/** 勾选切换加入/移出，直接提交并更新本地 folder_ids，操作可逆无需确认框。 */
+async function toggleInFolder(folder: Folder): Promise<void> {
+  const current = manga.value
+  if (!current || folderBusy.value) return
+  const joined = inFolder(folder.id)
+  folderBusy.value = true
+  try {
+    if (joined) {
+      await removeFolderMangas(folder.id, [mangaId])
+      current.folder_ids = (current.folder_ids ?? []).filter((id) => id !== folder.id)
+      toast.success(`已移出文件夹「${folder.name}」`)
+    } else {
+      await addFolderMangas(folder.id, [mangaId])
+      current.folder_ids = [...(current.folder_ids ?? []), folder.id].sort(
+        (left, right) => left - right,
+      )
+      toast.success(`已加入文件夹「${folder.name}」`)
+    }
+  } catch (err) {
+    toast.error(errorMessage(err))
+  } finally {
+    folderBusy.value = false
+  }
+}
+
+function openFolderCreate(): void {
+  // 弹窗打开前先收起菜单，避免对话框与菜单叠层
+  folderMenu.value = false
+  folderNameInput.value = ''
+  folderCreateDialog.value = true
+}
+
+/** 新建文件夹并立即把当前漫画加入。 */
+async function confirmFolderCreateAndAdd(): Promise<void> {
+  const name = folderNameInput.value.trim()
+  if (!name) {
+    toast.error('请输入文件夹名称')
+    return
+  }
+  if (name.length > 64) {
+    toast.error('文件夹名称不能超过 64 个字符')
+    return
+  }
+  folderCreateLoading.value = true
+  try {
+    const created = await createFolder(name)
+    await addFolderMangas(created.id, [mangaId])
+    const current = manga.value
+    if (current) {
+      current.folder_ids = [...(current.folder_ids ?? []), created.id].sort(
+        (left, right) => left - right,
+      )
+    }
+    // 清单在菜单下次打开时重新拉取，这里不手动插入避免重复
+    folderCreateDialog.value = false
+    toast.success(`已新建并加入文件夹「${created.name}」`)
+  } catch (err) {
+    toast.error(errorMessage(err))
+  } finally {
+    folderCreateLoading.value = false
+  }
+}
 
 /** 每个可阅读文件的阅读进度，用于展示「继续阅读 n/N」。 */
 const progressByFile = reactive<Record<number, ReadingProgress>>({})
@@ -390,6 +487,47 @@ onMounted(load)
           >
             {{ manga.is_blacklisted ? '解除拉黑' : '拉黑' }}
           </v-btn>
+          <v-menu
+            v-model="folderMenu"
+            :close-on-content-click="false"
+            location="bottom"
+          >
+            <template #activator="{ props: menuProps }">
+              <v-btn
+                variant="tonal"
+                size="small"
+                density="comfortable"
+                prepend-icon="mdi-folder-outline"
+                :disabled="manga.status === 'deleted'"
+                v-bind="menuProps"
+              >
+                加入文件夹
+              </v-btn>
+            </template>
+            <v-card min-width="260">
+              <v-list density="compact" max-height="320" class="overflow-y-auto">
+                <v-list-item
+                  prepend-icon="mdi-folder-plus-outline"
+                  title="新建文件夹并加入"
+                  @click="openFolderCreate"
+                />
+                <v-divider />
+                <v-list-item
+                  v-if="!folderBusy && folderOptions.length === 0"
+                  title="还没有文件夹"
+                  disabled
+                />
+                <v-list-item
+                  v-for="folder in folderOptions"
+                  :key="folder.id"
+                  :prepend-icon="inFolder(folder.id) ? 'mdi-check-circle' : 'mdi-circle-outline'"
+                  :title="folder.name"
+                  :disabled="folderBusy"
+                  @click="toggleInFolder(folder)"
+                />
+              </v-list>
+            </v-card>
+          </v-menu>
           <v-btn
             variant="tonal"
             color="error"
@@ -586,5 +724,26 @@ onMounted(load)
       :loading="blacklistLoading"
       @confirm="confirmBlacklist"
     />
+
+    <v-dialog v-model="folderCreateDialog" max-width="440">
+      <v-card>
+        <v-card-title>新建文件夹并加入</v-card-title>
+        <v-card-text>
+          <v-text-field
+            v-model="folderNameInput"
+            label="文件夹名称"
+            :counter="64"
+            @keyup.enter="confirmFolderCreateAndAdd"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="folderCreateDialog = false">取消</v-btn>
+          <v-btn color="primary" :loading="folderCreateLoading" @click="confirmFolderCreateAndAdd">
+            创建并加入
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>

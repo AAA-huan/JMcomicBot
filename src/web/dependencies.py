@@ -21,6 +21,7 @@ from src.service import (
 from src.message.manager import MessageManager
 from src.service.admin_qq_service import AdminQQService
 from src.service.favorite_service import FavoriteService
+from src.service.folder_service import FolderService
 from src.service.jm_collect_service import JmCollectService
 from src.service.jm_favorite_service import JmFavoriteService
 from src.service.jm_search_service import JmSearchService
@@ -62,6 +63,7 @@ class WebDependencies:  # pylint: disable=too-many-instance-attributes
     audit_query_service: AuditQueryService
     verify_service: VerifyService
     favorite_service: FavoriteService
+    folder_service: FolderService
     admin_qq_service: AdminQQService
     jm_favorite_service: JmFavoriteService
     jm_search_service: JmSearchService

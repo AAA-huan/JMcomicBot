@@ -9,6 +9,7 @@ from src.database.models import Manga, MangaFile, OperationTask
 from src.database.repositories import (
     AuditEventRepository,
     FavoriteRepository,
+    FolderRepository,
     MangaBlacklistRepository,
     MangaRepository,
     MangaTagRepository,
@@ -114,6 +115,8 @@ class MangaResult:  # pylint: disable=too-many-instance-attributes
     is_favorite: bool = False
     is_blacklisted: bool = False
     remote_metadata: Optional[Dict[str, Any]] = None
+    # 漫画所在的本地自定义文件夹 ID 列表（详情接口返回，列表接口不填）
+    folder_ids: tuple[int, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -139,12 +142,13 @@ class OperationTaskResult:  # pylint: disable=too-many-instance-attributes
 class MangaQueryService:
     """提供漫画分页和详情只读查询。"""
 
-    def __init__(
+    def __init__(  # pylint: disable=too-many-arguments
         self,
         manga_repository: MangaRepository,
         tag_repository: MangaTagRepository,
         favorite_repository: Optional[FavoriteRepository] = None,
         blacklist_repository: Optional[MangaBlacklistRepository] = None,
+        folder_repository: Optional[FolderRepository] = None,
     ) -> None:
         self.manga_repository = manga_repository
         self.tag_repository = tag_repository
@@ -157,6 +161,11 @@ class MangaQueryService:
             blacklist_repository
             if blacklist_repository is not None
             else MangaBlacklistRepository(manga_repository.db_manager)
+        )
+        self.folder_repository = (
+            folder_repository
+            if folder_repository is not None
+            else FolderRepository(manga_repository.db_manager)
         )
 
     def _to_result(self, manga: Manga) -> MangaResult:
@@ -199,6 +208,7 @@ class MangaQueryService:
         admin_id: int = 1,
         history_only: bool = False,
         blacklist_only: bool = False,
+        folder_id: Optional[int] = None,
     ) -> PageResult[MangaResult]:
         """按受控条件分页查询漫画。"""
         mangas, total = self.manga_repository.search(
@@ -211,6 +221,7 @@ class MangaQueryService:
             order,
             favorite_owner_id=str(admin_id) if favorite_only else None,
             unfavorite_owner_id=str(admin_id) if unfavorite_only else None,
+            folder_id=folder_id,
             history_only=history_only,
             blacklist_only=blacklist_only,
         )
@@ -246,6 +257,7 @@ class MangaQueryService:
             )
             is not None,
             is_blacklisted=self.blacklist_repository.exists(manga_id),
+            folder_ids=tuple(self.folder_repository.folders_for_manga(manga_id)),
         )
 
 

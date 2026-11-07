@@ -16,6 +16,7 @@ from src.database.models import utc_now
 from src.database.repositories import (
     AuditEventRepository,
     FavoriteRepository,
+    FolderRepository,
     JmFavoriteRepository,
     MangaBlacklistRepository,
     MangaRepository,
@@ -51,6 +52,7 @@ from src.service import (
 )
 from src.service.admin_qq_service import AdminQQService
 from src.service.favorite_service import FavoriteService
+from src.service.folder_service import FolderService
 from src.service.jm_collect_service import JmCollectService
 from src.service.jm_favorite_service import JmFavoriteService
 from src.service.jm_search_service import JmSearchService
@@ -242,6 +244,7 @@ def build_web_context(  # pylint: disable=too-many-locals
     manga_repo = MangaRepository(db_manager, download_root=str(download_root))
     tag_repo = MangaTagRepository(db_manager)
     favorite_repo = FavoriteRepository(db_manager)
+    folder_repo = FolderRepository(db_manager)
     operation_task_repo = OperationTaskRepository(db_manager)
     audit_repo = AuditEventRepository(db_manager)
     event_bus = WebEventBus()
@@ -326,7 +329,10 @@ def build_web_context(  # pylint: disable=too-many-locals
             ),
         ),
         manga_query_service=MangaQueryService(
-            manga_repo, tag_repo, blacklist_repository=blacklist_repo
+            manga_repo,
+            tag_repo,
+            blacklist_repository=blacklist_repo,
+            folder_repository=folder_repo,
         ),
         task_query_service=TaskQueryService(operation_task_repo),
         system_service=SystemService(
@@ -388,6 +394,7 @@ def build_web_context(  # pylint: disable=too-many-locals
         ),
         page_image_service=PageImageService(),
         favorite_service=FavoriteService(favorite_repo, audit_repo),
+        folder_service=FolderService(folder_repo, audit_repo),
         jm_favorite_service=JmFavoriteService(JmFavoriteRepository(db_manager)),
         jm_search_service=JmSearchService(),
         jm_collect_service=JmCollectService(manga_repo, tag_repo, favorite_repo),

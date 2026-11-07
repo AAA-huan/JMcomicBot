@@ -99,6 +99,7 @@ def create_manga_router(
         favorite_only: bool = False,
         history_only: bool = False,
         blacklist_only: bool = False,
+        folder_id: Annotated[Optional[int], Query(ge=1)] = None,
     ) -> dict[str, object]:
         # 伪状态「已下载未收藏」在路由层拆解为 已下载 + 未收藏筛选，
         # 不进入仓储状态白名单，其余非法状态仍由白名单校验拒绝为 400。
@@ -119,6 +120,7 @@ def create_manga_router(
                     unfavorite_only=unfavorite_only,
                     history_only=history_only,
                     blacklist_only=blacklist_only,
+                    folder_id=folder_id,
                     admin_id=authenticated.admin_id,
                 )
             )

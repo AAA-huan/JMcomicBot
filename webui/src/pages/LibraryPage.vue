@@ -6,6 +6,14 @@ import { useDisplay } from 'vuetify'
 import { errorMessage } from '@/api/client'
 import { setFavorite } from '@/api/favorites'
 import {
+  addFolderMangas,
+  createFolder,
+  deleteFolder,
+  listFolders,
+  removeFolderMangas,
+  renameFolder,
+} from '@/api/folders'
+import {
   batchBlacklistMangas,
   batchDeleteMangas,
   batchUnblacklistMangas,
@@ -20,7 +28,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
 import { useCoverPreview } from '@/stores/coverPreview'
 import { useToast } from '@/stores/toast'
-import type { Manga } from '@/types/api'
+import type { Folder, Manga } from '@/types/api'
 import { copyText } from '@/utils/clipboard'
 import { formatDateTime } from '@/utils/format'
 import {
@@ -89,8 +97,20 @@ const filters = reactive({
   page: 1,
   pageSize: 20,
   favoriteOnly: false,
-  collection: 'local' as 'local' | 'favorites' | 'history' | 'blacklist_only',
+  collection: 'local' as 'local' | 'favorites' | 'history' | 'blacklist_only' | 'folder',
+  // 文件夹页签内的当前文件夹 ID；空字符串表示停留在文件夹网格视图
+  folderId: '',
 })
+
+/** 文件夹页签的网格视图（未进入具体文件夹）。 */
+const folderGridView = computed(
+  () => filters.collection === 'folder' && filters.folderId === '',
+)
+
+/** 已进入具体文件夹：列表按 folder_id 筛选，批量区提供移出。 */
+const insideFolder = computed(
+  () => filters.collection === 'folder' && filters.folderId !== '',
+)
 
 /** 各分组的默认排序字段：历史按阅读时间，其余按下载时间。 */
 function defaultSortField(collection: string): string {
@@ -178,6 +198,168 @@ const batchBlacklistDialog = ref(false)
 const batchBlacklistLoading = ref(false)
 const batchBlacklistMode = ref<'add' | 'remove'>('add')
 
+// ===== 本地自定义文件夹 =====
+const folders = ref<Folder[]>([])
+const foldersLoading = ref(false)
+
+// 新建/重命名共用弹窗：folderRenamingId 为 null 表示新建，否则为被重命名的文件夹 ID
+const folderFormDialog = ref(false)
+const folderRenamingId = ref<number | null>(null)
+const folderNameInput = ref('')
+const folderFormLoading = ref(false)
+
+const folderDeleteTarget = ref<Folder | null>(null)
+const folderDeleteDialog = ref(false)
+const folderDeleteLoading = ref(false)
+
+// 批量加入文件夹弹窗
+const batchAddFolderDialog = ref(false)
+const batchAddFolderLoading = ref(false)
+const batchAddFolderIds = ref<number[]>([])
+
+/** 单独拉取文件夹清单；静默模式下失败不打断主视图。 */
+async function loadFolders(options: { silent?: boolean } = {}): Promise<void> {
+  const silent = options.silent === true
+  if (!silent) foldersLoading.value = true
+  error.value = ''
+  try {
+    folders.value = await listFolders()
+  } catch (err) {
+    if (!silent) error.value = errorMessage(err)
+  } finally {
+    if (!silent) foldersLoading.value = false
+  }
+}
+
+function openCreateFolder(): void {
+  folderRenamingId.value = null
+  folderNameInput.value = ''
+  folderFormDialog.value = true
+}
+
+function openRenameFolder(folder: Folder): void {
+  folderRenamingId.value = folder.id
+  folderNameInput.value = folder.name
+  folderFormDialog.value = true
+}
+
+/** 提交新建/重命名：重名由后端返回 409 并提示，不做本地猜测。 */
+async function confirmFolderForm(): Promise<void> {
+  const name = folderNameInput.value.trim()
+  if (!name) {
+    toast.error('请输入文件夹名称')
+    return
+  }
+  if (name.length > 64) {
+    toast.error('文件夹名称不能超过 64 个字符')
+    return
+  }
+  folderFormLoading.value = true
+  try {
+    if (folderRenamingId.value === null) {
+      const created = await createFolder(name)
+      toast.success(`已新建文件夹「${created.name}」`)
+    } else {
+      await renameFolder(folderRenamingId.value, name)
+      toast.success(`已重命名为「${name}」`)
+    }
+    folderFormDialog.value = false
+    await loadFolders()
+  } catch (err) {
+    toast.error(errorMessage(err))
+  } finally {
+    folderFormLoading.value = false
+  }
+}
+
+function askDeleteFolder(folder: Folder): void {
+  folderDeleteTarget.value = folder
+  folderDeleteDialog.value = true
+}
+
+/** 删除文件夹只解除分组关系，不删除漫画本体。 */
+async function confirmDeleteFolder(): Promise<void> {
+  const target = folderDeleteTarget.value
+  if (!target) return
+  folderDeleteLoading.value = true
+  try {
+    await deleteFolder(target.id)
+    toast.success(`已删除文件夹「${target.name}」，漫画未删除`)
+    folderDeleteDialog.value = false
+    await loadFolders()
+  } catch (err) {
+    toast.error(errorMessage(err))
+    folderDeleteDialog.value = false
+  } finally {
+    folderDeleteLoading.value = false
+  }
+}
+
+/** 进入具体文件夹：URL 同时写 collection 与 folder_id，列表复用漫画视图。 */
+function openFolder(folder: Folder): void {
+  updateQuery({ collection: 'folder', folder_id: folder.id, page: 1 })
+}
+
+function exitFolder(): void {
+  updateQuery({ collection: 'folder', folder_id: undefined, page: 1 })
+}
+
+const currentFolder = computed(
+  () => folders.value.find((folder) => String(folder.id) === filters.folderId) ?? null,
+)
+
+async function openBatchAddFolder(): Promise<void> {
+  if (selectedCount.value === 0) return
+  batchAddFolderIds.value = []
+  batchAddFolderDialog.value = true
+  // 弹窗需要最新文件夹清单，其他页签首次进入时列表可能尚未加载
+  await loadFolders({ silent: true })
+}
+
+/** 批量加入：对所选文件夹逐个提交，汇总新增数量。 */
+async function confirmBatchAddFolder(): Promise<void> {
+  const ids = [...selected.value]
+  if (ids.length === 0) {
+    batchAddFolderDialog.value = false
+    return
+  }
+  if (batchAddFolderIds.value.length === 0) {
+    toast.error('请至少选择一个文件夹')
+    return
+  }
+  batchAddFolderLoading.value = true
+  try {
+    let addedCount = 0
+    for (const folderId of batchAddFolderIds.value) {
+      const result = await addFolderMangas(folderId, ids)
+      addedCount += result.added.length
+    }
+    toast.success(
+      addedCount > 0
+        ? `已将 ${addedCount} 个漫画加入文件夹`
+        : '选中的漫画已在目标文件夹中',
+    )
+    batchAddFolderDialog.value = false
+  } catch (err) {
+    toast.error(errorMessage(err))
+  } finally {
+    batchAddFolderLoading.value = false
+  }
+}
+
+/** 文件夹视图内批量移出：操作可逆，与收藏一致不弹确认框。 */
+async function batchRemoveFromFolder(): Promise<void> {
+  const folderId = Number(filters.folderId)
+  if (!Number.isFinite(folderId) || selectedCount.value === 0) return
+  try {
+    const result = await removeFolderMangas(folderId, [...selected.value])
+    toast.success(`已移出 ${result.removed_count} 个漫画`)
+    await load()
+  } catch (err) {
+    toast.error(errorMessage(err))
+  }
+}
+
 const selectedCount = computed(() => selected.value.length)
 
 /** 选中项中已拉黑的 ID，批量解除只提交这些漫画。 */
@@ -220,8 +402,18 @@ function readQuery(): boolean {
   filters.keyword = rawTag || rawSearch
   filters.collection = query.collection === 'blacklist_only' ? 'blacklist_only'
     : query.collection === 'history' ? 'history'
+    : query.collection === 'folder' ? 'folder'
     : query.collection === 'favorites' || query.favorite_only === 'true' ? 'favorites' : 'local'
   filters.favoriteOnly = filters.collection === 'favorites'
+  // folder_id 仅在文件夹页签内生效，其他页签携带时忽略
+  const rawFolderId = Number.parseInt(
+    typeof query.folder_id === 'string' ? query.folder_id : '',
+    10,
+  )
+  filters.folderId =
+    filters.collection === 'folder' && Number.isFinite(rawFolderId) && rawFolderId >= 1
+      ? String(rawFolderId)
+      : ''
   filters.status = typeof query.status === 'string' ? query.status : ''
   // 手拼链接可能同时带上收藏分组与「已下载未收藏」，两者互斥：
   // 状态回落为全部并标记规范化，不向后端透传互斥组合。
@@ -251,9 +443,16 @@ function queryKey(): string {
 
 async function load(options: { silent?: boolean } = {}): Promise<void> {
   const silent = options.silent === true
+  // 文件夹网格视图不加载漫画列表
+  if (folderGridView.value) {
+    await loadFolders(options)
+    return
+  }
   if (!silent) loading.value = true
   error.value = ''
   try {
+    // 进入具体文件夹时顺带拉取文件夹清单，用于横幅名称与批量加入弹窗；失败不阻塞列表
+    if (insideFolder.value) void loadFolders({ silent: true })
     const result = await listMangas({
       page: filters.page,
       page_size: filters.pageSize,
@@ -265,6 +464,7 @@ async function load(options: { silent?: boolean } = {}): Promise<void> {
       favorite_only: filters.favoriteOnly || undefined,
       history_only: filters.collection === 'history' || undefined,
       blacklist_only: filters.collection === 'blacklist_only' || undefined,
+      folder_id: insideFolder.value ? Number(filters.folderId) : undefined,
     })
     mangas.value = result.items
     total.value = result.total
@@ -293,11 +493,12 @@ function updateQuery(patch: Record<string, string | number | undefined>): void {
 
 /** 切换分组时恢复默认排序并回到第一页。 */
 function switchCollection(
-  collection: 'local' | 'favorites' | 'history' | 'blacklist_only',
+  collection: 'local' | 'favorites' | 'history' | 'blacklist_only' | 'folder',
 ): void {
   updateQuery({
     collection: collection === 'local' ? undefined : collection,
     favorite_only: undefined,
+    folder_id: undefined,
     sort: defaultSortField(collection),
     order: 'desc',
     page: 1,
@@ -549,7 +750,7 @@ watch(
       })
       return
     }
-    if (libraryListCache.key !== '' && libraryListCache.key === queryKey()) {
+    if (!folderGridView.value && libraryListCache.key !== '' && libraryListCache.key === queryKey()) {
       // 缓存命中：先渲染旧数据消除等待感，再后台刷新保持一致
       mangas.value = libraryListCache.items
       total.value = libraryListCache.total
@@ -580,7 +781,7 @@ watch(
     </v-alert>
 
     <v-card class="mb-4">
-      <v-card-text class="pb-2">
+      <v-card-text v-if="!folderGridView" class="pb-2">
         <v-row dense>
           <v-col cols="12" md="3">
             <v-text-field
@@ -642,14 +843,15 @@ watch(
         :model-value="filters.collection"
         color="primary"
         aria-label="漫画库分组"
-        @update:model-value="switchCollection($event as 'local' | 'favorites' | 'history' | 'blacklist_only')"
+        @update:model-value="switchCollection($event as 'local' | 'favorites' | 'history' | 'blacklist_only' | 'folder')"
       >
         <v-tab value="local" prepend-icon="mdi-folder-outline">本地</v-tab>
         <v-tab value="favorites" prepend-icon="mdi-star-outline">收藏</v-tab>
         <v-tab value="history" prepend-icon="mdi-history">历史</v-tab>
         <v-tab value="blacklist_only" prepend-icon="mdi-lock">黑名单</v-tab>
+        <v-tab value="folder" prepend-icon="mdi-folder-multiple-outline">文件夹</v-tab>
       </v-tabs>
-      <v-card-actions class="flex-wrap">
+      <v-card-actions v-if="!folderGridView" class="flex-wrap">
         <v-switch
           v-model="coverPreview"
           label="封面预览"
@@ -689,6 +891,24 @@ watch(
           </v-btn>
           <v-btn
             variant="tonal"
+            prepend-icon="mdi-folder-plus-outline"
+            :disabled="selectedCount === 0"
+            @click="openBatchAddFolder"
+          >
+            加入文件夹
+          </v-btn>
+          <v-btn
+            v-if="insideFolder"
+            variant="tonal"
+            color="warning"
+            prepend-icon="mdi-folder-remove-outline"
+            :disabled="selectedCount === 0"
+            @click="batchRemoveFromFolder"
+          >
+            移出文件夹
+          </v-btn>
+          <v-btn
+            variant="tonal"
             color="error"
             prepend-icon="mdi-delete-sweep"
             :disabled="selectedCount === 0"
@@ -719,14 +939,104 @@ watch(
       </v-card-actions>
     </v-card>
 
-    <v-card>
+    <v-card v-if="folderGridView">
+      <v-progress-linear v-if="foldersLoading" indeterminate />
+      <v-card-title class="d-flex align-center">
+        文件夹
+        <v-spacer />
+        <v-btn
+          color="primary"
+          size="small"
+          prepend-icon="mdi-plus"
+          class="mr-2"
+          @click="openCreateFolder"
+        >
+          新建文件夹
+        </v-btn>
+        <v-btn icon="mdi-refresh" variant="text" size="small" aria-label="刷新" @click="loadFolders({})" />
+      </v-card-title>
+      <v-divider />
+      <EmptyState
+        v-if="!foldersLoading && folders.length === 0"
+        icon="mdi-folder-plus-outline"
+        title="还没有文件夹"
+        description="新建文件夹后，可在漫画列表勾选批量加入，或在详情页把漫画加入分组。"
+      />
+      <v-card-text v-else>
+        <v-row dense>
+          <v-col
+            v-for="folder in folders"
+            :key="folder.id"
+            cols="12"
+            sm="6"
+            md="4"
+            lg="3"
+          >
+            <v-card variant="outlined" class="pa-3">
+              <v-card-title class="text-wrap pa-0">
+                <v-btn
+                  variant="text"
+                  color="primary"
+                  class="text-none pa-2"
+                  prepend-icon="mdi-folder-outline"
+                  :aria-label="`打开文件夹 ${folder.name}`"
+                  @click="openFolder(folder)"
+                >
+                  {{ folder.name }}
+                </v-btn>
+              </v-card-title>
+              <v-card-subtitle class="pa-0 text-body-2 mt-1">
+                共 {{ folder.manga_count }} 本 · 更新于
+                {{ formatDateTime(folder.updated_at) }}
+              </v-card-subtitle>
+              <div class="d-flex justify-end mt-2">
+                <v-btn
+                  size="small"
+                  variant="text"
+                  prepend-icon="mdi-pencil-outline"
+                  aria-label="重命名文件夹"
+                  @click="openRenameFolder(folder)"
+                >
+                  重命名
+                </v-btn>
+                <v-btn
+                  size="small"
+                  variant="text"
+                  color="error"
+                  prepend-icon="mdi-delete-outline"
+                  aria-label="删除文件夹"
+                  @click="askDeleteFolder(folder)"
+                >
+                  删除
+                </v-btn>
+              </div>
+            </v-card>
+          </v-col>
+        </v-row>
+      </v-card-text>
+    </v-card>
+
+    <v-card v-else>
       <v-progress-linear v-if="loading" indeterminate />
+
+      <v-sheet v-if="insideFolder" class="pa-3 d-flex align-center ga-2" color="surface-variant">
+        <v-icon icon="mdi-folder-open-outline" color="primary" />
+        <span class="text-body-1">
+          {{ currentFolder ? `文件夹「${currentFolder.name}」` : `文件夹 #${filters.folderId}` }}
+        </span>
+        <v-spacer />
+        <v-btn size="small" variant="text" prepend-icon="mdi-arrow-left" @click="exitFolder">
+          返回文件夹列表
+        </v-btn>
+      </v-sheet>
 
       <EmptyState
         v-if="!loading && mangas.length === 0"
         icon="mdi-bookshelf"
-        title="没有找到漫画"
-        description="调整筛选条件，或前往漫画下载页请求下载新漫画。"
+        :title="insideFolder ? '这个文件夹还没有漫画' : '没有找到漫画'"
+        :description="insideFolder
+          ? '返回漫画列表勾选漫画后，使用「加入文件夹」放入分组。'
+          : '调整筛选条件，或前往漫画下载页请求下载新漫画。'"
       />
 
       <template v-else-if="!mobile">
@@ -1024,5 +1334,58 @@ watch(
       :loading="batchBlacklistLoading"
       @confirm="confirmBatchBlacklist"
     />
+
+    <v-dialog v-model="folderFormDialog" max-width="440">
+      <v-card>
+        <v-card-title>{{ folderRenamingId === null ? '新建文件夹' : '重命名文件夹' }}</v-card-title>
+        <v-card-text>
+          <v-text-field
+            v-model="folderNameInput"
+            label="文件夹名称"
+            :counter="64"
+            @keyup.enter="confirmFolderForm"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="folderFormDialog = false">取消</v-btn>
+          <v-btn color="primary" :loading="folderFormLoading" @click="confirmFolderForm">
+            保存
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
+
+    <ConfirmDialog
+      v-model="folderDeleteDialog"
+      :title="`删除文件夹「${folderDeleteTarget?.name ?? ''}」？`"
+      text="只删除分组关系，夹内漫画不会被删除，漫画库仍可找到它们。"
+      confirm-text="确认删除"
+      :loading="folderDeleteLoading"
+      @confirm="confirmDeleteFolder"
+    />
+
+    <ConfirmDialog
+      v-model="batchAddFolderDialog"
+      :title="`把 ${selectedCount} 个漫画加入文件夹`"
+      confirm-text="确认加入"
+      :loading="batchAddFolderLoading"
+      @confirm="confirmBatchAddFolder"
+    >
+      <div v-if="folders.length === 0" class="text-body-2">
+        还没有文件夹，请先切换到「文件夹」页签新建。
+      </div>
+      <div v-else class="d-flex flex-column" style="max-height: 260px; overflow-y: auto">
+        <v-checkbox
+          v-for="folder in folders"
+          :key="folder.id"
+          v-model="batchAddFolderIds"
+          :value="folder.id"
+          :label="folder.name"
+          density="compact"
+          hide-details
+        />
+      </div>
+    </ConfirmDialog>
   </div>
 </template>

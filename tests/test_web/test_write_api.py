@@ -536,3 +536,99 @@ def test_password_change_requires_old_password(db_manager) -> None:
         )
         assert changed.status_code == 200
         assert client.get("/api/v1/system/status").status_code == 401
+
+
+def test_folder_crud_and_member_batch_flow(db_manager, tmp_path) -> None:
+    """文件夹全生命周期：重名 409、批量成员幂等、删除不影响漫画、审计齐全。"""
+    repository = MangaRepository(db_manager, str(tmp_path / "downloads"))
+    repository.upsert("100", "漫画甲", "作者", 1, 10)
+    repository.upsert("200", "漫画乙", "作者", 1, 10)
+    client, context = _make_client(db_manager)
+    with client:
+        setup_and_login(client)
+        headers = csrf_headers(client)
+
+        created = client.post("/api/v1/folders", json={"name": "分组"}, headers=headers)
+        duplicate = client.post(
+            "/api/v1/folders", json={"name": "分组"}, headers=headers
+        )
+        empty_name = client.post(
+            "/api/v1/folders", json={"name": "   "}, headers=headers
+        )
+        folder_id = created.json()["id"]
+
+        added = client.post(
+            f"/api/v1/folders/{folder_id}/mangas",
+            json={"manga_ids": ["100", "100", "200"]},
+            headers=headers,
+        )
+        readded = client.post(
+            f"/api/v1/folders/{folder_id}/mangas",
+            json={"manga_ids": ["100"]},
+            headers=headers,
+        )
+        missing = client.post(
+            f"/api/v1/folders/{folder_id}/mangas",
+            json={"manga_ids": ["404"]},
+            headers=headers,
+        )
+        removed = client.request(
+            "DELETE",
+            f"/api/v1/folders/{folder_id}/mangas",
+            json={"manga_ids": ["100", "404"]},
+            headers=headers,
+        )
+        reremoved = client.request(
+            "DELETE",
+            f"/api/v1/folders/{folder_id}/mangas",
+            json={"manga_ids": ["100"]},
+            headers=headers,
+        )
+
+        renamed = client.patch(
+            f"/api/v1/folders/{folder_id}", json={"name": "重命名"}, headers=headers
+        )
+        conflict_rename = client.patch(
+            "/api/v1/folders/99999", json={"name": "占位"}, headers=headers
+        )
+        deleted = client.delete(f"/api/v1/folders/{folder_id}", headers=headers)
+        delete_again = client.delete(f"/api/v1/folders/{folder_id}", headers=headers)
+
+    assert created.status_code == 201
+    assert duplicate.status_code == 409
+    assert duplicate.json()["code"] == "FOLDER_NAME_CONFLICT"
+    assert empty_name.status_code == 400
+    assert sorted(added.json()["added"]) == ["100", "200"]
+    assert readded.json() == {"folder_id": folder_id, "added": [], "unchanged_count": 1}
+    assert missing.status_code == 400
+    assert missing.json()["code"] == "INVALID_FOLDER_MEMBERS_REQUEST"
+    assert removed.json()["removed_count"] == 1
+    assert reremoved.json()["removed_count"] == 0
+    assert renamed.json()["name"] == "重命名"
+    assert conflict_rename.status_code == 404
+    assert conflict_rename.json()["code"] == "FOLDER_NOT_FOUND"
+    assert deleted.json() == {"folder_id": folder_id, "deleted": True}
+    assert delete_again.status_code == 404
+    # 删除文件夹不删除漫画本体
+    assert repository.get("100") is not None
+    audit_events = context.dependencies.audit_query_service.list(
+        1, 100, event_type=None, source=None
+    )
+    folder_event_types = [
+        event.event_type
+        for event in audit_events.items
+        if event.event_type.startswith("folder.")
+    ]
+    # 审计按时间倒序：删除、重命名、两次成员变更（移出、加入）、创建
+    assert folder_event_types == [
+        "folder.deleted",
+        "folder.renamed",
+        "folder.members_changed",
+        "folder.members_changed",
+        "folder.created",
+    ]
+    assert all(
+        event.source == "web"
+        for event in audit_events.items
+        if event.event_type.startswith("folder.")
+    )

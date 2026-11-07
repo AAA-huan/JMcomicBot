@@ -14,6 +14,14 @@ vi.mock('@/api/mangas', () => ({
   batchUnblacklistMangas: vi.fn(),
 }))
 vi.mock('@/api/favorites', () => ({ setFavorite: vi.fn() }))
+vi.mock('@/api/folders', () => ({
+  listFolders: vi.fn(),
+  createFolder: vi.fn(),
+  renameFolder: vi.fn(),
+  deleteFolder: vi.fn(),
+  addFolderMangas: vi.fn(),
+  removeFolderMangas: vi.fn(),
+}))
 vi.mock('@/api/tasks', () => ({
   requestDownloads: vi.fn(),
 }))
@@ -26,11 +34,30 @@ import {
   unblacklistManga,
 } from '@/api/mangas'
 import { setFavorite } from '@/api/favorites'
+import {
+  addFolderMangas,
+  createFolder,
+  deleteFolder,
+  listFolders,
+  removeFolderMangas,
+  renameFolder,
+} from '@/api/folders'
 import { requestDownloads } from '@/api/tasks'
 import { ApiError } from '@/api/client'
 import LibraryPage from '@/pages/LibraryPage.vue'
 import { useToast } from '@/stores/toast'
-import type { Manga } from '@/types/api'
+import type { Folder, Manga } from '@/types/api'
+
+function folderFixture(id: number, name: string, mangaCount: number): Folder {
+  return {
+    id,
+    name,
+    sort_order: 0,
+    manga_count: mangaCount,
+    created_at: '2026-10-01T00:00:00',
+    updated_at: '2026-10-02T00:00:00',
+  }
+}
 
 const toast = useToast()
 
@@ -447,6 +474,162 @@ describe('LibraryPage', () => {
     await flushPromises()
 
     expect(unblacklistManga).toHaveBeenCalledWith('100')
+    wrapper.unmount()
+  })
+
+  it('文件夹页签显示卡片网格，点击卡片进入 folder_id 筛选列表并可移出', async () => {
+    vi.mocked(listFolders).mockResolvedValue([folderFixture(7, '追更', 1)])
+    vi.mocked(listMangas).mockResolvedValue({
+      items: [mangaFixture('100', '测试漫画')],
+      page: 1,
+      page_size: 20,
+      total: 1,
+      pages: 1,
+    })
+    vi.mocked(removeFolderMangas).mockResolvedValue({ folder_id: 7, removed_count: 1 })
+
+    const { wrapper, router } = await mountPage('/library?collection=folder')
+    // 网格视图不请求漫画列表
+    expect(listMangas).not.toHaveBeenCalled()
+    expect(listFolders).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('追更')
+    expect(wrapper.text()).toContain('共 1 本')
+
+    const link = wrapper
+      .findAll('button')
+      .find((item) => item.attributes('aria-label') === '打开文件夹 追更')
+    expect(link).toBeTruthy()
+    await link!.trigger('click')
+    await vi.waitFor(() =>
+      expect(router.currentRoute.value.query.folder_id).toBe('7'),
+    )
+    expect(listMangas).toHaveBeenCalledWith(
+      expect.objectContaining({ folder_id: 7 }),
+    )
+    expect(wrapper.text()).toContain('文件夹「追更」')
+
+    await wrapper.find('[aria-label="选择 测试漫画"]').setValue(true)
+    const removeButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === '移出文件夹')
+    expect(removeButton).toBeTruthy()
+    await removeButton!.trigger('click')
+    await flushPromises()
+    expect(removeFolderMangas).toHaveBeenCalledWith(7, ['100'])
+    expect(toastMessages()).toContain('已移出 1 个漫画')
+    wrapper.unmount()
+  })
+
+  it('文件夹网格支持新建与重命名', async () => {
+    vi.mocked(listFolders).mockResolvedValue([folderFixture(7, '追更', 1)])
+    vi.mocked(createFolder).mockResolvedValue(folderFixture(8, '新分组', 0))
+    vi.mocked(renameFolder).mockResolvedValue({ ...folderFixture(7, '改名后', 1) })
+
+    const { wrapper } = await mountPage('/library?collection=folder')
+
+    const createButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === '新建文件夹')
+    await createButton!.trigger('click')
+    await flushPromises()
+
+    const input = document.querySelector('.v-dialog input') as HTMLInputElement
+    expect(input).toBeTruthy()
+    input.value = '新分组'
+    input.dispatchEvent(new Event('input'))
+    await flushPromises()
+    const save = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.v-dialog button'),
+    ).find((button) => button.textContent?.trim() === '保存')
+    expect(save).toBeTruthy()
+    save!.click()
+    await flushPromises()
+    expect(createFolder).toHaveBeenCalledWith('新分组')
+    expect(toastMessages()).toContain('已新建文件夹「新分组」')
+
+    await wrapper
+      .findAll('button')
+      .find((button) => button.attributes('aria-label') === '重命名文件夹')!
+      .trigger('click')
+    await flushPromises()
+    const renameInput = document.querySelector('.v-dialog input') as HTMLInputElement
+    expect(renameInput.value).toBe('追更')
+    renameInput.value = '改名后'
+    renameInput.dispatchEvent(new Event('input'))
+    await flushPromises()
+    const renameSave = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.v-dialog button'),
+    ).find((button) => button.textContent?.trim() === '保存')
+    renameSave!.click()
+    await flushPromises()
+    expect(renameFolder).toHaveBeenCalledWith(7, '改名后')
+    expect(toastMessages()).toContain('已重命名为「改名后」')
+    wrapper.unmount()
+  })
+
+  it('删除文件夹经确认，只解除分组不删除漫画', async () => {
+    vi.mocked(listFolders).mockResolvedValue([folderFixture(7, '追更', 1)])
+    vi.mocked(deleteFolder).mockResolvedValue({ folder_id: 7, deleted: true })
+
+    const { wrapper } = await mountPage('/library?collection=folder')
+
+    const deleteButton = wrapper
+      .findAll('button')
+      .find((button) => button.attributes('aria-label') === '删除文件夹')
+    await deleteButton!.trigger('click')
+    await flushPromises()
+    const confirm = Array.from(document.querySelectorAll('button')).find(
+      (button) => button.textContent?.trim() === '确认删除',
+    )
+    expect(confirm).toBeTruthy()
+    confirm!.click()
+    await flushPromises()
+
+    expect(deleteFolder).toHaveBeenCalledWith(7)
+    expect(toastMessages()).toContain('已删除文件夹「追更」，漫画未删除')
+    wrapper.unmount()
+  })
+
+  it('批量加入文件夹弹窗提交所选文件夹', async () => {
+    vi.mocked(listMangas).mockResolvedValue({
+      items: [mangaFixture('100', '测试漫画')],
+      page: 1,
+      page_size: 20,
+      total: 1,
+      pages: 1,
+    })
+    vi.mocked(listFolders).mockResolvedValue([folderFixture(7, '追更', 1)])
+    vi.mocked(addFolderMangas).mockResolvedValue({
+      folder_id: 7,
+      added: ['100'],
+      unchanged_count: 0,
+    })
+
+    const { wrapper } = await mountPage()
+
+    await wrapper.find('[aria-label="选择 测试漫画"]').setValue(true)
+    const addButton = wrapper
+      .findAll('button')
+      .find((button) => button.text() === '加入文件夹')
+    await addButton!.trigger('click')
+    await flushPromises()
+    expect(listFolders).toHaveBeenCalled()
+
+    // 弹窗中勾选「追更」
+    await vi.waitFor(() =>
+      expect(document.querySelector('.v-dialog input[type="checkbox"]')).toBeTruthy(),
+    )
+    ;(document.querySelector('.v-dialog input[type="checkbox"]') as HTMLInputElement).click()
+    await flushPromises()
+
+    const confirm = Array.from(
+      document.querySelectorAll<HTMLButtonElement>('.v-dialog button'),
+    ).find((button) => button.textContent?.trim() === '确认加入')
+    expect(confirm).toBeTruthy()
+    confirm!.click()
+    await flushPromises()
+    expect(addFolderMangas).toHaveBeenCalledWith(7, ['100'])
+    expect(toastMessages()).toContain('已将 1 个漫画加入文件夹')
     wrapper.unmount()
   })
 })

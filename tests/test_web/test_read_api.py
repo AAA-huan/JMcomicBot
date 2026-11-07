@@ -300,3 +300,34 @@ def test_history_uses_read_time_and_pagination(db_manager) -> None:
             },
         )
         assert searched.json()["total"] == 1
+
+
+def test_manga_filter_by_folder_and_detail_folder_ids(db_manager) -> None:
+    """漫画列表按 folder_id 筛选，详情返回所在文件夹 ID 列表。"""
+    repository = MangaRepository(db_manager, download_root=db_manager.db_dir)
+    repository.upsert("100", "夹内漫画", "作者甲", 2, 20)
+    repository.upsert("200", "夹外漫画", "作者乙", 3, 30)
+
+    with _create_client(db_manager) as client:
+        _setup_and_login(client)
+        headers = {"X-CSRF-Token": client.cookies["jmbot_csrf"]}
+        created = client.post("/api/v1/folders", json={"name": "追更"}, headers=headers)
+        assert created.status_code == 201
+        folder_id = created.json()["id"]
+        added = client.post(
+            f"/api/v1/folders/{folder_id}/mangas",
+            json={"manga_ids": ["100"]},
+            headers=headers,
+        )
+        filtered = client.get("/api/v1/mangas", params={"folder_id": folder_id})
+        detail = client.get("/api/v1/mangas/100")
+        other_detail = client.get("/api/v1/mangas/200")
+        listed = client.get("/api/v1/folders")
+
+    assert added.status_code == 200
+    assert added.json()["added"] == ["100"]
+    assert added.json()["unchanged_count"] == 0
+    assert [item["id"] for item in filtered.json()["items"]] == ["100"]
+    assert detail.json()["folder_ids"] == [folder_id]
+    assert other_detail.json()["folder_ids"] == []
+    assert listed.json()[0]["manga_count"] == 1

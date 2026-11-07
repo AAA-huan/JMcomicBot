@@ -17,6 +17,7 @@ from src.database.models import (
     MangaBlacklist,
     MangaFavorite,
     MangaFile,
+    MangaFolderMember,
     MangaTag,
     ReadingProgress,
     Tag,
@@ -154,7 +155,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             statement = statement.where(Manga.id.in_(tagged_mangas))
         return statement
 
-    def search(
+    def search(  # pylint: disable=too-many-arguments
         self,
         page: int,
         page_size: int,
@@ -165,6 +166,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
         order: str = "desc",
         favorite_owner_id: Optional[str] = None,
         unfavorite_owner_id: Optional[str] = None,
+        folder_id: Optional[int] = None,
         history_only: bool = False,
         blacklist_only: bool = False,
     ) -> tuple[List[Manga], int]:
@@ -222,6 +224,16 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
                     MangaFavorite.manga_id == Manga.id,
                     MangaFavorite.owner_type == "web_admin",
                     MangaFavorite.owner_id == unfavorite_owner_id,
+                )
+                .exists()
+            )
+        if folder_id is not None:
+            # 文件夹筛选与收藏维度正交，EXISTS 写法与收藏筛选对称。
+            base_statement = base_statement.where(
+                select(MangaFolderMember.manga_id)
+                .where(
+                    MangaFolderMember.manga_id == Manga.id,
+                    MangaFolderMember.folder_id == folder_id,
                 )
                 .exists()
             )
@@ -337,7 +349,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             return True
 
     def mark_manga_deleted(self, manga_id: str) -> bool:
-        """保留漫画元数据供删除筛选查询，清除文件、进度、标签及收藏关联。"""
+        """保留漫画元数据供删除筛选查询，清除文件、进度、标签、收藏及文件夹关联。"""
         with self._get_session() as session:
             manga = session.get(Manga, manga_id)
             if manga is None or manga.status == "deleted":
@@ -348,6 +360,10 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
                 delete(MangaFavorite).where(MangaFavorite.manga_id == manga_id)
             )
             session.execute(delete(MangaTag).where(MangaTag.manga_id == manga_id))
+            # 文件夹是本地分组，已删除漫画不应继续出现在文件夹成员里
+            session.execute(
+                delete(MangaFolderMember).where(MangaFolderMember.manga_id == manga_id)
+            )
             manga.status = "deleted"
             manga.updated_at = utc_now()
             session.commit()

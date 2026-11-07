@@ -300,6 +300,46 @@ class MangaBlacklist(Base):
     )
 
 
+class MangaFolder(Base):
+    """本地自定义漫画文件夹，与 JM 站远端收藏夹不联动。"""
+
+    __tablename__ = "manga_folder"
+    __table_args__ = (UniqueConstraint("name", name="uq_manga_folder_name"),)
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(String(64), nullable=False, comment="文件夹名称")
+    sort_order: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, server_default=text("0"), comment="排序值"
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utc_now, comment="创建时间"
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utc_now, comment="更新时间"
+    )
+
+
+class MangaFolderMember(Base):
+    """文件夹与漫画的多对多关系，同一漫画可加入多个文件夹。"""
+
+    __tablename__ = "manga_folder_member"
+    __table_args__ = (Index("ix_manga_folder_member_manga_id", "manga_id"),)
+
+    folder_id: Mapped[int] = mapped_column(
+        ForeignKey("manga_folder.id", ondelete="CASCADE"),
+        primary_key=True,
+        comment="文件夹ID",
+    )
+    manga_id: Mapped[str] = mapped_column(
+        ForeignKey("manga.id", ondelete="CASCADE"),
+        primary_key=True,
+        comment="漫画ID",
+    )
+    added_at: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=utc_now, comment="加入时间"
+    )
+
+
 class JmRemoteFavorite(Base):
     """远端收藏索引，不为尚未下载的漫画创建本地漫画或文件记录。"""
 

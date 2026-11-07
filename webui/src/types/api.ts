@@ -31,6 +31,17 @@ export interface Manga {
   updated_at: string
   tags: string[]
   files: MangaFile[]
+  /** 详情接口返回：漫画所在的本地自定义文件夹 ID 列表。 */
+  folder_ids?: number[]
+}
+
+export interface Folder {
+  id: number
+  name: string
+  sort_order: number
+  manga_count: number
+  created_at: string
+  updated_at: string
 }
 
 export interface OperationTask {

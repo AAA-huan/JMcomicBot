@@ -16,6 +16,7 @@ from src.database.models import utc_now
 from src.database.repositories import (
     AuditEventRepository,
     FavoriteRepository,
+    FolderRepository,
     JmFavoriteRepository,
     MangaBlacklistRepository,
     MangaRepository,
@@ -60,6 +61,7 @@ from src.service import (
 )
 from src.service.admin_qq_service import AdminQQService
 from src.service.favorite_service import FavoriteService
+from src.service.folder_service import FolderService
 from src.service.jm_collect_service import JmCollectService
 from src.service.jm_favorite_service import JmFavoriteService
 from src.service.jm_search_service import JmSearchService
@@ -127,6 +129,7 @@ class MangaBot:  # pylint: disable=too-many-instance-attributes
         self.task_event_repo = TaskEventRepository(self.database_manager)
         self.audit_event_repo = AuditEventRepository(self.database_manager)
         self.favorite_repo = FavoriteRepository(self.database_manager)
+        self.folder_repo = FolderRepository(self.database_manager)
         self.web_admin_repo = WebAdminRepository(self.database_manager)
         self.web_session_repo = WebSessionRepository(self.database_manager)
         self.scan_record_repo = ScanRecordRepository(self.database_manager)
@@ -304,6 +307,8 @@ class MangaBot:  # pylint: disable=too-many-instance-attributes
         self.favorite_service = FavoriteService(
             self.favorite_repo, self.audit_event_repo
         )
+        # 本地自定义文件夹：纯本地分组，与 JM 远端收藏夹不联动
+        self.folder_service = FolderService(self.folder_repo, self.audit_event_repo)
         self.jm_favorite_service = JmFavoriteService(
             JmFavoriteRepository(self.database_manager)
         )
@@ -321,6 +326,7 @@ class MangaBot:  # pylint: disable=too-many-instance-attributes
             self.tag_repo,
             self.favorite_repo,
             self.manga_blacklist_repo,
+            self.folder_repo,
         )
         self.task_query_service = TaskQueryService(self.operation_task_repo)
         self.audit_query_service = AuditQueryService(self.audit_event_repo)
@@ -455,6 +461,7 @@ class MangaBot:  # pylint: disable=too-many-instance-attributes
                         audit_query_service=self.audit_query_service,
                         verify_service=self.verify_service,
                         favorite_service=self.favorite_service,
+                        folder_service=self.folder_service,
                         admin_qq_service=self.admin_qq_service,
                         jm_favorite_service=self.jm_favorite_service,
                         jm_search_service=self.jm_search_service,

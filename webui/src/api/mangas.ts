@@ -23,6 +23,8 @@ export interface MangaListQuery {
   sort?: string
   /** 排序方向，与字段分离；默认 desc（倒序）。 */
   order?: 'asc' | 'desc'
+  /** 按本地自定义文件夹筛选。 */
+  folder_id?: number
 }
 
 export function listMangas(query: MangaListQuery = {}): Promise<PageResult<Manga>> {
