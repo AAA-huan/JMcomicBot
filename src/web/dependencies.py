@@ -18,6 +18,7 @@ from src.service import (
     SettingsService,
     VerifyService,
 )
+from src.message.manager import MessageManager
 from src.service.admin_qq_service import AdminQQService
 from src.service.favorite_service import FavoriteService
 from src.service.jm_collect_service import JmCollectService
@@ -46,6 +47,7 @@ class WebDependencies:  # pylint: disable=too-many-instance-attributes
     manga_service: MangaService
     manga_blacklist_service: MangaBlacklistService
     download_service: DownloadService
+    message_manager: MessageManager
     permission_service: PermissionService
     settings_service: SettingsService
     option_file_service: OptionFileService

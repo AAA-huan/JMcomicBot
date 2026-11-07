@@ -5,6 +5,8 @@ from types import SimpleNamespace
 from typing import Any, Dict, List
 
 import queue
+import threading
+import time
 
 from src.command.executor import CommandExecutor
 from src.message.manager import MessageManager, SendTask
@@ -156,12 +158,14 @@ def test_send_queue_status_reports_pending_and_active() -> None:
     manager = object.__new__(MessageManager)
     manager._queue_count_lock = Lock()
     manager._queue_running = True
+    manager._paused = False
     manager._queue_count = 2
     manager._current_sending_file = "350236-标题(2章).pdf"
 
     status = manager.get_send_queue_status()
 
     assert status["running"] is True
+    assert status["paused"] is False
     assert status["queue_size"] == 2
     assert status["pending_count"] == 1
     assert status["current_file"] == "350236-标题(2章).pdf"
@@ -172,6 +176,7 @@ def test_send_queue_status_without_active_file() -> None:
     manager = object.__new__(MessageManager)
     manager._queue_count_lock = Lock()
     manager._queue_running = True
+    manager._paused = False
     manager._queue_count = 3
     manager._current_sending_file = None
 
@@ -180,3 +185,86 @@ def test_send_queue_status_without_active_file() -> None:
     assert status["queue_size"] == 3
     assert status["pending_count"] == 3
     assert status["current_file"] is None
+
+
+def test_send_queue_pause_resume_idempotent(monkeypatch) -> None:
+    """暂停/恢复幂等，get_send_queue_status 反映 paused 字段。"""
+    monkeypatch.setattr(MessageManager, "_start_file_queue_worker", lambda self: None)
+    manager = MessageManager(config={})
+
+    assert manager.is_paused() is False
+    assert manager.pause() is True
+    assert manager.pause() is False
+    assert manager.is_paused() is True
+    assert manager.get_send_queue_status()["paused"] is True
+    assert manager.resume() is True
+    assert manager.resume() is False
+    assert manager.get_send_queue_status()["paused"] is False
+
+
+def test_send_queue_pause_persisted_via_settings_service(monkeypatch) -> None:
+    """暂停状态经 SettingsService 持久化，新实例读取时恢复为暂停。"""
+    monkeypatch.setattr(MessageManager, "_start_file_queue_worker", lambda self: None)
+
+    class _Settings:
+        def __init__(self) -> None:
+            self.paused = False
+
+        def is_send_queue_paused(self) -> bool:
+            return self.paused
+
+        def set_send_queue_paused(self, paused: bool) -> None:
+            self.paused = paused
+
+    settings = _Settings()
+    manager = MessageManager(config={}, settings_service=settings)
+    assert settings.paused is False
+    manager.pause()
+    assert settings.paused is True
+
+    # 模拟重启：新实例从持久化状态读取到暂停
+    restarted = MessageManager(config={}, settings_service=settings)
+    assert restarted.is_paused() is True
+    restarted.resume()
+    assert settings.paused is False
+
+
+def test_send_queue_pause_blocks_and_resume_continues(tmp_path) -> None:
+    """暂停后工作线程不发送新文件，恢复后继续并完成等待中的 send_file。"""
+    sent: List[str] = []
+
+    class _Socket:
+        sock = SimpleNamespace(connected=True)
+
+        def send(self, payload: str) -> None:
+            sent.append(payload)
+
+    manager = MessageManager(config={})
+    manager.ws_client = SimpleNamespace(ws=_Socket())
+    manager.file_send_interval = 0.01
+    pdf = tmp_path / "350300-Test(1章).pdf"
+    pdf.write_bytes(b"%PDF")
+
+    assert manager.pause() is True
+
+    outcome: Dict[str, object] = {}
+
+    def _send() -> None:
+        try:
+            manager.send_file("10001", str(pdf))
+            outcome["done"] = True
+        except Exception as error:  # pylint: disable=broad-exception-caught
+            outcome["error"] = str(error)
+
+    sender = threading.Thread(target=_send, daemon=True)
+    sender.start()
+    time.sleep(0.6)
+    # 暂停期间不取新任务：文件未发送，等待线程也未返回
+    assert sent == []
+    assert outcome == {}
+
+    assert manager.resume() is True
+    sender.join(timeout=10)
+    assert outcome.get("done") is True
+    assert len(sent) == 1
+    manager.stop(timeout=3)

@@ -54,6 +54,14 @@ export function resumeDownloadQueue(): Promise<QueuePauseResult> {
   return apiRequest<QueuePauseResult>('/tasks/resume', { method: 'POST' })
 }
 
+export function pauseSendQueue(): Promise<QueuePauseResult> {
+  return apiRequest<QueuePauseResult>('/tasks/send-queue/pause', { method: 'POST' })
+}
+
+export function resumeSendQueue(): Promise<QueuePauseResult> {
+  return apiRequest<QueuePauseResult>('/tasks/send-queue/resume', { method: 'POST' })
+}
+
 export function cancelTask(taskId: string): Promise<{ cancelled: boolean }> {
   return apiRequest(`/tasks/${encodeURIComponent(taskId)}/cancel`, { method: 'POST' })
 }

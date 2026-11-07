@@ -199,6 +199,7 @@ class MangaBot:  # pylint: disable=too-many-instance-attributes
             config=self.config_manager.config_dict,
             ws_client=self.ws_client,
             task_log_repo=self.task_log_repo,
+            settings_service=self.settings_service,
         )
 
         self.download_manager = DownloadManager(
@@ -438,6 +439,7 @@ class MangaBot:  # pylint: disable=too-many-instance-attributes
                         manga_service=self.manga_service,
                         manga_blacklist_service=self.manga_blacklist_service,
                         download_service=self.download_service,
+                        message_manager=self.message_manager,
                         permission_service=self.permission_service,
                         settings_service=self.settings_service,
                         option_file_service=self.option_file_service,

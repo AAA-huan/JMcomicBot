@@ -163,6 +163,43 @@ class FakeDownloadQueue:
         return len(task_ids)
 
 
+class FakeMessageManager:
+    """发送队列测试替身：与 MessageManager 相同的暂停语义，状态经 SettingsService 持久化。"""
+
+    def __init__(self, settings_service: SettingsService) -> None:
+        self.settings_service = settings_service
+        self._paused = settings_service.is_send_queue_paused()
+
+    def get_send_queue_status(self) -> Dict[str, object]:
+        """返回与真实发送队列一致的最小状态。"""
+        return {
+            "running": True,
+            "paused": self._paused,
+            "queue_size": 0,
+            "pending_count": 0,
+            "current_file": None,
+        }
+
+    def is_paused(self) -> bool:
+        return self._paused
+
+    def pause(self) -> bool:
+        """幂等暂停；持久化后重启保持，与 MessageManager.pause 一致。"""
+        if self._paused:
+            return False
+        self.settings_service.set_send_queue_paused(True)
+        self._paused = True
+        return True
+
+    def resume(self) -> bool:
+        """幂等恢复。"""
+        if not self._paused:
+            return False
+        self.settings_service.set_send_queue_paused(False)
+        self._paused = False
+        return True
+
+
 class WebTestContext:
     """测试依赖集合与可观测的替身句柄。"""
 
@@ -170,6 +207,7 @@ class WebTestContext:
         self,
         dependencies: WebDependencies,
         download_queue: FakeDownloadQueue,
+        message_manager: FakeMessageManager,
         event_bus: WebEventBus,
         shutdown_calls: List[object],
         reconnect_calls: List[bool],
@@ -179,6 +217,7 @@ class WebTestContext:
     ) -> None:
         self.dependencies = dependencies
         self.download_queue = download_queue
+        self.message_manager = message_manager
         self.event_bus = event_bus
         self.shutdown_calls = shutdown_calls
         self.reconnect_calls = reconnect_calls
@@ -248,6 +287,9 @@ def build_web_context(  # pylint: disable=too-many-locals
         }
     )
 
+    # 发送队列替身：与真实 MessageManager 相同的暂停语义，不启动后台线程
+    message_manager = FakeMessageManager(settings_service)
+
     def request_reconnect() -> bool:
         reconnect_calls.append(True)
         return True
@@ -293,7 +335,7 @@ def build_web_context(  # pylint: disable=too-many-locals
             manga_repository=manga_repo,
             connection_provider=lambda: True,
             download_queue_provider=download_queue.get_queue_status,
-            send_queue_provider=lambda: {"running": True, "queue_size": 0},
+            send_queue_provider=message_manager.get_send_queue_status,
             reconnect_requester=request_reconnect,
             shutdown_requester=request_shutdown,
             restart_requester=request_restart,
@@ -307,6 +349,7 @@ def build_web_context(  # pylint: disable=too-many-locals
             blacklist_service=blacklist_service,
             downloaded_checker=manga_repo,
         ),
+        message_manager=message_manager,
         permission_service=PermissionService(
             permission_manager,
             audit_repo,
@@ -365,6 +408,7 @@ def build_web_context(  # pylint: disable=too-many-locals
     return WebTestContext(
         dependencies=dependencies,
         download_queue=download_queue,
+        message_manager=message_manager,
         event_bus=event_bus,
         shutdown_calls=shutdown_calls,
         reconnect_calls=reconnect_calls,

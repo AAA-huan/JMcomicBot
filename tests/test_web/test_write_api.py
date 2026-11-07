@@ -227,6 +227,44 @@ def test_download_queue_pause_and_resume_endpoints(db_manager) -> None:
     assert context.download_queue.paused is False
 
 
+def test_send_queue_pause_and_resume_endpoints(db_manager) -> None:
+    """发送队列暂停/恢复端点幂等，持久化暂停状态并记录审计事件。"""
+    client, context = _make_client(db_manager)
+    with client:
+        setup_and_login(client)
+        headers = csrf_headers(client)
+
+        paused = client.post("/api/v1/tasks/send-queue/pause", headers=headers)
+        paused_again = client.post("/api/v1/tasks/send-queue/pause", headers=headers)
+        status_paused = client.get("/api/v1/queues/send")
+
+        resumed = client.post("/api/v1/tasks/send-queue/resume", headers=headers)
+        status_resumed = client.get("/api/v1/queues/send")
+
+    assert paused.status_code == 200
+    assert paused.json() == {"paused": True, "changed": True}
+    assert paused_again.json() == {"paused": True, "changed": False}
+    assert status_paused.json()["paused"] is True
+    assert resumed.json() == {"paused": False, "changed": True}
+    assert status_resumed.json()["paused"] is False
+    # 状态持久化在 settings 表，供重启后恢复
+    assert context.dependencies.settings_service.is_send_queue_paused() is False
+    audit_events = context.dependencies.audit_query_service.list(
+        1, 100, event_type=None, source=None
+    )
+    pause_events = [
+        event
+        for event in audit_events.items
+        if event.event_type in {"queue.send_paused", "queue.send_resumed"}
+    ]
+    assert [event.event_type for event in pause_events] == [
+        "queue.send_resumed",
+        "queue.send_paused",
+        "queue.send_paused",
+    ]
+    assert all(event.source == "web" for event in pause_events)
+
+
 def test_task_cancel_endpoints(db_manager) -> None:
     """单个取消与全部取消应区分状态，并拒绝已开始任务。"""
     client, context = _make_client(db_manager)

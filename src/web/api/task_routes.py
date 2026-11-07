@@ -182,6 +182,44 @@ def create_task_router(
             "changed": changed,
         }
 
+    def _control_send_queue(
+        request: Request,
+        authenticated: AuthenticatedSession,
+        paused: bool,
+    ) -> dict[str, object]:
+        """暂停/恢复发送队列并记录审计；幂等，状态未变时 changed 为 False。"""
+        manager = dependencies.message_manager
+        changed = manager.pause() if paused else manager.resume()
+        context = build_operation_context(request, authenticated)
+        dependencies.system_service.audit_repository.record(
+            event_type="queue.send_paused" if paused else "queue.send_resumed",
+            source=context.source,
+            result="succeeded",
+            actor_user_id=context.actor_user_id,
+            actor_group_id=context.actor_group_id,
+            client_ip=context.client_ip,
+            target_type="queue",
+            target_id="send",
+        )
+        _publish_queue_status(dependencies)
+        return {"paused": manager.is_paused(), "changed": changed}
+
+    @router.post("/tasks/send-queue/pause")
+    def pause_send_queue(
+        request: Request,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """暂停发送队列；当前文件发送完成后不再发送新文件，状态持久化重启保持。"""
+        return _control_send_queue(request, authenticated, paused=True)
+
+    @router.post("/tasks/send-queue/resume")
+    def resume_send_queue(
+        request: Request,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """恢复发送队列，继续发送排队中的文件。"""
+        return _control_send_queue(request, authenticated, paused=False)
+
     @router.get("/downloads/progress")
     def get_download_progress(
         _authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],

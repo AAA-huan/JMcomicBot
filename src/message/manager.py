@@ -11,6 +11,7 @@ import time
 
 from src.database.repositories import TaskLogRepository
 from src.logging.logger_config import logger
+from src.service import SettingsService
 
 
 @dataclass
@@ -33,6 +34,7 @@ class MessageManager:
         config: Dict[str, Any],
         ws_client: Optional[Any] = None,
         task_log_repo: Optional[TaskLogRepository] = None,
+        settings_service: Optional[SettingsService] = None,
     ) -> None:
         """
         初始化消息管理器
@@ -41,13 +43,26 @@ class MessageManager:
             config: 配置字典，包含NAPCAT_TOKEN等信息
             ws_client: WebSocket客户端实例
             task_log_repo: 任务日志仓储，记录文件发送任务
+            settings_service: 运行时配置服务，用于持久化发送队列暂停状态
         """
         self.config = config
         self.ws_client = ws_client
         self.task_log_repo = task_log_repo
+        self.settings_service = settings_service
         self.logger = logger
         self._file_queue: queue.Queue = queue.Queue()
         self._queue_running: bool = True
+        # 暂停只阻塞取新任务，不中断正在发送的文件；与下载队列语义一致
+        self._paused: bool = (
+            settings_service.is_send_queue_paused()
+            if settings_service is not None
+            else False
+        )
+        self._resume_event: threading.Event = threading.Event()
+        if not self._paused:
+            self._resume_event.set()
+        # 保护暂停状态与设置写入，避免并发 pause/resume 重复持久化
+        self._queue_state_lock: threading.Lock = threading.Lock()
         self._stop_event: threading.Event = threading.Event()
         self._file_thread: Optional[threading.Thread] = None
         # 保护所有ws.send，避免多线程并发写入连接
@@ -69,6 +84,8 @@ class MessageManager:
             config.get("RESEND_CONFIRM_TIMEOUT", 300)
         )
         self._start_file_queue_worker()
+        if self._paused:
+            self.logger.info("文件发送队列处于暂停状态，恢复前不会发送新文件")
 
     def update_send_settings(
         self,
@@ -106,17 +123,51 @@ class MessageManager:
         current_file 为正在发送的文件名。
 
         Returns:
-            Dict[str, Any]: 包含 running、queue_size、pending_count、current_file 的状态字典
+            Dict[str, Any]: 包含 running、paused、queue_size、pending_count、
+                current_file 的状态字典
         """
         with self._queue_count_lock:
             qc = self._queue_count
         current_file = self._current_sending_file
         return {
             "running": self._queue_running,
+            "paused": self.is_paused(),
             "queue_size": qc,
             "pending_count": max(0, qc - (1 if current_file else 0)),
             "current_file": current_file,
         }
+
+    def is_paused(self) -> bool:
+        """返回发送队列是否处于暂停状态。"""
+        return self._paused
+
+    def pause(self) -> bool:
+        """暂停发送队列，返回本次调用是否改变了状态。
+
+        暂停后当前正在发送的文件会继续完成，队列线程不再取新任务；
+        状态持久化到 settings 表，重启后仍然生效。
+        """
+        with self._queue_state_lock:
+            if self._paused:
+                return False
+            if self.settings_service is not None:
+                self.settings_service.set_send_queue_paused(True)
+            self._paused = True
+            self._resume_event.clear()
+        self.logger.info("文件发送队列已暂停，当前文件发送完成后不再发送新文件")
+        return True
+
+    def resume(self) -> bool:
+        """恢复发送队列，返回本次调用是否改变了状态。"""
+        with self._queue_state_lock:
+            if not self._paused:
+                return False
+            if self.settings_service is not None:
+                self.settings_service.set_send_queue_paused(False)
+            self._paused = False
+            self._resume_event.set()
+        self.logger.info("文件发送队列已恢复")
+        return True
 
     def is_manga_sending(self, manga_id: str) -> bool:
         """返回指定漫画是否有文件正在发送或排队发送。"""
@@ -168,6 +219,11 @@ class MessageManager:
 
         def process_queue() -> None:
             while not self._stop_event.is_set():
+                # 暂停时等待恢复信号；超时用于定期检查停止事件（与下载队列写法一致）
+                if not self._resume_event.wait(timeout=1):
+                    self._flush_pending_errors()
+                    self._cleanup_expired_resends()
+                    continue
                 try:
                     task = self._file_queue.get(timeout=1)
                 except queue.Empty:
@@ -178,6 +234,11 @@ class MessageManager:
                 try:
                     if task is None or self._stop_event.is_set():
                         return
+                    # 取出任务后再次确认暂停：暂停瞬间已出队的任务放回队列，
+                    # 保证暂停生效后不会发送新文件
+                    if self._paused:
+                        self._file_queue.put(task)
+                        continue
                     self._process_send_task(task)
                 finally:
                     self._file_queue.task_done()

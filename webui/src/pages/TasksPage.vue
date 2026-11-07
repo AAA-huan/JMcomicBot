@@ -11,7 +11,9 @@ import {
   cancelTasks,
   listTasks,
   pauseDownloadQueue,
+  pauseSendQueue,
   resumeDownloadQueue,
+  resumeSendQueue,
   retryTasks,
 } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
@@ -19,7 +21,7 @@ import EmptyState from '@/components/EmptyState.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
 import { useSystemStore } from '@/stores/system'
 import { useToast } from '@/stores/toast'
-import type { OperationTask } from '@/types/api'
+import type { OperationTask, QueueStatus } from '@/types/api'
 import { copyText } from '@/utils/clipboard'
 import { formatDateTime } from '@/utils/format'
 import {
@@ -130,7 +132,31 @@ const retryableSelected = computed(() =>
 const downloadQueue = computed(() => system.status?.download_queue ?? null)
 const sendQueue = computed(() => system.status?.send_queue ?? null)
 const downloadPaused = computed(() => downloadQueue.value?.paused === true)
+const sendPaused = computed(() => sendQueue.value?.paused === true)
 const pauseLoading = ref(false)
+const sendPauseLoading = ref(false)
+
+/**
+ * 队列三态判定：已暂停 > 运行中（有任务或正在处理）> 空闲。
+ * `running` 标志只表示工作线程存活，不能用于状态展示。
+ */
+function queueState(
+  status: QueueStatus | null,
+  current: string | null | undefined,
+): { label: string; color: string } {
+  if (status?.paused === true) return { label: '已暂停', color: 'warning' }
+  if (status !== null && (status.queue_size > 0 || current)) {
+    return { label: '运行中', color: 'success' }
+  }
+  return { label: '空闲', color: 'grey' }
+}
+
+const downloadQueueState = computed(() =>
+  queueState(downloadQueue.value, downloadQueue.value?.current_manga_id),
+)
+const sendQueueState = computed(() =>
+  queueState(sendQueue.value, sendQueue.value?.current_file),
+)
 
 /** 暂停/恢复下载队列；当前下载任务不会被中断。 */
 async function toggleQueuePause(): Promise<void> {
@@ -154,6 +180,31 @@ async function toggleQueuePause(): Promise<void> {
     toast.error(errorMessage(err))
   } finally {
     pauseLoading.value = false
+  }
+}
+
+/** 暂停/恢复发送队列；当前正在发送的文件不会被中断。 */
+async function toggleSendQueuePause(): Promise<void> {
+  if (sendPauseLoading.value) return
+  sendPauseLoading.value = true
+  try {
+    const result = sendPaused.value
+      ? await resumeSendQueue()
+      : await pauseSendQueue()
+    toast.success(result.paused
+      ? '发送队列已暂停，当前文件发送完成后不再发送新文件'
+      : '发送队列已恢复，将继续发送排队文件')
+    // 立即更新本地状态，服务端队列事件随后保持一致
+    if (system.status) {
+      system.status.send_queue = {
+        ...system.status.send_queue,
+        paused: result.paused,
+      }
+    }
+  } catch (err) {
+    toast.error(errorMessage(err))
+  } finally {
+    sendPauseLoading.value = false
   }
 }
 
@@ -359,8 +410,8 @@ watch(
             <v-icon class="mr-2">mdi-download-box-outline</v-icon>
             <span class="text-subtitle-2">下载队列</span>
             <v-spacer />
-            <v-chip size="small" variant="tonal" :color="downloadQueue?.running ? 'success' : 'medium-emphasis'">
-              {{ downloadQueue?.running ? '运行中' : '已停止' }}
+            <v-chip size="small" variant="tonal" :color="downloadQueueState.color">
+              {{ downloadQueueState.label }}
             </v-chip>
             <v-btn
               size="small"
@@ -393,17 +444,33 @@ watch(
       </v-col>
       <v-col cols="12" md="6">
         <v-card class="pa-4 h-100">
-          <div class="d-flex align-center">
+          <div class="d-flex align-center flex-wrap">
             <v-icon class="mr-2">mdi-send-outline</v-icon>
             <span class="text-subtitle-2">发送队列</span>
             <v-spacer />
-            <v-chip size="small" variant="tonal" :color="sendQueue?.running ? 'success' : 'medium-emphasis'">
-              {{ sendQueue?.running ? '运行中' : '已停止' }}
+            <v-chip size="small" variant="tonal" :color="sendQueueState.color">
+              {{ sendQueueState.label }}
             </v-chip>
+            <v-btn
+              size="small"
+              variant="tonal"
+              class="ml-2"
+              :color="sendPaused ? 'success' : 'warning'"
+              :prepend-icon="sendPaused ? 'mdi-play' : 'mdi-pause'"
+              :loading="sendPauseLoading"
+              :disabled="!sendQueue?.running"
+              aria-label="暂停或恢复发送队列"
+              @click="toggleSendQueuePause"
+            >
+              {{ sendPaused ? '恢复发送' : '暂停发送' }}
+            </v-btn>
           </div>
           <div class="text-h5 mt-2">{{ sendQueue?.queue_size ?? 0 }} 个任务</div>
           <div class="text-caption text-medium-emphasis text-truncate">
             {{ sendQueue?.current_file ? `正在发送：${sendQueue.current_file}` : '当前没有正在发送的文件' }}
+          </div>
+          <div v-if="sendPaused" class="text-caption text-warning">
+            发送队列已暂停，当前文件发送完成后不再发送新文件。
           </div>
         </v-card>
       </v-col>
