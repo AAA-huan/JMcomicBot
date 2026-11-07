@@ -11,6 +11,11 @@ import time
 
 from src.database.repositories import TaskLogRepository
 from src.logging.logger_config import logger
+from src.service import (
+    OperationContext,
+    OperationTaskService,
+    SettingsService,
+)
 
 
 @dataclass
@@ -21,6 +26,10 @@ class SendTask:
     file_path: str
     group_id: Optional[str]
     private: bool
+    # 发送来源与请求人由入队方填充，用于补写 operation_task 记录
+    source: str = "qq"  # qq / web / system
+    requested_by: Optional[str] = None
+    operation_task_id: Optional[str] = None
     status: str = "pending"  # pending / done / failed
     error: Optional[str] = field(default=None)
 
@@ -33,6 +42,8 @@ class MessageManager:
         config: Dict[str, Any],
         ws_client: Optional[Any] = None,
         task_log_repo: Optional[TaskLogRepository] = None,
+        settings_service: Optional[SettingsService] = None,
+        operation_task_service: Optional[OperationTaskService] = None,
     ) -> None:
         """
         初始化消息管理器
@@ -41,13 +52,28 @@ class MessageManager:
             config: 配置字典，包含NAPCAT_TOKEN等信息
             ws_client: WebSocket客户端实例
             task_log_repo: 任务日志仓储，记录文件发送任务
+            settings_service: 运行时配置服务，用于持久化发送队列暂停状态
+            operation_task_service: 操作任务服务，把发送任务补写进任务管理
         """
         self.config = config
         self.ws_client = ws_client
         self.task_log_repo = task_log_repo
+        self.settings_service = settings_service
+        self.operation_task_service = operation_task_service
         self.logger = logger
         self._file_queue: queue.Queue = queue.Queue()
         self._queue_running: bool = True
+        # 暂停只阻塞取新任务，不中断正在发送的文件；与下载队列语义一致
+        self._paused: bool = (
+            settings_service.is_send_queue_paused()
+            if settings_service is not None
+            else False
+        )
+        self._resume_event: threading.Event = threading.Event()
+        if not self._paused:
+            self._resume_event.set()
+        # 保护暂停状态与设置写入，避免并发 pause/resume 重复持久化
+        self._queue_state_lock: threading.Lock = threading.Lock()
         self._stop_event: threading.Event = threading.Event()
         self._file_thread: Optional[threading.Thread] = None
         # 保护所有ws.send，避免多线程并发写入连接
@@ -69,6 +95,8 @@ class MessageManager:
             config.get("RESEND_CONFIRM_TIMEOUT", 300)
         )
         self._start_file_queue_worker()
+        if self._paused:
+            self.logger.info("文件发送队列处于暂停状态，恢复前不会发送新文件")
 
     def update_send_settings(
         self,
@@ -106,17 +134,51 @@ class MessageManager:
         current_file 为正在发送的文件名。
 
         Returns:
-            Dict[str, Any]: 包含 running、queue_size、pending_count、current_file 的状态字典
+            Dict[str, Any]: 包含 running、paused、queue_size、pending_count、
+                current_file 的状态字典
         """
         with self._queue_count_lock:
             qc = self._queue_count
         current_file = self._current_sending_file
         return {
             "running": self._queue_running,
+            "paused": self.is_paused(),
             "queue_size": qc,
             "pending_count": max(0, qc - (1 if current_file else 0)),
             "current_file": current_file,
         }
+
+    def is_paused(self) -> bool:
+        """返回发送队列是否处于暂停状态。"""
+        return self._paused
+
+    def pause(self) -> bool:
+        """暂停发送队列，返回本次调用是否改变了状态。
+
+        暂停后当前正在发送的文件会继续完成，队列线程不再取新任务；
+        状态持久化到 settings 表，重启后仍然生效。
+        """
+        with self._queue_state_lock:
+            if self._paused:
+                return False
+            if self.settings_service is not None:
+                self.settings_service.set_send_queue_paused(True)
+            self._paused = True
+            self._resume_event.clear()
+        self.logger.info("文件发送队列已暂停，当前文件发送完成后不再发送新文件")
+        return True
+
+    def resume(self) -> bool:
+        """恢复发送队列，返回本次调用是否改变了状态。"""
+        with self._queue_state_lock:
+            if not self._paused:
+                return False
+            if self.settings_service is not None:
+                self.settings_service.set_send_queue_paused(False)
+            self._paused = False
+            self._resume_event.set()
+        self.logger.info("文件发送队列已恢复")
+        return True
 
     def is_manga_sending(self, manga_id: str) -> bool:
         """返回指定漫画是否有文件正在发送或排队发送。"""
@@ -168,6 +230,11 @@ class MessageManager:
 
         def process_queue() -> None:
             while not self._stop_event.is_set():
+                # 暂停时等待恢复信号；超时用于定期检查停止事件（与下载队列写法一致）
+                if not self._resume_event.wait(timeout=1):
+                    self._flush_pending_errors()
+                    self._cleanup_expired_resends()
+                    continue
                 try:
                     task = self._file_queue.get(timeout=1)
                 except queue.Empty:
@@ -178,6 +245,11 @@ class MessageManager:
                 try:
                     if task is None or self._stop_event.is_set():
                         return
+                    # 取出任务后再次确认暂停：暂停瞬间已出队的任务放回队列，
+                    # 保证暂停生效后不会发送新文件
+                    if self._paused:
+                        self._file_queue.put(task)
+                        continue
                     self._process_send_task(task)
                 finally:
                     self._file_queue.task_done()
@@ -210,18 +282,87 @@ class MessageManager:
         except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error(f"记录发送任务日志失败: {e}")
 
+    @staticmethod
+    def _send_operation_context(task: SendTask) -> OperationContext:
+        """由发送任务构造操作上下文，供任务服务记录来源与请求人。"""
+        return OperationContext(
+            source=task.source,
+            actor_user_id=task.requested_by or task.user_id,
+            actor_group_id=None if task.private else task.group_id,
+        )
+
+    # 以下任务记录写入均为辅助记账：失败只记日志、不阻断发送主流程，
+    # 与 _log_send_task 的保护方式一致；未注入任务服务时静默跳过。
+
+    def _create_operation_task(self, task: SendTask) -> Optional[str]:
+        """创建 send 任务记录（排队中），返回任务 ID；未注入服务或写入失败返回 None。"""
+        if self.operation_task_service is None:
+            return None
+        file_name = os.path.basename(task.file_path)
+        manga_id = file_name.split("-", 1)[0]
+        target = "私聊" if task.private else "群聊"
+        summary = f"发送 {file_name} 至 {target} {task.user_id}"
+        try:
+            result = self.operation_task_service.create(
+                "send",
+                self._send_operation_context(task),
+                manga_id=manga_id,
+                summary=summary,
+            )
+            return result.id
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            self.logger.error(f"创建发送任务记录失败: {e}")
+            return None
+
+    def _start_operation_task(self, task: SendTask) -> None:
+        """任务开始发送时置为运行中。"""
+        if self.operation_task_service is None or task.operation_task_id is None:
+            return
+        try:
+            self.operation_task_service.start(
+                task.operation_task_id,
+                f"正在发送 {os.path.basename(task.file_path)}",
+            )
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            self.logger.error(f"更新发送任务状态失败: {e}")
+
+    def _succeed_operation_task(self, task: SendTask) -> None:
+        """发送成功时完成任务记录。"""
+        if self.operation_task_service is None or task.operation_task_id is None:
+            return
+        try:
+            self.operation_task_service.succeed(task.operation_task_id)
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            self.logger.error(f"完成发送任务记录失败: {e}")
+
+    def _fail_operation_task(
+        self, task: SendTask, error_code: str, error_message: str
+    ) -> None:
+        """发送失败时结束任务记录并保存错误信息。"""
+        if self.operation_task_service is None or task.operation_task_id is None:
+            return
+        try:
+            self.operation_task_service.fail(
+                task.operation_task_id, error_code, error_message
+            )
+        except Exception as e:  # pylint: disable=broad-exception-caught
+            self.logger.error(f"结束失败发送任务记录时出错: {e}")
+
     def _process_send_task(self, task: SendTask) -> None:
         """处理单个文件发送任务，发送结果通过条件变量通知等待线程"""
         self._current_sending_file = os.path.basename(task.file_path)
+        self._start_operation_task(task)
         try:
             self._send_file_with_retry(task)
             task.status = "done"
             self._log_send_task(task, "success", "")
+            self._succeed_operation_task(task)
         except Exception as e:  # pylint: disable=broad-exception-caught
             self.logger.error(f"发送文件失败: {task.file_path}, {e}")
             task.status = "failed"
             task.error = str(e)
             self._log_send_task(task, "failed", str(e))
+            self._fail_operation_task(task, "SEND_FAILED", str(e))
             if not self._stop_event.is_set():
                 self._store_pending_error(
                     user_id=task.user_id,
@@ -239,11 +380,18 @@ class MessageManager:
 
     def _enqueue_file_task(self, task: SendTask) -> None:
         """登记并加入文件发送队列，确保所有入队路径使用相同计数规则"""
-        with self._queue_count_lock:
-            if self._stop_event.is_set():
-                raise RuntimeError("文件发送队列已停止")
-            self._queue_count += 1
-            self._file_queue.put(task)
+        # 先创建任务记录再入队，避免工作线程先于记录创建开始处理
+        task.operation_task_id = self._create_operation_task(task)
+        try:
+            with self._queue_count_lock:
+                if self._stop_event.is_set():
+                    raise RuntimeError("文件发送队列已停止")
+                self._queue_count += 1
+                self._file_queue.put(task)
+        except RuntimeError as e:
+            # 队列已停止时任务不会被处理，把记录标失败避免停留在排队
+            self._fail_operation_task(task, "SEND_QUEUE_STOPPED", str(e))
+            raise
 
     def _send_file_with_retry(self, task: SendTask) -> None:
         """尝试发送文件，连接断开时等待重连并重试，超时抛出异常"""
@@ -319,6 +467,9 @@ class MessageManager:
         file_path: str,
         group_id: Optional[str] = None,
         private: bool = True,
+        *,
+        source: str = "qq",
+        requested_by: Optional[str] = None,
     ) -> None:
         """
         发送文件（进入文件发送队列串行执行，直到该文件发送完成或失败）
@@ -328,12 +479,17 @@ class MessageManager:
             file_path: 文件路径
             group_id: 群组ID（群聊时提供）
             private: 是否为私聊
+            source: 发送来源（qq / web / system），用于补写任务记录
+            requested_by: 请求人 QQ 号，缺省取 user_id
 
         Raises:
             FileNotFoundError: 当文件不存在时
             PermissionError: 当文件不可读时
+            ValueError: 当发送来源非法时
             RuntimeError: 当WebSocket连接未建立或发送队列已停止时
         """
+        if source not in ("qq", "web", "system"):
+            raise ValueError(f"不支持的发送来源: {source}")
         if not self._queue_running:
             error_msg = "文件发送队列已停止"
             self.logger.warning(error_msg)
@@ -358,6 +514,8 @@ class MessageManager:
             file_path=os.path.abspath(file_path),
             group_id=group_id,
             private=private,
+            source=source,
+            requested_by=requested_by or user_id,
         )
         self._enqueue_file_task(task)
 
@@ -566,6 +724,9 @@ class MessageManager:
                     file_path=entry["content"],
                     group_id=entry["group_id"],
                     private=entry["private"],
+                    # 重发由用户在 QQ 回复确认触发，来源为 qq
+                    source="qq",
+                    requested_by=entry["user_id"],
                 )
             )
             count += 1

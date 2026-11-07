@@ -29,6 +29,7 @@ test('漫画下载页空态与已有任务提示（不触发真实下载）', as
         queued_count: 0,
         duplicate_count: 1,
         skipped_blacklisted: [],
+        skipped_downloaded: [],
       }),
     })
   })
@@ -37,7 +38,8 @@ test('漫画下载页空态与已有任务提示（不触发真实下载）', as
   await input.fill('900004')
   await page.getByRole('button', { name: '请求下载', exact: true }).click()
 
-  await expect(page.getByText(/已入队 0 个/)).toBeVisible()
+  // 需求5 起提交结果改为全局 toast，提示文案由「已入队」改为「已提交」
+  await expect(page.getByText(/已提交 0 个/)).toBeVisible()
   await expect(page.getByText(/1 个已有活动任务（900004）/)).toBeVisible()
   await expect(input).toHaveValue('')
   expect(

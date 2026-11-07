@@ -3,7 +3,13 @@
 from datetime import timedelta
 from starlette.testclient import TestClient
 
-from src.database.models import MangaFile, ReadingProgress, utc_now
+from src.database.models import (
+    Manga,
+    MangaFile,
+    OperationTask,
+    ReadingProgress,
+    utc_now,
+)
 from src.database.repositories import (
     MangaRepository,
     MangaTagRepository,
@@ -72,7 +78,7 @@ def test_manga_read_api_supports_paging_search_tag_and_sort(db_manager) -> None:
 
         response = client.get(
             "/api/v1/mangas",
-            params={"search": "漫画", "tag": "冒险", "sort": "id_asc"},
+            params={"search": "漫画", "tag": "冒险", "sort": "id", "order": "asc"},
         )
         detail = client.get("/api/v1/mangas/100")
         missing = client.get("/api/v1/mangas/999")
@@ -87,6 +93,74 @@ def test_manga_read_api_supports_paging_search_tag_and_sort(db_manager) -> None:
     assert detail.json()["title"] == "苹果漫画"
     assert "relative_path" not in detail.text
     assert missing.status_code == 404
+
+
+def test_manga_sort_fields_and_order_switch(db_manager) -> None:
+    """排序为字段 + 统一倒序开关：默认下载时间新→旧，切换开关顺序立即反转。"""
+    repository = MangaRepository(db_manager, download_root=db_manager.db_dir)
+    earlier = repository.upsert("100", "B漫画", "作者乙", 2, 20)
+    later = repository.upsert("200", "A漫画", "作者甲", 3, 30)
+    # 手动拉开下载时间，避免两条记录时间戳相同
+    with db_manager.get_session() as session:
+        session.get(Manga, earlier.id).downloaded_at = utc_now() - timedelta(days=5)
+        session.get(Manga, later.id).downloaded_at = utc_now() - timedelta(days=1)
+        session.commit()
+
+    with _create_client(db_manager) as client:
+        _setup_and_login(client)
+        default_order = client.get("/api/v1/mangas")
+        asc_order = client.get("/api/v1/mangas", params={"order": "asc"})
+        title_desc = client.get(
+            "/api/v1/mangas", params={"sort": "title", "order": "desc"}
+        )
+        author_asc = client.get(
+            "/api/v1/mangas", params={"sort": "author", "order": "asc"}
+        )
+        invalid_field = client.get(
+            "/api/v1/mangas", params={"sort": "downloaded_at_desc"}
+        )
+
+    assert default_order.status_code == 200
+    assert [item["id"] for item in default_order.json()["items"]] == ["200", "100"]
+    assert [item["id"] for item in asc_order.json()["items"]] == ["100", "200"]
+    # 标题按字符串比较：A < B，倒序即 B 在前
+    assert [item["id"] for item in title_desc.json()["items"]] == ["100", "200"]
+    # 作者按整串比较：作者甲(U+7532) > 作者乙(U+4E59)，升序即作者乙在前
+    assert [item["id"] for item in author_asc.json()["items"]] == ["100", "200"]
+    assert invalid_field.status_code == 400
+
+
+def test_manga_filter_downloaded_unfavorited(db_manager) -> None:
+    """伪状态已下载未收藏：只含已下载且当前管理员未收藏的漫画；与收藏筛选互斥返回 400。"""
+    repository = MangaRepository(db_manager, download_root=db_manager.db_dir)
+    repository.upsert("100", "收藏的漫画", "作者甲", 2, 20)
+    repository.upsert("200", "未收藏的漫画", "作者乙", 3, 30)
+
+    with _create_client(db_manager) as client:
+        _setup_and_login(client)
+        headers = {"X-CSRF-Token": client.cookies["jmbot_csrf"]}
+        assert (
+            client.put("/api/v1/mangas/100/favorite", headers=headers).status_code
+            == 200
+        )
+        filtered = client.get(
+            "/api/v1/mangas", params={"status": "downloaded_unfavorited"}
+        )
+        conflict = client.get(
+            "/api/v1/mangas",
+            params={"status": "downloaded_unfavorited", "favorite_only": "true"},
+        )
+        searched = client.get(
+            "/api/v1/mangas",
+            params={"status": "downloaded_unfavorited", "search": "未收藏"},
+        )
+
+    assert filtered.status_code == 200
+    assert [item["id"] for item in filtered.json()["items"]] == ["200"]
+    assert conflict.status_code == 400
+    # 伪状态可与搜索组合，拆解逻辑不受影响
+    assert searched.status_code == 200
+    assert [item["id"] for item in searched.json()["items"]] == ["200"]
 
 
 def test_task_read_api_supports_filters_and_details(db_manager) -> None:
@@ -108,6 +182,60 @@ def test_task_read_api_supports_filters_and_details(db_manager) -> None:
     assert response.json()["items"][0]["summary"] == "下载漫画 100"
     assert detail.status_code == 200
     assert detail.json()["id"] == wanted.id
+    assert invalid.status_code == 400
+
+
+def test_task_read_api_supports_send_type_filter(db_manager) -> None:
+    """任务列表支持按新增的 send 类型过滤，验证迁移扩展的 CHECK 约束与类型白名单。"""
+    task_repository = OperationTaskRepository(db_manager)
+    sent = task_repository.create(
+        "send",
+        "qq",
+        requested_by="10001",
+        manga_id="100",
+        summary="发送 100-测试.pdf 至 私聊 10001",
+    )
+
+    with _create_client(db_manager) as client:
+        _setup_and_login(client)
+        filtered = client.get("/api/v1/tasks", params={"task_type": "send"})
+        detail = client.get(f"/api/v1/tasks/{sent.id}")
+
+    assert filtered.status_code == 200
+    assert [item["id"] for item in filtered.json()["items"]] == [sent.id]
+    assert filtered.json()["items"][0]["summary"] == "发送 100-测试.pdf 至 私聊 10001"
+    assert detail.status_code == 200
+    assert detail.json()["task_type"] == "send"
+
+
+def test_task_read_api_supports_created_at_filters(db_manager) -> None:
+    """任务列表支持按创建时间区间筛选，时间格式非法时返回 400。"""
+    task_repository = OperationTaskRepository(db_manager)
+    old_task = task_repository.create("download", "qq", manga_id="100")
+    new_task = task_repository.create("download", "web", manga_id="200")
+    # 手动拉开两条任务的创建时间，便于验证区间过滤
+    with db_manager.get_session() as session:
+        session.get(OperationTask, old_task.id).created_at = utc_now() - timedelta(
+            days=10
+        )
+        session.get(OperationTask, new_task.id).created_at = utc_now() - timedelta(
+            days=1
+        )
+        session.commit()
+
+    with _create_client(db_manager) as client:
+        _setup_and_login(client)
+        ranged = client.get(
+            "/api/v1/tasks",
+            params={
+                "created_after": (utc_now() - timedelta(days=5)).isoformat(),
+                "created_before": utc_now().isoformat(),
+            },
+        )
+        invalid = client.get("/api/v1/tasks", params={"created_after": "not-a-date"})
+
+    assert ranged.status_code == 200
+    assert [item["id"] for item in ranged.json()["items"]] == [new_task.id]
     assert invalid.status_code == 400
 
 
@@ -143,7 +271,8 @@ def test_history_uses_read_time_and_pagination(db_manager) -> None:
             "/api/v1/mangas",
             params={
                 "history_only": True,
-                "sort": "read_at_desc",
+                "sort": "read_at",
+                "order": "desc",
                 "page_size": 1,
             },
         )
@@ -154,7 +283,8 @@ def test_history_uses_read_time_and_pagination(db_manager) -> None:
             "/api/v1/mangas",
             params={
                 "history_only": True,
-                "sort": "read_at_desc",
+                "sort": "read_at",
+                "order": "desc",
                 "page_size": 1,
                 "page": 2,
             },
@@ -164,8 +294,40 @@ def test_history_uses_read_time_and_pagination(db_manager) -> None:
             "/api/v1/mangas",
             params={
                 "history_only": True,
-                "sort": "read_at_desc",
+                "sort": "read_at",
+                "order": "desc",
                 "search": "200",
             },
         )
         assert searched.json()["total"] == 1
+
+
+def test_manga_filter_by_folder_and_detail_folder_ids(db_manager) -> None:
+    """漫画列表按 folder_id 筛选，详情返回所在文件夹 ID 列表。"""
+    repository = MangaRepository(db_manager, download_root=db_manager.db_dir)
+    repository.upsert("100", "夹内漫画", "作者甲", 2, 20)
+    repository.upsert("200", "夹外漫画", "作者乙", 3, 30)
+
+    with _create_client(db_manager) as client:
+        _setup_and_login(client)
+        headers = {"X-CSRF-Token": client.cookies["jmbot_csrf"]}
+        created = client.post("/api/v1/folders", json={"name": "追更"}, headers=headers)
+        assert created.status_code == 201
+        folder_id = created.json()["id"]
+        added = client.post(
+            f"/api/v1/folders/{folder_id}/mangas",
+            json={"manga_ids": ["100"]},
+            headers=headers,
+        )
+        filtered = client.get("/api/v1/mangas", params={"folder_id": folder_id})
+        detail = client.get("/api/v1/mangas/100")
+        other_detail = client.get("/api/v1/mangas/200")
+        listed = client.get("/api/v1/folders")
+
+    assert added.status_code == 200
+    assert added.json()["added"] == ["100"]
+    assert added.json()["unchanged_count"] == 0
+    assert [item["id"] for item in filtered.json()["items"]] == ["100"]
+    assert detail.json()["folder_ids"] == [folder_id]
+    assert other_detail.json()["folder_ids"] == []
+    assert listed.json()[0]["manga_count"] == 1

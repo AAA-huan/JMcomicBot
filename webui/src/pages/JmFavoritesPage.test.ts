@@ -15,10 +15,16 @@ import {
   loginJmAccount, logoutJmAccount, requestJmDownloads, startJmImport,
 } from '@/api/jmFavorites'
 import type { JmImport } from '@/api/jmFavorites'
+import { useToast } from '@/stores/toast'
 import JmFavoritesPage from './JmFavoritesPage.vue'
 
 const account = { connected: true, username: 'user', total: 2, expires_at: '2026-10-04T12:00:00', folders: [{ id: '0', name: '全部收藏' }, { id: '7', name: '精选' }] }
 const job: JmImport = { id: 'job', username: 'user', folder_ids: ['0'], status: 'running', pages_done: 0, imported_count: 0, duplicate_count: 0, local_count: 0, error_message: null, created_at: '', updated_at: '' }
+
+/** 当前展示中的 toast 文案列表。 */
+function toastMessages(): string[] {
+  return useToast().visible.value.map((item) => item.message)
+}
 
 async function mountPage(initialPath = '/jm-favorites') {
   const router = createRouter({ history: createMemoryHistory(), routes: [
@@ -36,6 +42,7 @@ async function mountPage(initialPath = '/jm-favorites') {
 describe('JM 收藏导入页', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useToast().clear()
     vi.mocked(getJmAccount).mockResolvedValue({ connected: false })
     vi.mocked(listJmImports).mockResolvedValue({ items: [] })
     vi.mocked(listJmFavorites).mockResolvedValue({
@@ -61,7 +68,7 @@ describe('JM 收藏导入页', () => {
     await wrapper.find('[data-testid="jm-download"]').trigger('click')
     await flushPromises()
     expect(requestJmDownloads).toHaveBeenCalledWith(['100'])
-    expect(wrapper.text()).toContain('已加入下载队列 1 本')
+    expect(toastMessages().join('')).toContain('已加入下载队列 1 本')
     wrapper.unmount()
   })
 
@@ -72,7 +79,7 @@ describe('JM 收藏导入页', () => {
     await flushPromises()
 
     expect(importJmFavoritesToLibrary).toHaveBeenCalledWith(['100'])
-    expect(wrapper.text()).toContain('已导入 1 本到漫画库')
+    expect(toastMessages().join('')).toContain('已导入 1 本到漫画库')
     expect(wrapper.text()).toContain('已入库')
     expect(wrapper.find('a[href="/library/100"]').exists()).toBe(true)
     expect(wrapper.findAll('input[type="checkbox"]')).toHaveLength(1)

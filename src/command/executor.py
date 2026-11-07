@@ -41,7 +41,8 @@ class CommandExecutor:
     def __init__(  # pylint: disable=too-many-arguments,too-many-positional-arguments
         self,
         message_sender: Callable[[str, str, Optional[str], bool], None],
-        file_sender: Callable[[str, str, Optional[str], bool], None],
+        # 文件发送器额外接受关键字参数 source/requested_by，用于任务记录归属
+        file_sender: Callable[..., None],
         download_manager: Any,
         config: Dict[str, Any],
         self_id_getter: Callable[[], Optional[str]],
@@ -570,7 +571,15 @@ class CommandExecutor:
                 success_count = 0
                 for pdf_path in pdf_paths:
                     try:
-                        self.file_sender(user_id, pdf_path, group_id, private)
+                        # QQ「发送」命令触发，来源记为 qq，请求人为发起用户
+                        self.file_sender(
+                            user_id,
+                            pdf_path,
+                            group_id,
+                            private,
+                            source="qq",
+                            requested_by=user_id,
+                        )
                         success_count += 1
                         file_count += 1
 
@@ -1089,7 +1098,14 @@ class CommandExecutor:
             )
             self.message_sender(user_id, "🚀 开始发送测试文件...", group_id, private)
 
-            self.file_sender(user_id, test_file_path, group_id, private)
+            self.file_sender(
+                user_id,
+                test_file_path,
+                group_id,
+                private,
+                source="qq",
+                requested_by=user_id,
+            )
 
             if os.path.exists(test_file_path):
                 os.remove(test_file_path)

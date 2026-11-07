@@ -30,6 +30,7 @@ from .audit_routes import create_audit_router
 from .common import SESSION_COOKIE_NAME, build_authenticate
 from .document_routes import create_document_router
 from .file_routes import create_file_router
+from .folder_routes import create_folder_router
 from .jm_favorite_routes import create_jm_favorite_router
 from .jm_search_routes import create_jm_search_router
 from .maintenance_routes import create_maintenance_router
@@ -176,6 +177,7 @@ def create_api_router(  # pylint: disable=too-many-locals
     )
     router.include_router(create_system_router(dependencies, authenticate))
     router.include_router(create_manga_router(dependencies, authenticate))
+    router.include_router(create_folder_router(dependencies, authenticate))
     router.include_router(create_file_router(dependencies, authenticate))
     router.include_router(create_task_router(dependencies, authenticate))
     router.include_router(create_jm_favorite_router(dependencies, authenticate))

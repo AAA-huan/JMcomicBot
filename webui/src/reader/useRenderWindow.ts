@@ -14,8 +14,11 @@ import { isRenderingCancelled } from './pdfErrors'
 export interface RenderWindowHandle {
   /** 由模板 ref 调用：注册/注销页面 Canvas。 */
   registerCanvas: (pageNumber: number, canvas: HTMLCanvasElement | null) => void
-  /** 同步渲染窗口：渲染窗口内页面并释放窗口外页面。 */
-  syncWindow: (pageNumbers: number[], scale: number) => Promise<void>
+  /** 同步渲染窗口：渲染窗口内页面并释放窗口外页面；每页可独立缩放。 */
+  syncWindow: (
+    pageNumbers: number[],
+    scaleForPage: (pageNumber: number) => number,
+  ) => Promise<void>
   /** 取消所有进行中的渲染任务（不释放已渲染内容）。 */
   cancelAll: () => void
   /** 释放全部页面资源（组件卸载时调用）。 */
@@ -134,13 +137,15 @@ export function useRenderWindow(
 
   async function syncWindow(
     pageNumbers: number[],
-    scale: number,
+    scaleForPage: (pageNumber: number) => number,
   ): Promise<void> {
     const wanted = new Set(pageNumbers)
     for (const existing of [...canvases.keys()]) {
       if (!wanted.has(existing)) releasePage(existing)
     }
-    await Promise.all(pageNumbers.map((page) => renderPage(page, scale)))
+    await Promise.all(
+      pageNumbers.map((page) => renderPage(page, scaleForPage(page))),
+    )
   }
 
   function cancelAll(): void {

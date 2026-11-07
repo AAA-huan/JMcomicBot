@@ -2,6 +2,8 @@ import { flushPromises, mount } from '@vue/test-utils'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { createVuetify } from 'vuetify'
 
+import { useToast } from '@/stores/toast'
+
 vi.mock('@/api/maintenance', () => ({
   scanLibrary: vi.fn(), repairLibrary: vi.fn(), verifyLibrary: vi.fn(),
   exportData: vi.fn(), validateDataImport: vi.fn(), applyDataImport: vi.fn(),
@@ -18,9 +20,16 @@ import {
 } from '@/api/maintenance'
 import MaintenancePage from './MaintenancePage.vue'
 
+/** 当前展示中的 toast 文案列表。 */
+function toastMessages(): string[] {
+  return useToast().visible.value.map((item) => item.message)
+}
+
 describe('维护页参数', () => {
+
   beforeEach(() => {
     vi.clearAllMocks()
+    useToast().clear()
   })
 
   it('扫描时传递预览及联网补全选项', async () => {
@@ -107,6 +116,7 @@ describe('维护页参数', () => {
 describe('维护页数据迁移', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useToast().clear()
   })
 
   it('导出数据触发浏览器下载并提示文件名', async () => {
@@ -122,7 +132,7 @@ describe('维护页数据迁移', () => {
 
     expect(exportData).toHaveBeenCalledTimes(1)
     expect(click).toHaveBeenCalledTimes(1)
-    expect(wrapper.text()).toContain('数据已导出：data-export-20261023-120000-schema0029_add_manga_status_favorited.zip')
+    expect(toastMessages().join('')).toContain('数据已导出：data-export-20261023-120000-schema0029_add_manga_status_favorited.zip')
     click.mockRestore()
     wrapper.unmount()
   })
@@ -192,7 +202,7 @@ describe('维护页数据迁移', () => {
     await flushPromises()
 
     expect(applyDataImport).toHaveBeenCalledWith(file)
-    expect(wrapper.text()).toContain('数据库导入完成，服务正在重启')
+    expect(toastMessages().join('')).toContain('数据库导入完成，服务正在重启')
     wrapper.unmount()
   })
 
@@ -205,7 +215,7 @@ describe('维护页数据迁移', () => {
     await input.trigger('change')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('网络请求失败：结构错误')
+    expect(toastMessages().join('')).toContain('网络请求失败：结构错误')
     expect(wrapper.find('button').exists()).toBe(true)
     expect(wrapper.text()).not.toContain('确认导入')
     wrapper.unmount()

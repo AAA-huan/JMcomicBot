@@ -14,6 +14,10 @@ export interface TaskListQuery {
   task_type?: string
   status?: string
   manga_id?: string
+  /** 任务创建时间下界（ISO 8601 UTC 时间）。 */
+  created_after?: string
+  /** 任务创建时间上界（ISO 8601 UTC 时间）。 */
+  created_before?: string
 }
 
 export function listTasks(query: TaskListQuery = {}): Promise<PageResult<OperationTask>> {
@@ -48,6 +52,14 @@ export function pauseDownloadQueue(): Promise<QueuePauseResult> {
 
 export function resumeDownloadQueue(): Promise<QueuePauseResult> {
   return apiRequest<QueuePauseResult>('/tasks/resume', { method: 'POST' })
+}
+
+export function pauseSendQueue(): Promise<QueuePauseResult> {
+  return apiRequest<QueuePauseResult>('/tasks/send-queue/pause', { method: 'POST' })
+}
+
+export function resumeSendQueue(): Promise<QueuePauseResult> {
+  return apiRequest<QueuePauseResult>('/tasks/send-queue/resume', { method: 'POST' })
 }
 
 export function cancelTask(taskId: string): Promise<{ cancelled: boolean }> {

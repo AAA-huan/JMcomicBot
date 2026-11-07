@@ -13,11 +13,13 @@ import type { JmAlbumDetail, JmSearchAlbum } from '@/api/jmSearch'
 import { requestDownloads } from '@/api/tasks'
 import EmptyState from '@/components/EmptyState.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
+import { useToast } from '@/stores/toast'
 import { copyText } from '@/utils/clipboard'
 
 const route = useRoute()
 const router = useRouter()
 const { mobile } = useDisplay()
+const toast = useToast()
 
 const albums = ref<JmSearchAlbum[]>([])
 const selected = ref<string[]>([])
@@ -28,8 +30,6 @@ const total = ref(0)
 const loading = ref(false)
 const favoriting = ref(false)
 const error = ref('')
-const actionError = ref('')
-const actionNotice = ref('')
 
 const detailDialog = ref(false)
 const detailLoading = ref(false)
@@ -89,14 +89,12 @@ async function load(targetPage = page.value): Promise<void> {
 
 /** 下载远程漫画，复用任务管理页的批量下载接口。 */
 async function requestDownloadIds(ids: string[]): Promise<void> {
-  actionError.value = ''
-  actionNotice.value = ''
   if (ids.length === 0) {
-    actionError.value = '请选择至少一个漫画'
+    toast.error('请选择至少一个漫画')
     return
   }
   if (ids.length > 100) {
-    actionError.value = '单次最多请求 100 个漫画'
+    toast.error('单次最多请求 100 个漫画')
     return
   }
   try {
@@ -120,23 +118,21 @@ async function requestDownloadIds(ids: string[]): Promise<void> {
         `${result.duplicate_count} 个已有活动任务（${duplicates.join('、')}）`,
       )
     }
-    actionNotice.value = parts.join('，')
+    toast.success(parts.join('，'))
     selected.value = []
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   }
 }
 
 /** 收藏选中漫画：联网存入本地库并标记管理员收藏，不下载本体。 */
 async function favoriteAlbums(ids: string[]): Promise<void> {
-  actionError.value = ''
-  actionNotice.value = ''
   if (ids.length === 0) {
-    actionError.value = '请选择至少一个漫画'
+    toast.error('请选择至少一个漫画')
     return
   }
   if (ids.length > 100) {
-    actionError.value = '单次最多收藏 100 个漫画'
+    toast.error('单次最多收藏 100 个漫画')
     return
   }
   favoriting.value = true
@@ -163,10 +159,10 @@ async function favoriteAlbums(ids: string[]): Promise<void> {
         `${result.failed.length} 本收藏失败（${result.failed.map((item) => `${item.album_id}: ${item.error}`).join('；')}）`,
       )
     }
-    actionNotice.value = parts.join('，') || '没有需要收藏的漫画'
+    toast.success(parts.join('，') || '没有需要收藏的漫画')
     selected.value = []
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     favoriting.value = false
   }
@@ -193,10 +189,8 @@ async function copySelectedIds(): Promise<void> {
   if (selectedCount.value === 0) return
   const ids = [...new Set(selected.value)].join(',')
   const ok = await copyText(ids)
-  actionError.value = ''
-  actionNotice.value = ok
-    ? `已复制 ${selectedCount.value} 个漫画 ID`
-    : '复制失败，请手动选择并复制'
+  if (ok) toast.success(`已复制 ${selectedCount.value} 个漫画 ID`)
+  else toast.error('复制失败，请手动选择并复制')
 }
 
 /** 打开远程漫画详情对话框，失败时在对话框内展示中文错误。 */
@@ -243,28 +237,6 @@ watch(
       <template #append>
         <v-btn v-if="author" size="small" variant="text" @click="load(page)">重试</v-btn>
       </template>
-    </v-alert>
-    <v-alert
-      v-if="actionError"
-      type="error"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionError = ''"
-    >
-      {{ actionError }}
-    </v-alert>
-    <v-alert
-      v-if="actionNotice"
-      type="success"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionNotice = ''"
-    >
-      {{ actionNotice }}
     </v-alert>
 
     <v-card class="mb-4">

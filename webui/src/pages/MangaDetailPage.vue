@@ -1,17 +1,31 @@
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue'
+import { computed, onMounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 
 import { errorMessage } from '@/api/client'
+import { setFavorite } from '@/api/favorites'
 import { fileDownloadUrl, getReadingProgress } from '@/api/files'
-import { deleteManga, getManga, patchManga } from '@/api/mangas'
+import {
+  addFolderMangas,
+  createFolder,
+  listFolders,
+  removeFolderMangas,
+} from '@/api/folders'
+import {
+  blacklistManga,
+  deleteManga,
+  getManga,
+  patchManga,
+  unblacklistManga,
+} from '@/api/mangas'
 import { requestDownloads } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import MangaCover from '@/components/MangaCover.vue'
 import { useCoverPreview } from '@/stores/coverPreview'
-import type { Manga, MangaFile, ReadingProgress } from '@/types/api'
+import { useToast } from '@/stores/toast'
+import type { Folder, Manga, MangaFile, ReadingProgress } from '@/types/api'
 import { formatBytes, formatDateTime, parseTags } from '@/utils/format'
 import {
   colorOf,
@@ -26,6 +40,7 @@ const { coverPreview } = useCoverPreview()
 const route = useRoute()
 const router = useRouter()
 const { mobile } = useDisplay()
+const toast = useToast()
 
 const mangaId = String(route.params.mangaId ?? '')
 
@@ -36,8 +51,6 @@ const coverFile = computed(() => manga.value?.files
   .slice().sort((left, right) => left.id - right.id)[0])
 const loading = ref(false)
 const error = ref('')
-const notice = ref('')
-const actionError = ref('')
 const actionLoading = ref(false)
 
 const editDialog = ref(false)
@@ -47,6 +60,103 @@ const editLoading = ref(false)
 
 const deleteDialog = ref(false)
 const deleteLoading = ref(false)
+
+const favoriteBusy = ref(false)
+
+const blacklistDialog = ref(false)
+const blacklistLoading = ref(false)
+const blacklistMode = ref<'add' | 'remove'>('add')
+
+// 加入文件夹菜单：菜单打开时按需加载文件夹清单
+const folderMenu = ref(false)
+const folderOptions = ref<Folder[]>([])
+const folderBusy = ref(false)
+const folderCreateDialog = ref(false)
+const folderNameInput = ref('')
+const folderCreateLoading = ref(false)
+
+/** 漫画是否已在指定文件夹内。 */
+function inFolder(folderId: number): boolean {
+  return (manga.value?.folder_ids ?? []).includes(folderId)
+}
+
+async function loadFolderOptions(): Promise<void> {
+  folderBusy.value = true
+  try {
+    folderOptions.value = await listFolders()
+  } catch (err) {
+    toast.error(errorMessage(err))
+  } finally {
+    folderBusy.value = false
+  }
+}
+
+watch(folderMenu, (open) => {
+  if (open) void loadFolderOptions()
+})
+
+/** 勾选切换加入/移出，直接提交并更新本地 folder_ids，操作可逆无需确认框。 */
+async function toggleInFolder(folder: Folder): Promise<void> {
+  const current = manga.value
+  if (!current || folderBusy.value) return
+  const joined = inFolder(folder.id)
+  folderBusy.value = true
+  try {
+    if (joined) {
+      await removeFolderMangas(folder.id, [mangaId])
+      current.folder_ids = (current.folder_ids ?? []).filter((id) => id !== folder.id)
+      toast.success(`已移出文件夹「${folder.name}」`)
+    } else {
+      await addFolderMangas(folder.id, [mangaId])
+      current.folder_ids = [...(current.folder_ids ?? []), folder.id].sort(
+        (left, right) => left - right,
+      )
+      toast.success(`已加入文件夹「${folder.name}」`)
+    }
+  } catch (err) {
+    toast.error(errorMessage(err))
+  } finally {
+    folderBusy.value = false
+  }
+}
+
+function openFolderCreate(): void {
+  // 弹窗打开前先收起菜单，避免对话框与菜单叠层
+  folderMenu.value = false
+  folderNameInput.value = ''
+  folderCreateDialog.value = true
+}
+
+/** 新建文件夹并立即把当前漫画加入。 */
+async function confirmFolderCreateAndAdd(): Promise<void> {
+  const name = folderNameInput.value.trim()
+  if (!name) {
+    toast.error('请输入文件夹名称')
+    return
+  }
+  if (name.length > 64) {
+    toast.error('文件夹名称不能超过 64 个字符')
+    return
+  }
+  folderCreateLoading.value = true
+  try {
+    const created = await createFolder(name)
+    await addFolderMangas(created.id, [mangaId])
+    const current = manga.value
+    if (current) {
+      current.folder_ids = [...(current.folder_ids ?? []), created.id].sort(
+        (left, right) => left - right,
+      )
+    }
+    // 清单在菜单下次打开时重新拉取，这里不手动插入避免重复
+    folderCreateDialog.value = false
+    toast.success(`已新建并加入文件夹「${created.name}」`)
+  } catch (err) {
+    toast.error(errorMessage(err))
+  } finally {
+    folderCreateLoading.value = false
+  }
+}
 
 /** 每个可阅读文件的阅读进度，用于展示「继续阅读 n/N」。 */
 const progressByFile = reactive<Record<number, ReadingProgress>>({})
@@ -121,7 +231,7 @@ async function submitEdit(): Promise<void> {
       tags: parseTags(editForm.tags),
     })
     editDialog.value = false
-    notice.value = '元数据已更新'
+    toast.success('元数据已更新')
   } catch (err) {
     editError.value = errorMessage(err)
   } finally {
@@ -140,22 +250,20 @@ function searchSameAuthor(): void {
 }
 
 async function handleDownload(): Promise<void> {
-  actionError.value = ''
-  notice.value = ''
   actionLoading.value = true
   try {
     const result = await requestDownloads([mangaId])
     if (result.skipped_blacklisted.length > 0) {
-      notice.value = '该漫画已被拉黑，下载请求已跳过'
+      toast.success('该漫画已被拉黑，下载请求已跳过')
     } else if (result.skipped_downloaded.length > 0) {
-      notice.value = '该漫画已下载，本次请求已跳过'
+      toast.success('该漫画已下载，本次请求已跳过')
     } else if (result.duplicate_count > 0) {
-      notice.value = '该漫画已有进行中的下载任务'
+      toast.success('该漫画已有进行中的下载任务')
     } else {
-      notice.value = '已加入下载队列'
+      toast.success('已加入下载队列')
     }
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     actionLoading.value = false
   }
@@ -163,15 +271,58 @@ async function handleDownload(): Promise<void> {
 
 async function confirmDelete(): Promise<void> {
   deleteLoading.value = true
-  actionError.value = ''
   try {
     await deleteManga(mangaId)
     await router.replace({ name: 'library', query: route.query })
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     deleteDialog.value = false
   } finally {
     deleteLoading.value = false
+  }
+}
+
+/** 收藏/取消收藏；与漫画库行为一致，操作可逆故无需确认对话框。 */
+async function toggleFavorite(): Promise<void> {
+  if (!manga.value || favoriteBusy.value) return
+  favoriteBusy.value = true
+  const title = manga.value.title
+  try {
+    const result = await setFavorite(manga.value.id, !manga.value.is_favorite)
+    if (manga.value) manga.value.is_favorite = result.is_favorite
+    toast.success(result.is_favorite ? `已收藏《${title}》` : `已取消收藏《${title}》`)
+  } catch (err) {
+    toast.error(errorMessage(err))
+  } finally {
+    favoriteBusy.value = false
+  }
+}
+
+function askBlacklist(): void {
+  if (!manga.value) return
+  blacklistMode.value = manga.value.is_blacklisted ? 'remove' : 'add'
+  blacklistDialog.value = true
+}
+
+/** 拉黑/解除提交；拉黑在删除绑定模式下可能改变文件状态，成功后重新加载详情。 */
+async function confirmBlacklist(): Promise<void> {
+  if (!manga.value || blacklistLoading.value) return
+  blacklistLoading.value = true
+  const title = manga.value.title
+  try {
+    const result = blacklistMode.value === 'add'
+      ? await blacklistManga(manga.value.id)
+      : await unblacklistManga(manga.value.id)
+    toast.success(blacklistMode.value === 'add'
+      ? (result.changed ? `已将《${title}》加入黑名单` : `《${title}》已在黑名单中`)
+      : (result.changed ? `已将《${title}》移出黑名单` : `《${title}》不在黑名单中`))
+    blacklistDialog.value = false
+    await load()
+  } catch (err) {
+    toast.error(errorMessage(err))
+    blacklistDialog.value = false
+  } finally {
+    blacklistLoading.value = false
   }
 }
 
@@ -198,28 +349,6 @@ onMounted(load)
         <v-btn size="small" variant="text" @click="load">重试</v-btn>
       </template>
     </v-alert>
-    <v-alert
-      v-if="actionError"
-      type="error"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionError = ''"
-    >
-      {{ actionError }}
-    </v-alert>
-    <v-alert
-      v-if="notice"
-      type="success"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="notice = ''"
-    >
-      {{ notice }}
-    </v-alert>
 
     <v-progress-linear v-if="loading" indeterminate class="mb-4" />
 
@@ -245,6 +374,14 @@ onMounted(load)
               :color="colorOf(MANGA_STATUS_COLORS, manga.status)"
             >
               {{ labelOf(MANGA_STATUS_LABELS, manga.status) }}
+            </v-chip>
+            <v-chip
+              v-if="manga.is_blacklisted"
+              variant="tonal"
+              size="small"
+              :color="colorOf(MANGA_STATUS_COLORS, 'blacklisted')"
+            >
+              {{ labelOf(MANGA_STATUS_LABELS, 'blacklisted') }}
             </v-chip>
             <v-chip size="small" variant="outlined">ID: {{ manga.id }}</v-chip>
           </div>
@@ -327,6 +464,70 @@ onMounted(load)
           >
             {{ manga.status === 'favorited' ? '下载漫画' : '请求下载' }}
           </v-btn>
+          <v-btn
+            variant="tonal"
+            size="small"
+            density="comfortable"
+            :color="manga.is_favorite ? 'warning' : undefined"
+            :prepend-icon="manga.is_favorite ? 'mdi-star' : 'mdi-star-outline'"
+            :loading="favoriteBusy"
+            :disabled="favoriteBusy || manga.status === 'deleted'"
+            @click="toggleFavorite"
+          >
+            {{ manga.is_favorite ? '取消收藏' : '收藏' }}
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            size="small"
+            density="comfortable"
+            :color="manga.is_blacklisted ? 'warning' : undefined"
+            :prepend-icon="manga.is_blacklisted ? 'mdi-lock-off' : 'mdi-lock'"
+            :disabled="manga.status === 'deleted'"
+            @click="askBlacklist"
+          >
+            {{ manga.is_blacklisted ? '解除拉黑' : '拉黑' }}
+          </v-btn>
+          <v-menu
+            v-model="folderMenu"
+            :close-on-content-click="false"
+            location="bottom"
+          >
+            <template #activator="{ props: menuProps }">
+              <v-btn
+                variant="tonal"
+                size="small"
+                density="comfortable"
+                prepend-icon="mdi-folder-outline"
+                :disabled="manga.status === 'deleted'"
+                v-bind="menuProps"
+              >
+                加入文件夹
+              </v-btn>
+            </template>
+            <v-card min-width="260">
+              <v-list density="compact" max-height="320" class="overflow-y-auto">
+                <v-list-item
+                  prepend-icon="mdi-folder-plus-outline"
+                  title="新建文件夹并加入"
+                  @click="openFolderCreate"
+                />
+                <v-divider />
+                <v-list-item
+                  v-if="!folderBusy && folderOptions.length === 0"
+                  title="还没有文件夹"
+                  disabled
+                />
+                <v-list-item
+                  v-for="folder in folderOptions"
+                  :key="folder.id"
+                  :prepend-icon="inFolder(folder.id) ? 'mdi-check-circle' : 'mdi-circle-outline'"
+                  :title="folder.name"
+                  :disabled="folderBusy"
+                  @click="toggleInFolder(folder)"
+                />
+              </v-list>
+            </v-card>
+          </v-menu>
           <v-btn
             variant="tonal"
             color="error"
@@ -510,5 +711,39 @@ onMounted(load)
       :loading="deleteLoading"
       @confirm="confirmDelete"
     />
+
+    <ConfirmDialog
+      v-model="blacklistDialog"
+      :title="blacklistMode === 'add'
+        ? `拉黑《${manga?.title ?? ''}》？`
+        : `解除拉黑《${manga?.title ?? ''}》？`"
+      :text="blacklistMode === 'add'
+        ? '加入黑名单后，该漫画的下载请求将被跳过。默认不删除本地 PDF；若开启删除绑定则会同时执行删除。'
+        : '移出黑名单后，该漫画可重新下载。已经删除的漫画和 PDF 不会恢复。'"
+      :confirm-text="blacklistMode === 'add' ? '确认拉黑' : '确认解除'"
+      :loading="blacklistLoading"
+      @confirm="confirmBlacklist"
+    />
+
+    <v-dialog v-model="folderCreateDialog" max-width="440">
+      <v-card>
+        <v-card-title>新建文件夹并加入</v-card-title>
+        <v-card-text>
+          <v-text-field
+            v-model="folderNameInput"
+            label="文件夹名称"
+            :counter="64"
+            @keyup.enter="confirmFolderCreateAndAdd"
+          />
+        </v-card-text>
+        <v-card-actions>
+          <v-spacer />
+          <v-btn variant="text" @click="folderCreateDialog = false">取消</v-btn>
+          <v-btn color="primary" :loading="folderCreateLoading" @click="confirmFolderCreateAndAdd">
+            创建并加入
+          </v-btn>
+        </v-card-actions>
+      </v-card>
+    </v-dialog>
   </div>
 </template>

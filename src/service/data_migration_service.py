@@ -41,6 +41,8 @@ _COUNTED_TABLES: Tuple[str, ...] = (
     "manga",
     "manga_file",
     "manga_favorite",
+    "manga_folder",
+    "manga_folder_member",
     "reading_progress",
     "reading_setting",
     "manga_blacklist",

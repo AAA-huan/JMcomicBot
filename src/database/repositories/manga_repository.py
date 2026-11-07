@@ -17,6 +17,7 @@ from src.database.models import (
     MangaBlacklist,
     MangaFavorite,
     MangaFile,
+    MangaFolderMember,
     MangaTag,
     ReadingProgress,
     Tag,
@@ -154,15 +155,18 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             statement = statement.where(Manga.id.in_(tagged_mangas))
         return statement
 
-    def search(
+    def search(  # pylint: disable=too-many-arguments
         self,
         page: int,
         page_size: int,
         search: Optional[str] = None,
         status: Optional[str] = None,
         tag: Optional[str] = None,
-        sort: str = "downloaded_at_desc",
+        sort: str = "downloaded_at",
+        order: str = "desc",
         favorite_owner_id: Optional[str] = None,
+        unfavorite_owner_id: Optional[str] = None,
+        folder_id: Optional[int] = None,
         history_only: bool = False,
         blacklist_only: bool = False,
     ) -> tuple[List[Manga], int]:
@@ -178,17 +182,27 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             .correlate(Manga)
             .scalar_subquery()
         )
-        sort_columns = {
-            "read_at_desc": (last_read.desc(), numeric_id),
-            "downloaded_at_desc": (Manga.downloaded_at.desc(), numeric_id),
-            "downloaded_at_asc": (Manga.downloaded_at, numeric_id),
-            "title_asc": (Manga.title, numeric_id),
-            "title_desc": (Manga.title.desc(), numeric_id),
-            "id_asc": (numeric_id, Manga.id),
-            "id_desc": (numeric_id.desc(), Manga.id),
+        # 排序字段与方向分离：字段决定主排序列，方向统一控制主、次排序键升降。
+        # 作者按整串比较（作者字段是逗号分隔多作者串，不拆分单个作者）。
+        sort_fields = {
+            "read_at": last_read,
+            "downloaded_at": Manga.downloaded_at,
+            "title": Manga.title,
+            "id": numeric_id,
+            "author": Manga.author,
         }
-        if sort not in sort_columns:
-            raise ValueError(f"不支持的漫画排序方式: {sort}")
+        if sort not in sort_fields:
+            raise ValueError(f"不支持的漫画排序字段: {sort}")
+        if order not in {"asc", "desc"}:
+            raise ValueError(f"不支持的漫画排序方向: {order}")
+        primary = sort_fields[sort]
+        if order == "desc":
+            sort_columns = (primary.desc(), numeric_id.desc())
+        else:
+            sort_columns = (primary, numeric_id)
+        # 「已收藏」与「未收藏」两个方向互斥，同时传入视为非法组合，不做兜底。
+        if favorite_owner_id is not None and unfavorite_owner_id is not None:
+            raise ValueError("收藏筛选与未收藏筛选不能同时使用")
         base_statement = self._build_query(search, status, tag, blacklist_only)
         if history_only:
             base_statement = base_statement.where(last_read.is_not(None))
@@ -202,6 +216,27 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
                 )
                 .exists()
             )
+        if unfavorite_owner_id is not None:
+            # 未收藏判定同样按管理员隔离，与上面的 EXISTS 写法对称取反。
+            base_statement = base_statement.where(
+                ~select(MangaFavorite.manga_id)
+                .where(
+                    MangaFavorite.manga_id == Manga.id,
+                    MangaFavorite.owner_type == "web_admin",
+                    MangaFavorite.owner_id == unfavorite_owner_id,
+                )
+                .exists()
+            )
+        if folder_id is not None:
+            # 文件夹筛选与收藏维度正交，EXISTS 写法与收藏筛选对称。
+            base_statement = base_statement.where(
+                select(MangaFolderMember.manga_id)
+                .where(
+                    MangaFolderMember.manga_id == Manga.id,
+                    MangaFolderMember.folder_id == folder_id,
+                )
+                .exists()
+            )
         with self._get_session() as session:
             total = session.scalar(
                 select(func.count()).select_from(  # pylint: disable=not-callable
@@ -210,7 +245,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             )
             statement = (
                 base_statement.options(selectinload(Manga.files))
-                .order_by(*sort_columns[sort])
+                .order_by(*sort_columns)
                 .offset((page - 1) * page_size)
                 .limit(page_size)
             )
@@ -314,7 +349,7 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
             return True
 
     def mark_manga_deleted(self, manga_id: str) -> bool:
-        """保留漫画元数据供删除筛选查询，清除文件、进度、标签及收藏关联。"""
+        """保留漫画元数据供删除筛选查询，清除文件、进度、标签、收藏及文件夹关联。"""
         with self._get_session() as session:
             manga = session.get(Manga, manga_id)
             if manga is None or manga.status == "deleted":
@@ -325,6 +360,10 @@ class MangaRepository(BaseRepository):  # pylint: disable=too-many-public-method
                 delete(MangaFavorite).where(MangaFavorite.manga_id == manga_id)
             )
             session.execute(delete(MangaTag).where(MangaTag.manga_id == manga_id))
+            # 文件夹是本地分组，已删除漫画不应继续出现在文件夹成员里
+            session.execute(
+                delete(MangaFolderMember).where(MangaFolderMember.manga_id == manga_id)
+            )
             manga.status = "deleted"
             manga.updated_at = utc_now()
             session.commit()

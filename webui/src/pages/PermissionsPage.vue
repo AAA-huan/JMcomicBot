@@ -4,6 +4,7 @@ import { onMounted, reactive, ref } from 'vue'
 import { errorMessage } from '@/api/client'
 import { addPermission, getPermissions, removePermission, getAdminQQ, linkAdminQQ, unlinkAdminQQ } from '@/api/permissions'
 import EmptyState from '@/components/EmptyState.vue'
+import { useToast } from '@/stores/toast'
 import type { CachedGroup, CachedUser } from '@/types/api'
 import { formatDateTime } from '@/utils/format'
 import {
@@ -18,13 +19,12 @@ const scopeOrder = [
   'delete_permission_user',
 ]
 
+const toast = useToast()
 const scopes = ref<Record<string, string[]>>({})
 const cachedUsers = ref<CachedUser[]>([])
 const cachedGroups = ref<CachedGroup[]>([])
 const loading = ref(false)
 const error = ref('')
-const actionError = ref('')
-const actionNotice = ref('')
 const linkedQQ = ref<string | null>(null)
 const qqInput = ref('')
 const qqBusy = ref(false)
@@ -61,11 +61,9 @@ async function load(): Promise<void> {
 
 async function saveAdminQQ(unlink = false): Promise<void> {
   if (qqBusy.value) return
-  actionError.value = ''
-  actionNotice.value = ''
   const qq = qqInput.value.trim()
   if (!unlink && !/^[1-9][0-9]{0,19}$/.test(qq)) {
-    actionError.value = 'QQ 号必须是 1–20 位正整数数字，不能含前导零'
+    toast.error('QQ 号必须是 1–20 位正整数数字，不能含前导零')
     return
   }
   qqBusy.value = true
@@ -73,9 +71,9 @@ async function saveAdminQQ(unlink = false): Promise<void> {
     const result = unlink ? await unlinkAdminQQ() : await linkAdminQQ(qq)
     linkedQQ.value = result.qq_id
     qqInput.value = result.qq_id ?? ''
-    actionNotice.value = unlink ? '已解除管理员 QQ 关联' : `已关联管理员 QQ：${result.qq_id}`
+    toast.success(unlink ? '已解除管理员 QQ 关联' : `已关联管理员 QQ：${result.qq_id}`)
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     qqBusy.value = false
   }
@@ -87,42 +85,38 @@ function isValidId(value: string): boolean {
 
 async function addToScope(scope: string, rawValue: string): Promise<void> {
   const value = rawValue.trim()
-  actionError.value = ''
-  actionNotice.value = ''
   if (!value) {
-    actionError.value = '请输入 QQ 号或群号'
+    toast.error('请输入 QQ 号或群号')
     return
   }
   if (!isValidId(value)) {
-    actionError.value = 'ID 必须是 1-64 位数字'
+    toast.error('ID 必须是 1-64 位数字')
     return
   }
   adding[scope] = true
   try {
     const result = await addPermission(scope, value)
-    actionNotice.value = result.changed
+    toast.success(result.changed
       ? `已添加到${PERMISSION_SCOPE_LABELS[scope] ?? scope}：${value}`
-      : `${value} 已在该名单中`
+      : `${value} 已在该名单中`)
     addInputs[scope] = ''
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     adding[scope] = false
   }
 }
 
 async function removeFromScope(scope: string, value: string): Promise<void> {
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     const result = await removePermission(scope, value)
-    actionNotice.value = result.changed
+    toast.success(result.changed
       ? `已从${PERMISSION_SCOPE_LABELS[scope] ?? scope}移除：${value}`
-      : `${value} 不在该名单中`
+      : `${value} 不在该名单中`)
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   }
 }
 
@@ -136,28 +130,6 @@ onMounted(load)
       <template #append>
         <v-btn size="small" variant="text" @click="load">重试</v-btn>
       </template>
-    </v-alert>
-    <v-alert
-      v-if="actionError"
-      type="error"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionError = ''"
-    >
-      {{ actionError }}
-    </v-alert>
-    <v-alert
-      v-if="actionNotice"
-      type="success"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionNotice = ''"
-    >
-      {{ actionNotice }}
     </v-alert>
 
     <v-progress-linear v-if="loading" indeterminate class="mb-4" />

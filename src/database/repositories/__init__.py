@@ -2,6 +2,7 @@
 
 from .audit_event_repository import AuditEventRepository
 from .favorite_repository import FavoriteRepository
+from .folder_repository import FolderRepository
 from .jm_favorite_repository import JmFavoriteRepository
 from .manga_blacklist_repository import MangaBlacklistRepository
 from .manga_repository import MangaRepository
@@ -30,6 +31,7 @@ from .web_auth_repository import (
 __all__ = [
     "AuditEventRepository",
     "FavoriteRepository",
+    "FolderRepository",
     "JmFavoriteRepository",
     "MangaBlacklistRepository",
     "MangaRepository",

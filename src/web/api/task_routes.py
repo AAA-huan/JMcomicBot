@@ -1,6 +1,7 @@
 """下载任务查询、创建与取消 API。"""
 
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Annotated, Callable, List, Optional
 
 import threading
@@ -67,6 +68,17 @@ class BatchTaskIdsRequest(BaseModel):
     task_ids: List[str] = Field(min_length=1, max_length=100)
 
 
+def _parse_utc_datetime(value: str, field: str) -> datetime:
+    """解析 ISO 8601 时间并转换为与数据库一致的 UTC 无时区约定。"""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError(f"参数 {field} 不是合法的时间格式") from error
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
 def create_task_router(
     dependencies: WebDependencies, authenticate: AuthenticateCallable
 ) -> APIRouter:
@@ -81,11 +93,23 @@ def create_task_router(
         task_type: Optional[str] = None,
         task_status: Annotated[Optional[str], Query(alias="status")] = None,
         manga_id: Optional[str] = None,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
     ) -> dict[str, object]:
         try:
+            after = (
+                _parse_utc_datetime(created_after, "created_after")
+                if created_after is not None
+                else None
+            )
+            before = (
+                _parse_utc_datetime(created_before, "created_before")
+                if created_before is not None
+                else None
+            )
             return asdict(
                 dependencies.task_query_service.list(
-                    page, page_size, task_type, task_status, manga_id
+                    page, page_size, task_type, task_status, manga_id, after, before
                 )
             )
         except ValueError as error:
@@ -157,6 +181,44 @@ def create_task_router(
             "paused": dependencies.download_service.is_paused(),
             "changed": changed,
         }
+
+    def _control_send_queue(
+        request: Request,
+        authenticated: AuthenticatedSession,
+        paused: bool,
+    ) -> dict[str, object]:
+        """暂停/恢复发送队列并记录审计；幂等，状态未变时 changed 为 False。"""
+        manager = dependencies.message_manager
+        changed = manager.pause() if paused else manager.resume()
+        context = build_operation_context(request, authenticated)
+        dependencies.system_service.audit_repository.record(
+            event_type="queue.send_paused" if paused else "queue.send_resumed",
+            source=context.source,
+            result="succeeded",
+            actor_user_id=context.actor_user_id,
+            actor_group_id=context.actor_group_id,
+            client_ip=context.client_ip,
+            target_type="queue",
+            target_id="send",
+        )
+        _publish_queue_status(dependencies)
+        return {"paused": manager.is_paused(), "changed": changed}
+
+    @router.post("/tasks/send-queue/pause")
+    def pause_send_queue(
+        request: Request,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """暂停发送队列；当前文件发送完成后不再发送新文件，状态持久化重启保持。"""
+        return _control_send_queue(request, authenticated, paused=True)
+
+    @router.post("/tasks/send-queue/resume")
+    def resume_send_queue(
+        request: Request,
+        authenticated: Annotated[AuthenticatedSession, Depends(authenticate)],
+    ) -> dict[str, object]:
+        """恢复发送队列，继续发送排队中的文件。"""
+        return _control_send_queue(request, authenticated, paused=False)
 
     @router.get("/downloads/progress")
     def get_download_progress(

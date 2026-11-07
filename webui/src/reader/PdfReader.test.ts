@@ -40,14 +40,26 @@ vi.mock('./pageImage', () => ({
   probePageImage: pageImageMocks.probePageImage,
   loadPageImageSize: pageImageMocks.loadPageImageSize,
 }))
+const renderMocks = vi.hoisted(() => ({
+  syncWindow: vi.fn(),
+}))
+const pdfMocks = vi.hoisted(() => ({
+  pageSizes: [] as Array<{ width: number; height: number }>,
+}))
 vi.mock('./usePdfDocument', () => ({
   usePdfDocument: () => ({
     doc: ref({
       numPages: 12,
-      getPage: async () => ({
-        getViewport: () => ({ width: 600, height: 800 }),
-        cleanup: vi.fn(),
-      }),
+      getPage: async (pageNumber: number) => {
+        const size = pdfMocks.pageSizes[pageNumber - 1] ?? {
+          width: 600,
+          height: 800,
+        }
+        return {
+          getViewport: () => size,
+          cleanup: vi.fn(),
+        }
+      },
     }),
     load: async () => null,
     destroy: vi.fn(),
@@ -56,7 +68,7 @@ vi.mock('./usePdfDocument', () => ({
 vi.mock('./useRenderWindow', () => ({
   useRenderWindow: () => ({
     registerCanvas: vi.fn(),
-    syncWindow: vi.fn(),
+    syncWindow: renderMocks.syncWindow,
     releaseAll: vi.fn(),
   }),
 }))
@@ -144,6 +156,8 @@ beforeEach(() => {
   pageImageMocks.probePageImage.mockResolvedValue({ kind: 'fallback' })
   pageImageMocks.loadPageImageSize.mockReset()
   pageImageMocks.loadPageImageSize.mockResolvedValue({ width: 1000, height: 1320 })
+  renderMocks.syncWindow.mockReset()
+  pdfMocks.pageSizes = []
   vi.mocked(getReaderSettings).mockReset()
   vi.mocked(updateReaderSettings).mockReset()
   vi.mocked(updateReaderSettings).mockImplementation(async (payload) =>
@@ -211,7 +225,7 @@ describe('初始化', () => {
     wrapper.unmount()
   })
 
-  it('首页尺寸后台补全，不阻塞 loading 且不改变其余页占位', async () => {
+  it('连排窗口内未知页后台补全真实尺寸，窗口外保持 probe 占位', async () => {
     vi.mocked(getReadingProgress).mockResolvedValue({
       file_id: 42,
       page_number: 2,
@@ -219,30 +233,177 @@ describe('初始化', () => {
       percent: 8,
       updated_at: null,
     })
-    let resolveFirstSize!: (size: PageBaseSize | null) => void
-    pageImageMocks.loadPageImageSize.mockReturnValue(
-      new Promise((resolve) => {
-        resolveFirstSize = resolve
-      }),
+    const pending: Array<(size: PageBaseSize | null) => void> = []
+    pageImageMocks.loadPageImageSize.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          pending.push(resolve)
+        }),
     )
     useImageProbe({ width: 800, height: 1200 })
     const wrapper = await mountReader({ continuous: true, prefetch_pages: 2 })
 
     expect(wrapper.find('.reader-status').exists()).toBe(false)
     expect(pageImageMocks.probePageImage).toHaveBeenCalledWith(42, 2)
-    expect(pageImageMocks.loadPageImageSize).toHaveBeenCalledWith(42, 1)
+    // 只请求窗口内（1-4 页）未知页，当前页已有 probe 尺寸
+    expect(pageImageMocks.loadPageImageSize.mock.calls).toEqual([
+      [42, 1],
+      [42, 3],
+      [42, 4],
+    ])
     const pageOne = wrapper.find('[data-reader-page="1"]')
-    const pageThree = wrapper.find('[data-reader-page="3"]')
+    const pageFive = wrapper.find('[data-reader-page="5"]')
     expect(pageOne.attributes('style')).toContain('width: 800px')
-    expect(pageThree.attributes('style')).toContain('width: 800px')
+    expect(pageFive.attributes('style')).toContain('width: 800px')
 
-    resolveFirstSize({ width: 1000, height: 1320 })
+    for (const resolve of pending) resolve({ width: 1000, height: 1320 })
     await flushPromises()
 
     expect(pageOne.attributes('style')).toContain('width: 1000px')
-    // 其余未知页继续使用 probe 页尺寸，不随首页尺寸整体跳动
-    expect(pageThree.attributes('style')).toContain('width: 800px')
+    // 窗口外页面继续使用 probe 页尺寸，不随窗口补全整体跳动
+    expect(pageFive.attributes('style')).toContain('width: 800px')
     wrapper.unmount()
+  })
+
+  it('连排适宽按页独立缩放，宽高比不同的页面都满宽', async () => {
+    vi.mocked(getReadingProgress).mockResolvedValue({
+      file_id: 42,
+      page_number: 1,
+      page_count: 3,
+      percent: 0,
+      updated_at: null,
+    })
+    useImageProbe({ width: 800, height: 1200 })
+    pageImageMocks.loadPageImageSize.mockImplementation(
+      async (_fileId: number, pageNumber: number) =>
+        pageNumber === 2
+          ? { width: 400, height: 300 }
+          : { width: 800, height: 400 },
+    )
+    const widthSpy = vi
+      .spyOn(HTMLElement.prototype, 'clientWidth', 'get')
+      .mockReturnValue(600)
+    const heightSpy = vi
+      .spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+      .mockReturnValue(1000)
+    try {
+      const wrapper = await mountReader({ continuous: true, prefetch_pages: 2 })
+
+      // 可用宽度 600 - 16*2 = 568；三页宽高比不同但都满宽
+      const styles = wrapper
+        .findAll('.reader-page')
+        .map((page) => page.attributes('style'))
+      expect(styles).toHaveLength(3)
+      for (const style of styles) {
+        expect(style).toContain('width: 568px')
+      }
+      // 高度按各页自身宽高比计算，不再统一套用最大页倍率
+      expect(styles[0]).toContain('height: 852px')
+      expect(styles[1]).toContain('height: 426px')
+      expect(styles[2]).toContain('height: 284px')
+      wrapper.unmount()
+    } finally {
+      widthSpy.mockRestore()
+      heightSpy.mockRestore()
+    }
+  })
+
+  it('连排补齐更早页面尺寸后补偿滚动位置，当前页不跳动', async () => {
+    vi.mocked(getReadingProgress).mockResolvedValue({
+      file_id: 42,
+      page_number: 2,
+      page_count: 3,
+      percent: 40,
+      updated_at: null,
+    })
+    const pending: Array<(size: PageBaseSize | null) => void> = []
+    pageImageMocks.loadPageImageSize.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          pending.push(resolve)
+        }),
+    )
+    useImageProbe({ width: 800, height: 1200 })
+    const wrapper = await mountReader({
+      continuous: true,
+      reading_mode: 'scroll',
+      prefetch_pages: 1,
+    })
+
+    const scroll = wrapper.find('.reader-scroll').element as HTMLElement
+    scroll.scrollTop = 500
+    // 第 1 页真实高度 1600，比 probe 占位高 400
+    pending[0]({ width: 800, height: 1600 })
+    await flushPromises()
+
+    expect(scroll.scrollTop).toBe(900)
+    pending[1]({ width: 800, height: 1200 })
+    wrapper.unmount()
+  })
+
+  it('多页尺寸同批补全时滚动补偿累加，不互相覆盖', async () => {
+    vi.mocked(getReadingProgress).mockResolvedValue({
+      file_id: 42,
+      page_number: 3,
+      page_count: 5,
+      percent: 50,
+      updated_at: null,
+    })
+    const pending: Array<(size: PageBaseSize | null) => void> = []
+    pageImageMocks.loadPageImageSize.mockImplementation(
+      () =>
+        new Promise((resolve) => {
+          pending.push(resolve)
+        }),
+    )
+    useImageProbe({ width: 800, height: 1200 })
+    const wrapper = await mountReader({
+      continuous: true,
+      reading_mode: 'scroll',
+      prefetch_pages: 2,
+    })
+
+    const scroll = wrapper.find('.reader-scroll').element as HTMLElement
+    scroll.scrollTop = 500
+    // 第 1 页高 1600（+400）、第 2 页高 1800（+600），同批到达需累加
+    pending[0]({ width: 800, height: 1600 })
+    pending[1]({ width: 800, height: 1800 })
+    await flushPromises()
+
+    expect(scroll.scrollTop).toBe(1500)
+    pending[2]({ width: 800, height: 1200 })
+    pending[3]({ width: 800, height: 1200 })
+    wrapper.unmount()
+  })
+
+  it('PDF.js 连排按每页自身倍率渲染画布', async () => {
+    pdfMocks.pageSizes = Array.from({ length: 12 }, (_, index) =>
+      index === 0 ? { width: 1200, height: 800 } : { width: 600, height: 800 },
+    )
+    const widthSpy = vi
+      .spyOn(HTMLElement.prototype, 'clientWidth', 'get')
+      .mockReturnValue(600)
+    const heightSpy = vi
+      .spyOn(HTMLElement.prototype, 'clientHeight', 'get')
+      .mockReturnValue(1000)
+    try {
+      const wrapper = await mountReader({ continuous: true, prefetch_pages: 1 })
+
+      expect(renderMocks.syncWindow).toHaveBeenCalled()
+      const call = renderMocks.syncWindow.mock.calls.at(-1)!
+      const [pages, scaleForPage] = call as [
+        number[],
+        (pageNumber: number) => number,
+      ]
+      expect(pages).toEqual([1, 2])
+      // 首页是双页大图、第 2 页是普通页，各自按可用宽度独立缩放
+      expect(scaleForPage(1)).toBeCloseTo(568 / 1200)
+      expect(scaleForPage(2)).toBeCloseTo(568 / 600)
+      wrapper.unmount()
+    } finally {
+      widthSpy.mockRestore()
+      heightSpy.mockRestore()
+    }
   })
 
   it('进度页就是首页时不再额外请求首页尺寸', async () => {

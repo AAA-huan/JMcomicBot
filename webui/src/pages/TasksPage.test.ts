@@ -12,12 +12,19 @@ vi.mock('@/api/tasks', () => ({
   retryTasks: vi.fn(),
   pauseDownloadQueue: vi.fn(),
   resumeDownloadQueue: vi.fn(),
+  pauseSendQueue: vi.fn(),
+  resumeSendQueue: vi.fn(),
 }))
 vi.mock('@/api/eventStream', () => ({
   useEventSubscription: vi.fn(),
 }))
 
-import { listTasks, pauseDownloadQueue, resumeDownloadQueue } from '@/api/tasks'
+import {
+  listTasks,
+  pauseDownloadQueue,
+  pauseSendQueue,
+  resumeDownloadQueue,
+} from '@/api/tasks'
 import TasksPage from '@/pages/TasksPage.vue'
 import { useSystemStore } from '@/stores/system'
 import type { SystemStatus } from '@/types/api'
@@ -34,7 +41,7 @@ function statusFixture(paused: boolean): SystemStatus {
   }
 }
 
-async function mountPage() {
+async function mountPage(path = '/tasks') {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -46,7 +53,7 @@ async function mountPage() {
       },
     ],
   })
-  await router.push('/tasks')
+  await router.push(path)
   await router.isReady()
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -109,5 +116,51 @@ describe('TasksPage', () => {
     expect(system.status?.download_queue.paused).toBe(false)
     expect(wrapper.text()).toContain('暂停队列')
     wrapper.unmount()
+  })
+
+  it('队列 chip 按任务与暂停状态显示三态', async () => {
+    const { wrapper, system } = await mountPage()
+
+    // 下载队列有任务显示运行中；发送队列无任务显示空闲，不再误报运行中
+    expect(wrapper.text()).toContain('运行中')
+    expect(wrapper.text()).toContain('空闲')
+    expect(wrapper.text()).not.toContain('已停止')
+
+    system.status!.send_queue.paused = true
+    await wrapper.vm.$nextTick()
+    expect(wrapper.text()).toContain('已暂停')
+    wrapper.unmount()
+  })
+
+  it('暂停发送队列调用端点并更新本地状态与提示', async () => {
+    vi.mocked(pauseSendQueue).mockResolvedValue({ paused: true, changed: true })
+    const { wrapper, system } = await mountPage()
+
+    const pauseButton = wrapper
+      .findAll('button')
+      .find((button) => button.text().includes('暂停发送'))
+    expect(pauseButton).toBeDefined()
+    await pauseButton!.trigger('click')
+    await flushPromises()
+
+    expect(pauseSendQueue).toHaveBeenCalledTimes(1)
+    expect(system.status?.send_queue.paused).toBe(true)
+    expect(wrapper.text()).toContain('恢复发送')
+    expect(wrapper.text()).toContain(
+      '发送队列已暂停，当前文件发送完成后不再发送新文件。',
+    )
+    wrapper.unmount()
+  })
+
+  it('日期筛选按本地时区转换为 UTC 边界后传给后端', async () => {
+    await mountPage('/tasks?created_after=2026-01-01&created_before=2026-01-02')
+
+    expect(listTasks).toHaveBeenCalledTimes(1)
+    const query = vi.mocked(listTasks).mock.calls[0][0] ?? {}
+    // 数据库存 UTC 无时区时间，页面展示为浏览器本地时间，边界需按本地时区构造
+    expect(query.created_after).toBe(new Date(2026, 0, 1).toISOString())
+    expect(query.created_before).toBe(
+      new Date(2026, 0, 2, 23, 59, 59, 999).toISOString(),
+    )
   })
 })

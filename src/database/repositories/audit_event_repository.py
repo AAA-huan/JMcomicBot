@@ -50,6 +50,7 @@ _AUDIT_METADATA_KEYS = {
     "failed_count",
     "file_count",
     "file_size_bytes",
+    "manga_count",
     "missing_count",
     "new_count",
     "page_count",

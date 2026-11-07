@@ -130,7 +130,7 @@ def _build_executor(
 
     return CommandExecutor(
         message_sender=message_sender,
-        file_sender=lambda *_args: None,
+        file_sender=lambda *_args, **_kwargs: None,
         download_manager=manager,
         config={"MANGA_DOWNLOAD_PATH": "/tmp", "FILE_SEND_BATCH_SIZE": 10},
         self_id_getter=lambda: "bot",

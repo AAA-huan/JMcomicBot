@@ -44,6 +44,7 @@ export const TASK_TYPE_LABELS: Record<string, string> = {
   backup: '备份',
   verify: '校验',
   blacklist: '黑名单',
+  send: '发送',
 }
 
 export const TASK_STATUS_LABELS: Record<string, string> = {

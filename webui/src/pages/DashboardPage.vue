@@ -8,6 +8,7 @@ import { listTasks } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import { useSystemStore } from '@/stores/system'
+import { useToast } from '@/stores/toast'
 import type { OperationTask } from '@/types/api'
 import { formatBytes, formatDateTime, formatUptime } from '@/utils/format'
 import {
@@ -19,9 +20,8 @@ import {
 } from '@/utils/labels'
 
 const system = useSystemStore()
+const toast = useToast()
 
-const actionError = ref('')
-const notice = ref('')
 const reconnecting = ref(false)
 const shutdownDialog = ref(false)
 const shuttingDown = ref(false)
@@ -53,29 +53,25 @@ async function handleRefresh(): Promise<void> {
 }
 
 async function handleReconnect(): Promise<void> {
-  actionError.value = ''
-  notice.value = ''
   reconnecting.value = true
   try {
     await reconnectNapcat()
-    notice.value = '已请求 NapCat 重连，状态恢复后会自动更新'
+    toast.success('已请求 NapCat 重连，状态恢复后会自动更新')
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     reconnecting.value = false
   }
 }
 
 async function confirmShutdown(): Promise<void> {
-  actionError.value = ''
-  notice.value = ''
   shuttingDown.value = true
   try {
     await requestShutdown()
     shutdownDialog.value = false
-    notice.value = '已请求安全关闭，机器人即将停止'
+    toast.success('已请求安全关闭，机器人即将停止')
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     shutdownDialog.value = false
   } finally {
     shuttingDown.value = false
@@ -83,17 +79,15 @@ async function confirmShutdown(): Promise<void> {
 }
 
 async function confirmRestart(): Promise<void> {
-  actionError.value = ''
-  notice.value = ''
   restarting.value = true
   try {
     await requestRestart()
     restartDialog.value = false
-    notice.value = '已请求重启，服务恢复后页面将自动刷新'
+    toast.success('已请求重启，服务恢复后页面将自动刷新')
     restartPolling.value = true
     void pollSystemStatus()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     restartDialog.value = false
   } finally {
     restarting.value = false
@@ -119,7 +113,7 @@ async function pollSystemStatus(): Promise<void> {
     }
   }
   restartPolling.value = false
-  notice.value = '重启超时，服务可能仍在恢复，请手动刷新页面'
+  toast.success('重启超时，服务可能仍在恢复，请手动刷新页面')
 }
 
 // 任务事件到达后防抖刷新最近任务
@@ -153,28 +147,6 @@ onBeforeUnmount(() => {
       class="mb-4"
     >
       {{ system.error }}
-    </v-alert>
-    <v-alert
-      v-if="actionError"
-      type="error"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionError = ''"
-    >
-      {{ actionError }}
-    </v-alert>
-    <v-alert
-      v-if="notice"
-      type="success"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="notice = ''"
-    >
-      {{ notice }}
     </v-alert>
 
     <div class="d-flex flex-wrap ga-2 mb-4">
