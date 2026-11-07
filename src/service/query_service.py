@@ -277,10 +277,12 @@ class TaskQueryService:
         task_type: Optional[str],
         status: Optional[str],
         manga_id: Optional[str],
+        created_after: Optional[datetime] = None,
+        created_before: Optional[datetime] = None,
     ) -> PageResult[OperationTaskResult]:
         """按受控条件分页查询任务。"""
         tasks, total = self.task_repository.search(
-            page, page_size, task_type, status, manga_id
+            page, page_size, task_type, status, manga_id, created_after, created_before
         )
         return PageResult(
             items=tuple(self._to_result(task) for task in tasks),

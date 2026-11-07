@@ -68,9 +68,26 @@ const filters = ref({
   taskType: '',
   status: '',
   mangaId: '',
+  createdAfter: '',
+  createdBefore: '',
   page: 1,
   pageSize: 20,
 })
+
+/**
+ * 把本地日期（YYYY-MM-DD）转换为与后端一致的 UTC ISO 时间边界。
+ *
+ * 数据库统一存储 UTC 无时区时间，前端展示为浏览器本地时间；
+ * 因此日期边界需按浏览器本地时区构造后转换为 UTC，才能与列表中展示的日期一致。
+ */
+function localDateToUtcIso(date: string, endOfDay: boolean): string | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return undefined
+  const [year, month, day] = date.split('-').map(Number)
+  const boundary = endOfDay
+    ? new Date(year, month - 1, day, 23, 59, 59, 999)
+    : new Date(year, month - 1, day, 0, 0, 0, 0)
+  return boundary.toISOString()
+}
 
 const cancelTarget = ref<OperationTask | null>(null)
 const cancelDialog = ref(false)
@@ -147,6 +164,8 @@ function readQuery(): void {
   filters.value.taskType = typeof query.task_type === 'string' ? query.task_type : ''
   filters.value.status = typeof query.status === 'string' ? query.status : ''
   filters.value.mangaId = typeof query.manga_id === 'string' ? query.manga_id : ''
+  filters.value.createdAfter = typeof query.created_after === 'string' ? query.created_after : ''
+  filters.value.createdBefore = typeof query.created_before === 'string' ? query.created_before : ''
   const page = Number.parseInt(typeof query.page === 'string' ? query.page : '1', 10)
   filters.value.page = Number.isFinite(page) && page > 0 ? page : 1
   const size = Number.parseInt(
@@ -166,6 +185,8 @@ async function load(): Promise<void> {
       task_type: filters.value.taskType || undefined,
       status: filters.value.status || undefined,
       manga_id: filters.value.mangaId || undefined,
+      created_after: localDateToUtcIso(filters.value.createdAfter, false),
+      created_before: localDateToUtcIso(filters.value.createdBefore, true),
     })
     tasks.value = result.items
     total.value = result.total
@@ -188,6 +209,15 @@ function updateQuery(patch: Record<string, string | number | undefined>): void {
 
 function applyMangaFilter(): void {
   updateQuery({ manga_id: filters.value.mangaId || undefined, page: 1 })
+}
+
+/** 日期变更立即生效；清空任一端即取消该端筛选。 */
+function applyDateFilter(): void {
+  updateQuery({
+    created_after: filters.value.createdAfter || undefined,
+    created_before: filters.value.createdBefore || undefined,
+    page: 1,
+  })
 }
 
 function canCancel(task: OperationTask): boolean {
@@ -416,7 +446,7 @@ watch(
     <v-card class="mb-4">
       <v-card-text class="pb-2">
         <v-row dense>
-          <v-col cols="6" md="3">
+          <v-col cols="6" md="2">
             <v-select
               v-model="filters.taskType"
               :items="typeOptions"
@@ -425,7 +455,7 @@ watch(
               @update:model-value="updateQuery({ task_type: filters.taskType || undefined, page: 1 })"
             />
           </v-col>
-          <v-col cols="6" md="3">
+          <v-col cols="6" md="2">
             <v-select
               v-model="filters.status"
               :items="statusOptions"
@@ -434,7 +464,7 @@ watch(
               @update:model-value="updateQuery({ status: filters.status || undefined, page: 1 })"
             />
           </v-col>
-          <v-col cols="12" md="4">
+          <v-col cols="12" sm="4" md="2">
             <v-text-field
               v-model="filters.mangaId"
               label="漫画 ID"
@@ -442,6 +472,26 @@ watch(
               clearable
               @keyup.enter="applyMangaFilter"
               @click:clear="applyMangaFilter"
+            />
+          </v-col>
+          <v-col cols="6" sm="4" md="2">
+            <v-text-field
+              v-model="filters.createdAfter"
+              label="开始日期"
+              type="date"
+              hide-details
+              clearable
+              @update:model-value="applyDateFilter"
+            />
+          </v-col>
+          <v-col cols="6" sm="4" md="2">
+            <v-text-field
+              v-model="filters.createdBefore"
+              label="结束日期"
+              type="date"
+              hide-details
+              clearable
+              @update:model-value="applyDateFilter"
             />
           </v-col>
           <v-col cols="12" md="2" class="d-flex align-center">

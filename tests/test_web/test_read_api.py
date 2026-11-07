@@ -3,7 +3,7 @@
 from datetime import timedelta
 from starlette.testclient import TestClient
 
-from src.database.models import MangaFile, ReadingProgress, utc_now
+from src.database.models import MangaFile, OperationTask, ReadingProgress, utc_now
 from src.database.repositories import (
     MangaRepository,
     MangaTagRepository,
@@ -108,6 +108,37 @@ def test_task_read_api_supports_filters_and_details(db_manager) -> None:
     assert response.json()["items"][0]["summary"] == "下载漫画 100"
     assert detail.status_code == 200
     assert detail.json()["id"] == wanted.id
+    assert invalid.status_code == 400
+
+
+def test_task_read_api_supports_created_at_filters(db_manager) -> None:
+    """任务列表支持按创建时间区间筛选，时间格式非法时返回 400。"""
+    task_repository = OperationTaskRepository(db_manager)
+    old_task = task_repository.create("download", "qq", manga_id="100")
+    new_task = task_repository.create("download", "web", manga_id="200")
+    # 手动拉开两条任务的创建时间，便于验证区间过滤
+    with db_manager.get_session() as session:
+        session.get(OperationTask, old_task.id).created_at = utc_now() - timedelta(
+            days=10
+        )
+        session.get(OperationTask, new_task.id).created_at = utc_now() - timedelta(
+            days=1
+        )
+        session.commit()
+
+    with _create_client(db_manager) as client:
+        _setup_and_login(client)
+        ranged = client.get(
+            "/api/v1/tasks",
+            params={
+                "created_after": (utc_now() - timedelta(days=5)).isoformat(),
+                "created_before": utc_now().isoformat(),
+            },
+        )
+        invalid = client.get("/api/v1/tasks", params={"created_after": "not-a-date"})
+
+    assert ranged.status_code == 200
+    assert [item["id"] for item in ranged.json()["items"]] == [new_task.id]
     assert invalid.status_code == 400
 
 

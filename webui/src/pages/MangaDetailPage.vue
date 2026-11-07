@@ -4,8 +4,15 @@ import { useRoute, useRouter } from 'vue-router'
 import { useDisplay } from 'vuetify'
 
 import { errorMessage } from '@/api/client'
+import { setFavorite } from '@/api/favorites'
 import { fileDownloadUrl, getReadingProgress } from '@/api/files'
-import { deleteManga, getManga, patchManga } from '@/api/mangas'
+import {
+  blacklistManga,
+  deleteManga,
+  getManga,
+  patchManga,
+  unblacklistManga,
+} from '@/api/mangas'
 import { requestDownloads } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
@@ -47,6 +54,12 @@ const editLoading = ref(false)
 
 const deleteDialog = ref(false)
 const deleteLoading = ref(false)
+
+const favoriteBusy = ref(false)
+
+const blacklistDialog = ref(false)
+const blacklistLoading = ref(false)
+const blacklistMode = ref<'add' | 'remove'>('add')
 
 /** 每个可阅读文件的阅读进度，用于展示「继续阅读 n/N」。 */
 const progressByFile = reactive<Record<number, ReadingProgress>>({})
@@ -175,6 +188,54 @@ async function confirmDelete(): Promise<void> {
   }
 }
 
+/** 收藏/取消收藏；与漫画库行为一致，操作可逆故无需确认对话框。 */
+async function toggleFavorite(): Promise<void> {
+  if (!manga.value || favoriteBusy.value) return
+  favoriteBusy.value = true
+  actionError.value = ''
+  notice.value = ''
+  const title = manga.value.title
+  try {
+    const result = await setFavorite(manga.value.id, !manga.value.is_favorite)
+    if (manga.value) manga.value.is_favorite = result.is_favorite
+    notice.value = result.is_favorite ? `已收藏《${title}》` : `已取消收藏《${title}》`
+  } catch (err) {
+    actionError.value = errorMessage(err)
+  } finally {
+    favoriteBusy.value = false
+  }
+}
+
+function askBlacklist(): void {
+  if (!manga.value) return
+  blacklistMode.value = manga.value.is_blacklisted ? 'remove' : 'add'
+  blacklistDialog.value = true
+}
+
+/** 拉黑/解除提交；拉黑在删除绑定模式下可能改变文件状态，成功后重新加载详情。 */
+async function confirmBlacklist(): Promise<void> {
+  if (!manga.value || blacklistLoading.value) return
+  blacklistLoading.value = true
+  actionError.value = ''
+  notice.value = ''
+  const title = manga.value.title
+  try {
+    const result = blacklistMode.value === 'add'
+      ? await blacklistManga(manga.value.id)
+      : await unblacklistManga(manga.value.id)
+    notice.value = blacklistMode.value === 'add'
+      ? (result.changed ? `已将《${title}》加入黑名单` : `《${title}》已在黑名单中`)
+      : (result.changed ? `已将《${title}》移出黑名单` : `《${title}》不在黑名单中`)
+    blacklistDialog.value = false
+    await load()
+  } catch (err) {
+    actionError.value = errorMessage(err)
+    blacklistDialog.value = false
+  } finally {
+    blacklistLoading.value = false
+  }
+}
+
 onMounted(load)
 </script>
 
@@ -245,6 +306,14 @@ onMounted(load)
               :color="colorOf(MANGA_STATUS_COLORS, manga.status)"
             >
               {{ labelOf(MANGA_STATUS_LABELS, manga.status) }}
+            </v-chip>
+            <v-chip
+              v-if="manga.is_blacklisted"
+              variant="tonal"
+              size="small"
+              :color="colorOf(MANGA_STATUS_COLORS, 'blacklisted')"
+            >
+              {{ labelOf(MANGA_STATUS_LABELS, 'blacklisted') }}
             </v-chip>
             <v-chip size="small" variant="outlined">ID: {{ manga.id }}</v-chip>
           </div>
@@ -326,6 +395,29 @@ onMounted(load)
             @click="handleDownload"
           >
             {{ manga.status === 'favorited' ? '下载漫画' : '请求下载' }}
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            size="small"
+            density="comfortable"
+            :color="manga.is_favorite ? 'warning' : undefined"
+            :prepend-icon="manga.is_favorite ? 'mdi-star' : 'mdi-star-outline'"
+            :loading="favoriteBusy"
+            :disabled="favoriteBusy || manga.status === 'deleted'"
+            @click="toggleFavorite"
+          >
+            {{ manga.is_favorite ? '取消收藏' : '收藏' }}
+          </v-btn>
+          <v-btn
+            variant="tonal"
+            size="small"
+            density="comfortable"
+            :color="manga.is_blacklisted ? 'warning' : undefined"
+            :prepend-icon="manga.is_blacklisted ? 'mdi-lock-off' : 'mdi-lock'"
+            :disabled="manga.status === 'deleted'"
+            @click="askBlacklist"
+          >
+            {{ manga.is_blacklisted ? '解除拉黑' : '拉黑' }}
           </v-btn>
           <v-btn
             variant="tonal"
@@ -509,6 +601,19 @@ onMounted(load)
       confirm-text="确认删除"
       :loading="deleteLoading"
       @confirm="confirmDelete"
+    />
+
+    <ConfirmDialog
+      v-model="blacklistDialog"
+      :title="blacklistMode === 'add'
+        ? `拉黑《${manga?.title ?? ''}》？`
+        : `解除拉黑《${manga?.title ?? ''}》？`"
+      :text="blacklistMode === 'add'
+        ? '加入黑名单后，该漫画的下载请求将被跳过。默认不删除本地 PDF；若开启删除绑定则会同时执行删除。'
+        : '移出黑名单后，该漫画可重新下载。已经删除的漫画和 PDF 不会恢复。'"
+      :confirm-text="blacklistMode === 'add' ? '确认拉黑' : '确认解除'"
+      :loading="blacklistLoading"
+      @confirm="confirmBlacklist"
     />
   </div>
 </template>

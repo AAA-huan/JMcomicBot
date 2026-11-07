@@ -107,6 +107,8 @@ class OperationTaskRepository(BaseRepository):
         task_type: Optional[str] = None,
         status: Optional[str] = None,
         manga_id: Optional[str] = None,
+        created_after: Optional[datetime] = None,
+        created_before: Optional[datetime] = None,
     ) -> tuple[List[OperationTask], int]:
         """按受控字段分页查询操作任务并返回总数。"""
         if task_type is not None and task_type not in _TASK_TYPES:
@@ -120,6 +122,11 @@ class OperationTaskRepository(BaseRepository):
             statement = statement.where(OperationTask.status == status)
         if manga_id is not None:
             statement = statement.where(OperationTask.manga_id == manga_id)
+        # created_at 统一为 UTC 无时区存储，边界由调用方按同一约定构造
+        if created_after is not None:
+            statement = statement.where(OperationTask.created_at >= created_after)
+        if created_before is not None:
+            statement = statement.where(OperationTask.created_at <= created_before)
         with self._get_session() as session:
             total = session.scalar(
                 select(func.count()).select_from(  # pylint: disable=not-callable

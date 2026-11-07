@@ -14,6 +14,10 @@ export interface TaskListQuery {
   task_type?: string
   status?: string
   manga_id?: string
+  /** 任务创建时间下界（ISO 8601 UTC 时间）。 */
+  created_after?: string
+  /** 任务创建时间上界（ISO 8601 UTC 时间）。 */
+  created_before?: string
 }
 
 export function listTasks(query: TaskListQuery = {}): Promise<PageResult<OperationTask>> {

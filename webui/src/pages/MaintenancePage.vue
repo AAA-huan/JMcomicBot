@@ -246,12 +246,14 @@ async function confirmImport(): Promise<void> {
               <div class="text-body-2">新增：{{ scanResult.new_count }}，更新：{{ scanResult.updated_count }}</div>
               <div class="text-body-2">无需更新：{{ scanResult.unchanged_count }}，跳过：{{ scanResult.skipped_count }}，重复文件漫画：{{ scanResult.duplicate_count }}</div>
               <div class="text-body-2">在线详情成功/失败：{{ scanResult.enrich_succeeded }}/{{ scanResult.enrich_failed }}，PDF 读取失败：{{ scanResult.page_read_failed }}，章节查询失败：{{ scanResult.chapter_errors }}</div>
-              <details v-for="item in scanResult.details" :key="item.manga_id" class="mt-2">
-                <summary>漫画 {{ item.manga_id }} · {{ item.file ?? '未选择文件' }} · {{ item.changes.length }} 项变化</summary>
-                <p v-if="item.error">处理失败：{{ item.error }}</p>
-                <p v-for="warning in item.warnings" :key="warning">{{ warning }}</p>
-                <p v-for="change in item.changes" :key="change.field">{{ change.label }}：{{ JSON.stringify(change.old) }} → {{ JSON.stringify(change.new) }}（{{ change.source }}）</p>
-              </details>
+              <div class="scan-details-scroll">
+                <details v-for="item in scanResult.details" :key="item.manga_id" class="mt-2">
+                  <summary>漫画 {{ item.manga_id }} · {{ item.file ?? '未选择文件' }} · {{ item.changes.length }} 项变化</summary>
+                  <p v-if="item.error">处理失败：{{ item.error }}</p>
+                  <p v-for="warning in item.warnings" :key="warning">{{ warning }}</p>
+                  <p v-for="change in item.changes" :key="change.field">{{ change.label }}：{{ JSON.stringify(change.old) }} → {{ JSON.stringify(change.new) }}（{{ change.source }}）</p>
+                </details>
+              </div>
               <div v-if="scanResult.dry_run" class="text-body-2">预览完成，待标记缺失：{{ scanResult.pending_cleanup_count }}（未写入数据库）</div>
               <div v-else class="text-body-2">标记缺失：{{ scanResult.marked_missing_count }}</div>
             </v-sheet>
@@ -441,3 +443,11 @@ async function confirmImport(): Promise<void> {
     </ConfirmDialog>
   </div>
 </template>
+
+<style scoped>
+/* 扫描明细较多时在固定区域内滚动，避免把页面无限撑长；用 max-height 让漫画少时不留空白 */
+.scan-details-scroll {
+  max-height: 320px;
+  overflow-y: auto;
+}
+</style>

@@ -34,7 +34,7 @@ function statusFixture(paused: boolean): SystemStatus {
   }
 }
 
-async function mountPage() {
+async function mountPage(path = '/tasks') {
   const router = createRouter({
     history: createMemoryHistory(),
     routes: [
@@ -46,7 +46,7 @@ async function mountPage() {
       },
     ],
   })
-  await router.push('/tasks')
+  await router.push(path)
   await router.isReady()
   const pinia = createPinia()
   setActivePinia(pinia)
@@ -109,5 +109,17 @@ describe('TasksPage', () => {
     expect(system.status?.download_queue.paused).toBe(false)
     expect(wrapper.text()).toContain('暂停队列')
     wrapper.unmount()
+  })
+
+  it('日期筛选按本地时区转换为 UTC 边界后传给后端', async () => {
+    await mountPage('/tasks?created_after=2026-01-01&created_before=2026-01-02')
+
+    expect(listTasks).toHaveBeenCalledTimes(1)
+    const query = vi.mocked(listTasks).mock.calls[0][0] ?? {}
+    // 数据库存 UTC 无时区时间，页面展示为浏览器本地时间，边界需按本地时区构造
+    expect(query.created_after).toBe(new Date(2026, 0, 1).toISOString())
+    expect(query.created_before).toBe(
+      new Date(2026, 0, 2, 23, 59, 59, 999).toISOString(),
+    )
   })
 })

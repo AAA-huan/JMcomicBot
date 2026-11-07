@@ -1,6 +1,7 @@
 """下载任务查询、创建与取消 API。"""
 
 from dataclasses import asdict
+from datetime import datetime, timezone
 from typing import Annotated, Callable, List, Optional
 
 import threading
@@ -67,6 +68,17 @@ class BatchTaskIdsRequest(BaseModel):
     task_ids: List[str] = Field(min_length=1, max_length=100)
 
 
+def _parse_utc_datetime(value: str, field: str) -> datetime:
+    """解析 ISO 8601 时间并转换为与数据库一致的 UTC 无时区约定。"""
+    try:
+        parsed = datetime.fromisoformat(value)
+    except ValueError as error:
+        raise ValueError(f"参数 {field} 不是合法的时间格式") from error
+    if parsed.tzinfo is not None:
+        parsed = parsed.astimezone(timezone.utc).replace(tzinfo=None)
+    return parsed
+
+
 def create_task_router(
     dependencies: WebDependencies, authenticate: AuthenticateCallable
 ) -> APIRouter:
@@ -81,11 +93,23 @@ def create_task_router(
         task_type: Optional[str] = None,
         task_status: Annotated[Optional[str], Query(alias="status")] = None,
         manga_id: Optional[str] = None,
+        created_after: Optional[str] = None,
+        created_before: Optional[str] = None,
     ) -> dict[str, object]:
         try:
+            after = (
+                _parse_utc_datetime(created_after, "created_after")
+                if created_after is not None
+                else None
+            )
+            before = (
+                _parse_utc_datetime(created_before, "created_before")
+                if created_before is not None
+                else None
+            )
             return asdict(
                 dependencies.task_query_service.list(
-                    page, page_size, task_type, task_status, manga_id
+                    page, page_size, task_type, task_status, manga_id, after, before
                 )
             )
         except ValueError as error:
