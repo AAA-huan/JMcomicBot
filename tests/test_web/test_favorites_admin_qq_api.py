@@ -28,10 +28,10 @@ def test_favorites_filter_pagination_isolation_and_audit(db_manager):
             assert client.put(path, headers=headers).json()["changed"]
             assert not client.put(path, headers=headers).json()["changed"]
         first = client.get(
-            "/api/v1/mangas?favorite_only=true&page_size=1&sort=id_asc"
+            "/api/v1/mangas?favorite_only=true&page_size=1&sort=id&order=asc"
         ).json()
         second = client.get(
-            "/api/v1/mangas?favorite_only=true&page_size=1&page=2&sort=id_asc"
+            "/api/v1/mangas?favorite_only=true&page_size=1&page=2&sort=id&order=asc"
         ).json()
         assert first["total"] == first["pages"] == 2
         assert first["items"][0]["id"] == "100"

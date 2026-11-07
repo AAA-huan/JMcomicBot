@@ -18,7 +18,8 @@ EFFECT_RESTART = "restart"
 
 # 内部运行状态也保存在 settings 表，但不属于配置注册表，不参与配置列表展示
 DOWNLOAD_QUEUE_PAUSED_KEY = "download_queue_paused"
-_INTERNAL_SETTING_KEYS = frozenset({DOWNLOAD_QUEUE_PAUSED_KEY})
+SEND_QUEUE_PAUSED_KEY = "send_queue_paused"
+_INTERNAL_SETTING_KEYS = frozenset({DOWNLOAD_QUEUE_PAUSED_KEY, SEND_QUEUE_PAUSED_KEY})
 
 # 敏感值对前端和审计只展示占位符，永不回显真实内容
 _MASKED_VALUE = "******"
@@ -352,6 +353,21 @@ class SettingsService:
     def set_download_queue_paused(self, paused: bool) -> None:
         """持久化下载队列暂停状态，供重启后恢复。"""
         self.setting_repository.set(DOWNLOAD_QUEUE_PAUSED_KEY, "1" if paused else "0")
+
+    def is_send_queue_paused(self) -> bool:
+        """读取持久化的发送队列暂停状态，未保存时视为未暂停。"""
+        raw_value = self.setting_repository.get_optional(SEND_QUEUE_PAUSED_KEY)
+        if raw_value is None:
+            return False
+        if raw_value == "1":
+            return True
+        if raw_value == "0":
+            return False
+        raise ValueError(f"发送队列暂停状态非法: {raw_value}")
+
+    def set_send_queue_paused(self, paused: bool) -> None:
+        """持久化发送队列暂停状态，供重启后恢复。"""
+        self.setting_repository.set(SEND_QUEUE_PAUSED_KEY, "1" if paused else "0")
 
     def list(self) -> Tuple[SettingView, ...]:
         """返回全部配置项的安全视图，保持注册表顺序。"""

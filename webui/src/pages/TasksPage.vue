@@ -11,14 +11,17 @@ import {
   cancelTasks,
   listTasks,
   pauseDownloadQueue,
+  pauseSendQueue,
   resumeDownloadQueue,
+  resumeSendQueue,
   retryTasks,
 } from '@/api/tasks'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
 import { useSystemStore } from '@/stores/system'
-import type { OperationTask } from '@/types/api'
+import { useToast } from '@/stores/toast'
+import type { OperationTask, QueueStatus } from '@/types/api'
 import { copyText } from '@/utils/clipboard'
 import { formatDateTime } from '@/utils/format'
 import {
@@ -34,6 +37,7 @@ const route = useRoute()
 const router = useRouter()
 const { mobile } = useDisplay()
 const system = useSystemStore()
+const toast = useToast()
 
 const pageSizeOptions = [20, 50, 100]
 const typeOptions = [
@@ -45,6 +49,7 @@ const typeOptions = [
   { value: 'backup', title: '备份' },
   { value: 'verify', title: '校验' },
   { value: 'blacklist', title: '黑名单' },
+  { value: 'send', title: '发送' },
 ]
 const statusOptions = [
   { value: '', title: '全部状态' },
@@ -61,16 +66,31 @@ const total = ref(0)
 const pages = ref(0)
 const loading = ref(false)
 const error = ref('')
-const actionError = ref('')
-const actionNotice = ref('')
 
 const filters = ref({
   taskType: '',
   status: '',
   mangaId: '',
+  createdAfter: '',
+  createdBefore: '',
   page: 1,
   pageSize: 20,
 })
+
+/**
+ * 把本地日期（YYYY-MM-DD）转换为与后端一致的 UTC ISO 时间边界。
+ *
+ * 数据库统一存储 UTC 无时区时间，前端展示为浏览器本地时间；
+ * 因此日期边界需按浏览器本地时区构造后转换为 UTC，才能与列表中展示的日期一致。
+ */
+function localDateToUtcIso(date: string, endOfDay: boolean): string | undefined {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return undefined
+  const [year, month, day] = date.split('-').map(Number)
+  const boundary = endOfDay
+    ? new Date(year, month - 1, day, 23, 59, 59, 999)
+    : new Date(year, month - 1, day, 0, 0, 0, 0)
+  return boundary.toISOString()
+}
 
 const cancelTarget = ref<OperationTask | null>(null)
 const cancelDialog = ref(false)
@@ -113,21 +133,43 @@ const retryableSelected = computed(() =>
 const downloadQueue = computed(() => system.status?.download_queue ?? null)
 const sendQueue = computed(() => system.status?.send_queue ?? null)
 const downloadPaused = computed(() => downloadQueue.value?.paused === true)
+const sendPaused = computed(() => sendQueue.value?.paused === true)
 const pauseLoading = ref(false)
+const sendPauseLoading = ref(false)
+
+/**
+ * 队列三态判定：已暂停 > 运行中（有任务或正在处理）> 空闲。
+ * `running` 标志只表示工作线程存活，不能用于状态展示。
+ */
+function queueState(
+  status: QueueStatus | null,
+  current: string | null | undefined,
+): { label: string; color: string } {
+  if (status?.paused === true) return { label: '已暂停', color: 'warning' }
+  if (status !== null && (status.queue_size > 0 || current)) {
+    return { label: '运行中', color: 'success' }
+  }
+  return { label: '空闲', color: 'grey' }
+}
+
+const downloadQueueState = computed(() =>
+  queueState(downloadQueue.value, downloadQueue.value?.current_manga_id),
+)
+const sendQueueState = computed(() =>
+  queueState(sendQueue.value, sendQueue.value?.current_file),
+)
 
 /** 暂停/恢复下载队列；当前下载任务不会被中断。 */
 async function toggleQueuePause(): Promise<void> {
   if (pauseLoading.value) return
   pauseLoading.value = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     const result = downloadPaused.value
       ? await resumeDownloadQueue()
       : await pauseDownloadQueue()
-    actionNotice.value = result.paused
+    toast.success(result.paused
       ? '下载队列已暂停，当前任务完成后不再开始新任务'
-      : '下载队列已恢复，将继续处理排队任务'
+      : '下载队列已恢复，将继续处理排队任务')
     // 立即更新本地状态，服务端队列事件随后保持一致
     if (system.status) {
       system.status.download_queue = {
@@ -136,9 +178,34 @@ async function toggleQueuePause(): Promise<void> {
       }
     }
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     pauseLoading.value = false
+  }
+}
+
+/** 暂停/恢复发送队列；当前正在发送的文件不会被中断。 */
+async function toggleSendQueuePause(): Promise<void> {
+  if (sendPauseLoading.value) return
+  sendPauseLoading.value = true
+  try {
+    const result = sendPaused.value
+      ? await resumeSendQueue()
+      : await pauseSendQueue()
+    toast.success(result.paused
+      ? '发送队列已暂停，当前文件发送完成后不再发送新文件'
+      : '发送队列已恢复，将继续发送排队文件')
+    // 立即更新本地状态，服务端队列事件随后保持一致
+    if (system.status) {
+      system.status.send_queue = {
+        ...system.status.send_queue,
+        paused: result.paused,
+      }
+    }
+  } catch (err) {
+    toast.error(errorMessage(err))
+  } finally {
+    sendPauseLoading.value = false
   }
 }
 
@@ -147,6 +214,8 @@ function readQuery(): void {
   filters.value.taskType = typeof query.task_type === 'string' ? query.task_type : ''
   filters.value.status = typeof query.status === 'string' ? query.status : ''
   filters.value.mangaId = typeof query.manga_id === 'string' ? query.manga_id : ''
+  filters.value.createdAfter = typeof query.created_after === 'string' ? query.created_after : ''
+  filters.value.createdBefore = typeof query.created_before === 'string' ? query.created_before : ''
   const page = Number.parseInt(typeof query.page === 'string' ? query.page : '1', 10)
   filters.value.page = Number.isFinite(page) && page > 0 ? page : 1
   const size = Number.parseInt(
@@ -166,6 +235,8 @@ async function load(): Promise<void> {
       task_type: filters.value.taskType || undefined,
       status: filters.value.status || undefined,
       manga_id: filters.value.mangaId || undefined,
+      created_after: localDateToUtcIso(filters.value.createdAfter, false),
+      created_before: localDateToUtcIso(filters.value.createdBefore, true),
     })
     tasks.value = result.items
     total.value = result.total
@@ -190,6 +261,15 @@ function applyMangaFilter(): void {
   updateQuery({ manga_id: filters.value.mangaId || undefined, page: 1 })
 }
 
+/** 日期变更立即生效；清空任一端即取消该端筛选。 */
+function applyDateFilter(): void {
+  updateQuery({
+    created_after: filters.value.createdAfter || undefined,
+    created_before: filters.value.createdBefore || undefined,
+    page: 1,
+  })
+}
+
 function canCancel(task: OperationTask): boolean {
   return task.task_type === 'download' && task.status === 'queued'
 }
@@ -203,15 +283,13 @@ async function confirmCancel(): Promise<void> {
   const target = cancelTarget.value
   if (!target) return
   cancelLoading.value = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     await cancelTask(target.id)
-    actionNotice.value = '任务已取消'
+    toast.success('任务已取消')
     cancelDialog.value = false
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     cancelDialog.value = false
   } finally {
     cancelLoading.value = false
@@ -220,15 +298,13 @@ async function confirmCancel(): Promise<void> {
 
 async function confirmCancelQueued(): Promise<void> {
   cancelQueuedLoading.value = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     const result = await cancelQueuedTasks()
-    actionNotice.value = `已取消 ${result.cancelled_count} 个排队任务`
+    toast.success(`已取消 ${result.cancelled_count} 个排队任务`)
     cancelQueuedDialog.value = false
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     cancelQueuedDialog.value = false
   } finally {
     cancelQueuedLoading.value = false
@@ -250,26 +326,22 @@ async function copySelectedIds(): Promise<void> {
   const ids = [...new Set(selectedTasks.map((task) => task.manga_id!))].join(',')
   if (!ids) return
   const ok = await copyText(ids)
-  actionError.value = ''
-  actionNotice.value = ok
-    ? `已复制 ${new Set(selectedTasks.map((t) => t.manga_id)).size} 个漫画 ID`
-    : '复制失败，请手动选择并复制'
+  if (ok) toast.success(`已复制 ${new Set(selectedTasks.map((t) => t.manga_id)).size} 个漫画 ID`)
+  else toast.error('复制失败，请手动选择并复制')
 }
 
 async function batchCancel(): Promise<void> {
   const targets = cancelableSelected.value
   if (targets.length === 0) return
   batchLoading.value = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     const result = await cancelTasks(targets.map((task) => task.id))
     const succeeded = result.items.filter((item) => item.status === 'cancelled').length
     const failed = result.failed_count
-    actionNotice.value = `已取消 ${succeeded} 个任务${failed > 0 ? `，${failed} 个失败` : ''}`
+    toast.success(`已取消 ${succeeded} 个任务${failed > 0 ? `，${failed} 个失败` : ''}`)
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     batchLoading.value = false
   }
@@ -279,19 +351,17 @@ async function batchRetry(): Promise<void> {
   const targets = retryableSelected.value
   if (targets.length === 0) return
   batchLoading.value = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     const result = await retryTasks(targets.map((task) => task.id))
     const succeeded = result.items.filter((item) => item.status === 'requeued').length
     const downloaded = result.items.filter((item) => item.status === 'already_downloaded').length
     const failed = result.failed_count - downloaded
     const downloadedNotice = downloaded > 0 ? `，${downloaded} 个已下载跳过` : ''
-    actionNotice.value = `已重新入队 ${succeeded} 个任务${downloadedNotice}${failed > 0 ? `，${failed} 个失败` : ''}`
+    toast.success(`已重新入队 ${succeeded} 个任务${downloadedNotice}${failed > 0 ? `，${failed} 个失败` : ''}`)
     selected.value = []
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     batchLoading.value = false
   }
@@ -333,28 +403,6 @@ watch(
         <v-btn size="small" variant="text" @click="load">重试</v-btn>
       </template>
     </v-alert>
-    <v-alert
-      v-if="actionError"
-      type="error"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionError = ''"
-    >
-      {{ actionError }}
-    </v-alert>
-    <v-alert
-      v-if="actionNotice"
-      type="success"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionNotice = ''"
-    >
-      {{ actionNotice }}
-    </v-alert>
 
     <v-row dense class="mb-4">
       <v-col cols="12" md="6">
@@ -363,8 +411,8 @@ watch(
             <v-icon class="mr-2">mdi-download-box-outline</v-icon>
             <span class="text-subtitle-2">下载队列</span>
             <v-spacer />
-            <v-chip size="small" variant="tonal" :color="downloadQueue?.running ? 'success' : 'medium-emphasis'">
-              {{ downloadQueue?.running ? '运行中' : '已停止' }}
+            <v-chip size="small" variant="tonal" :color="downloadQueueState.color">
+              {{ downloadQueueState.label }}
             </v-chip>
             <v-btn
               size="small"
@@ -397,17 +445,33 @@ watch(
       </v-col>
       <v-col cols="12" md="6">
         <v-card class="pa-4 h-100">
-          <div class="d-flex align-center">
+          <div class="d-flex align-center flex-wrap">
             <v-icon class="mr-2">mdi-send-outline</v-icon>
             <span class="text-subtitle-2">发送队列</span>
             <v-spacer />
-            <v-chip size="small" variant="tonal" :color="sendQueue?.running ? 'success' : 'medium-emphasis'">
-              {{ sendQueue?.running ? '运行中' : '已停止' }}
+            <v-chip size="small" variant="tonal" :color="sendQueueState.color">
+              {{ sendQueueState.label }}
             </v-chip>
+            <v-btn
+              size="small"
+              variant="tonal"
+              class="ml-2"
+              :color="sendPaused ? 'success' : 'warning'"
+              :prepend-icon="sendPaused ? 'mdi-play' : 'mdi-pause'"
+              :loading="sendPauseLoading"
+              :disabled="!sendQueue?.running"
+              aria-label="暂停或恢复发送队列"
+              @click="toggleSendQueuePause"
+            >
+              {{ sendPaused ? '恢复发送' : '暂停发送' }}
+            </v-btn>
           </div>
           <div class="text-h5 mt-2">{{ sendQueue?.queue_size ?? 0 }} 个任务</div>
           <div class="text-caption text-medium-emphasis text-truncate">
             {{ sendQueue?.current_file ? `正在发送：${sendQueue.current_file}` : '当前没有正在发送的文件' }}
+          </div>
+          <div v-if="sendPaused" class="text-caption text-warning">
+            发送队列已暂停，当前文件发送完成后不再发送新文件。
           </div>
         </v-card>
       </v-col>
@@ -416,7 +480,7 @@ watch(
     <v-card class="mb-4">
       <v-card-text class="pb-2">
         <v-row dense>
-          <v-col cols="6" md="3">
+          <v-col cols="6" md="2">
             <v-select
               v-model="filters.taskType"
               :items="typeOptions"
@@ -425,7 +489,7 @@ watch(
               @update:model-value="updateQuery({ task_type: filters.taskType || undefined, page: 1 })"
             />
           </v-col>
-          <v-col cols="6" md="3">
+          <v-col cols="6" md="2">
             <v-select
               v-model="filters.status"
               :items="statusOptions"
@@ -434,7 +498,7 @@ watch(
               @update:model-value="updateQuery({ status: filters.status || undefined, page: 1 })"
             />
           </v-col>
-          <v-col cols="12" md="4">
+          <v-col cols="12" sm="4" md="2">
             <v-text-field
               v-model="filters.mangaId"
               label="漫画 ID"
@@ -442,6 +506,26 @@ watch(
               clearable
               @keyup.enter="applyMangaFilter"
               @click:clear="applyMangaFilter"
+            />
+          </v-col>
+          <v-col cols="6" sm="4" md="2">
+            <v-text-field
+              v-model="filters.createdAfter"
+              label="开始日期"
+              type="date"
+              hide-details
+              clearable
+              @update:model-value="applyDateFilter"
+            />
+          </v-col>
+          <v-col cols="6" sm="4" md="2">
+            <v-text-field
+              v-model="filters.createdBefore"
+              label="结束日期"
+              type="date"
+              hide-details
+              clearable
+              @update:model-value="applyDateFilter"
             />
           </v-col>
           <v-col cols="12" md="2" class="d-flex align-center">

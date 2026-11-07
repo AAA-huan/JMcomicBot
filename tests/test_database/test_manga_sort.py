@@ -32,22 +32,25 @@ def test_search_sorts_numeric_ids(db_manager, manga_repo) -> None:
     _add_manga(db_manager, "101051", same_time)
     _add_manga(db_manager, "99999", same_time)
 
-    ascending, _ = manga_repo.search(1, 10, sort="id_asc")
-    descending, _ = manga_repo.search(1, 10, sort="id_desc")
+    ascending, _ = manga_repo.search(1, 10, sort="id", order="asc")
+    descending, _ = manga_repo.search(1, 10, sort="id", order="desc")
 
     assert [manga.id for manga in ascending] == ["2556", "99999", "101051"]
     assert [manga.id for manga in descending] == ["101051", "99999", "2556"]
 
 
 def test_search_same_downloaded_at_uses_numeric_id(db_manager, manga_repo) -> None:
-    """下载时间相同的记录按数值 ID 稳定排序，字符串序不得打乱顺序。"""
+    """下载时间相同的记录按数值 ID 稳定排序，字符串序不得打乱顺序；
+    倒序时第二排序键 numeric_id 同样反转（大 ID 在前）。"""
     downloaded_at = utc_now()
     _add_manga(db_manager, "101051", downloaded_at)
     _add_manga(db_manager, "2556", downloaded_at)
 
-    result, _ = manga_repo.search(1, 10, sort="downloaded_at_desc")
+    descending, _ = manga_repo.search(1, 10, sort="downloaded_at", order="desc")
+    ascending, _ = manga_repo.search(1, 10, sort="downloaded_at", order="asc")
 
-    assert [manga.id for manga in result] == ["2556", "101051"]
+    assert [manga.id for manga in descending] == ["101051", "2556"]
+    assert [manga.id for manga in ascending] == ["2556", "101051"]
 
 
 def test_search_sorts_by_downloaded_at(db_manager, manga_repo) -> None:
@@ -57,8 +60,8 @@ def test_search_sorts_by_downloaded_at(db_manager, manga_repo) -> None:
     _add_manga(db_manager, "900", later)
     _add_manga(db_manager, "100", earlier)
 
-    descending, _ = manga_repo.search(1, 10, sort="downloaded_at_desc")
-    ascending, _ = manga_repo.search(1, 10, sort="downloaded_at_asc")
+    descending, _ = manga_repo.search(1, 10, sort="downloaded_at", order="desc")
+    ascending, _ = manga_repo.search(1, 10, sort="downloaded_at", order="asc")
 
     assert [manga.id for manga in descending] == ["900", "100"]
     assert [manga.id for manga in ascending] == ["100", "900"]

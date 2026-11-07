@@ -4,8 +4,9 @@
  *
  * 首次打开只请求当前进度页的尺寸端点：图片型 PDF 使用 <img> 按窗口懒加载，
  * 完全不经过 PDF.js；非图片型 PDF 回退到 PDF.js + Canvas。尺寸请求不下载
- * 图字节、不在客户端 decode，首页尺寸在 loading 结束后后台补全。连排滚动
- * 位置由页面尺寸缓存的 offset 二分查找，不再逐页 getBoundingClientRect。
+ * 图字节、不在客户端 decode；连排时进入渲染窗口的未知页会后台补全真实尺寸。
+ * 缩放按页独立计算，各页尺寸不一致时每页仍能满宽/满页显示。连排滚动位置
+ * 由页面尺寸缓存的 offset 二分查找，不再逐页 getBoundingClientRect。
  * 阅读模式、连续显示、点击翻页、深色背景与预加载页数统一保存在后端，
  * 工具栏改动即时同步并在失败时回滚。进度 1 秒防抖写入，页面隐藏/离开时
  * keepalive 立即刷新；失败明确提示「进度未同步」并可重试，不阻塞阅读。
@@ -240,37 +241,44 @@ function baseSizeOf(target: number): PageBaseSize {
   return baseSizes.value[target - 1] ?? placeholderSize.value
 }
 
-/** 适应计算的目标页面尺寸：单页用当前页，连排用最大页保证不溢出。 */
-const fitBase = computed<PageBaseSize | null>(() => {
-  if (pageCount.value === 0) return null
-  if (!continuous.value) return baseSizeOf(pageNumber.value)
-  let width = 0
-  let height = 0
-  for (let page = 1; page <= pageCount.value; page += 1) {
-    const size = baseSizeOf(page)
-    width = Math.max(width, size.width)
-    height = Math.max(height, size.height)
-  }
-  return { width, height }
-})
+/** 阅读区可用尺寸（扣除内边距），过小时按 100px 计算避免倍率归零。 */
+const availableWidth = computed(() =>
+  Math.max(containerWidth.value - PAGE_PADDING * 2, 100),
+)
+const availableHeight = computed(() =>
+  Math.max(containerHeight.value - PAGE_PADDING * 2, 100),
+)
 
-const scale = computed(() => {
-  if (zoomMode.value === 'custom') return customScale.value
-  const base = fitBase.value
-  if (!base || containerWidth.value === 0) return 1
-  const availableWidth = Math.max(containerWidth.value - PAGE_PADDING * 2, 100)
-  const availableHeight = Math.max(containerHeight.value - PAGE_PADDING * 2, 100)
-  return computeFitScale(base, availableWidth, availableHeight, zoomMode.value)
-})
+/**
+ * 指定页在当前缩放模式下的倍率。
+ *
+ * 单页与连排都按页独立计算：各页宽高比不同时 fit-width 每页仍满宽，
+ * fit-page 每页完整适配视口，不再被最大页统一压缩。
+ */
+function scaleForPage(target: number): number {
+  const currentMode = zoomMode.value
+  if (currentMode === 'custom') return customScale.value
+  if (pageCount.value === 0 || containerWidth.value === 0) return 1
+  return computeFitScale(
+    baseSizeOf(target),
+    availableWidth.value,
+    availableHeight.value,
+    currentMode,
+  )
+}
+
+/** 工具栏缩放百分比与单页渲染使用当前页倍率。 */
+const scale = computed(() => scaleForPage(pageNumber.value))
 
 /** 连排占位尺寸，未加载真实尺寸的页面仍保留布局高度/宽度。 */
 const pageSizes = computed<PageBaseSize[]>(() => {
   const sizes: PageBaseSize[] = []
   for (let page = 1; page <= pageCount.value; page += 1) {
     const base = baseSizeOf(page)
+    const pageScale = scaleForPage(page)
     sizes.push({
-      width: base.width * scale.value,
-      height: base.height * scale.value,
+      width: base.width * pageScale,
+      height: base.height * pageScale,
     })
   }
   return sizes
@@ -312,12 +320,102 @@ function onPageLoad(target: number, event: Event): void {
   const width = image.naturalWidth
   const height = image.naturalHeight
   if (width <= 0 || height <= 0) return
-  const current = baseSizes.value[target - 1]
-  if (current?.width === width && current.height === height) return
-  const updated = baseSizes.value.slice()
-  updated[target - 1] = { width, height }
-  baseSizes.value = updated
+  setBaseSize(target, { width, height })
 }
+
+/** 连排布局重算后待补偿的滚动差值，多页尺寸同批到达时累加。 */
+let pendingScrollDelta = 0
+let pendingScrollHorizontal = false
+let pendingScrollScheduled = false
+
+/** 在 DOM 更新后按累计差值补偿滚动位置，避免多次补尺寸互相覆盖。 */
+function scheduleScrollCompensation(
+  container: HTMLElement,
+  delta: number,
+  useHorizontal: boolean,
+): void {
+  pendingScrollDelta += delta
+  if (pendingScrollScheduled) return
+  pendingScrollScheduled = true
+  pendingScrollHorizontal = useHorizontal
+  void nextTick(() => {
+    pendingScrollScheduled = false
+    const applied = pendingScrollDelta
+    pendingScrollDelta = 0
+    if (applied === 0) return
+    if (pendingScrollHorizontal) {
+      container.scrollLeft += applied
+    } else {
+      container.scrollTop += applied
+    }
+  })
+}
+
+/**
+ * 写回某页真实尺寸；连排时补偿滚动位置，避免布局重算把当前页挤走。
+ *
+ * 普通纵排/横排以页面起始边为锚点（起始偏移不变），日漫横排以内容
+ * 右边缘为起点，需要同时扣除总内容长度的变化。
+ */
+function setBaseSize(target: number, size: PageBaseSize): void {
+  const current = baseSizes.value[target - 1]
+  if (current?.width === size.width && current.height === size.height) return
+  const container = continuous.value ? scrollElement : null
+  const oldLayout = container ? pageLayout.value : null
+  const updated = baseSizes.value.slice()
+  updated[target - 1] = size
+  baseSizes.value = updated
+  if (!container || !oldLayout) return
+  const newLayout = pageLayout.value
+  const index = pageNumber.value - 1
+  const oldOffset = oldLayout.offsets[index]
+  const newOffset = newLayout.offsets[index]
+  if (oldOffset === undefined || newOffset === undefined) return
+  const delta = horizontal.value && mangaDirection.value
+    ? newLayout.contentLength - oldLayout.contentLength - (newOffset - oldOffset)
+    : newOffset - oldOffset
+  if (delta === 0) return
+  scheduleScrollCompensation(container, delta, horizontal.value)
+}
+
+/** 已在请求中的页码，避免窗口快速变化时重复拉取同一页尺寸。 */
+const pendingPageSizes = new Set<number>()
+
+/**
+ * 后台补全渲染窗口内未知页的真实尺寸。
+ *
+ * 占位尺寸只用于尽早撑开页面，窗口内用真实宽高比替换后布局更准确；
+ * 失败保持 probe 占位（显示优化失败不影响阅读）。
+ */
+function fillWindowPageSizes(pages: number[]): void {
+  if (!continuous.value || !imageMode.value) return
+  for (const page of pages) {
+    if (baseSizes.value[page - 1] !== null || pendingPageSizes.has(page)) continue
+    pendingPageSizes.add(page)
+    void loadPageImageSize(fileId, page)
+      .then((size) => {
+        if (size) setBaseSize(page, size)
+      })
+      .catch((sizeError) => {
+        if (sizeError instanceof ApiError && sizeError.status === 401) {
+          redirectToLogin()
+        }
+        // 其他失败保持 probe 占位，下次进入窗口重试
+      })
+      .finally(() => {
+        pendingPageSizes.delete(page)
+      })
+  }
+}
+
+// 滚动窗口变化或切到图片型连排后，补齐窗口内未知页尺寸
+watch(
+  [windowPages, imageMode, continuous],
+  () => {
+    fillWindowPageSizes(windowPages.value)
+  },
+  { flush: 'post' },
+)
 
 // ---------- 渲染 ----------
 
@@ -326,14 +424,15 @@ async function renderWindow(): Promise<void> {
   if (imageMode.value) return
   if (!doc.value || baseSizes.value.length === 0) return
   try {
-    await syncWindow(windowPages.value, scale.value)
+    await syncWindow(windowPages.value, scaleForPage)
   } catch (renderError) {
     error.value = mapPdfError(renderError)
   }
 }
 
+// 连排每页倍率可能不同，布局尺寸变化后按各页倍率重渲染窗口
 watch(
-  [windowPages, scale, imageMode],
+  [windowPages, pageSizes, imageMode],
   () => {
     void renderWindow()
   },
@@ -707,20 +806,6 @@ function startProgressSync(): void {
   })
 }
 
-/** 后台补全首页尺寸；不阻塞 loading，失败时继续使用 probe 页占位。 */
-function supplementFirstPageSize(): void {
-  void loadPageImageSize(fileId, 1)
-    .then((size) => {
-      if (!size) return
-      const updated = baseSizes.value.slice()
-      updated[0] = size
-      baseSizes.value = updated
-    })
-    .catch(() => {
-      // 后台补尺寸失败时保持 probe 页占位，不影响阅读
-    })
-}
-
 /** 图片型路径：只用 <img> 渲染，不加载 PDF.js，也不使用渲染窗口。 */
 async function initializeImageMode(
   progress: ReadingProgress,
@@ -738,15 +823,12 @@ async function initializeImageMode(
   baseSizes.value = sizes
   pageNumber.value = target
   startProgressSync()
-  // probe 已拿到当前页尺寸，立即结束转圈；其余页先用 probe 尺寸占位
+  // probe 已拿到当前页尺寸，立即结束转圈；其余页先用 probe 尺寸占位，
+  // 进入渲染窗口后由 fillWindowPageSizes 后台补全
   loading.value = false
   await nextTick()
   if (continuous.value) {
     scrollToPage(pageNumber.value)
-  }
-  if (target !== 1) {
-    // 首页真实尺寸不阻塞打开，后台补全后由 computed 自动重算布局
-    supplementFirstPageSize()
   }
 }
 
@@ -797,6 +879,7 @@ async function initialize(): Promise<void> {
   baseSizes.value = []
   probeBaseSize.value = null
   loadedPages.value = new Set()
+  pendingPageSizes.clear()
 
   // 设置与进度互不依赖，并行请求以重叠网络等待；probe 依赖进度页码
   const [settingsLoaded, progress] = await Promise.all([

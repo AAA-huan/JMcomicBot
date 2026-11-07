@@ -14,6 +14,7 @@ vi.mock('@/api/eventStream', () => ({
 
 import { useConnectionSubscription, useEventSubscription } from '@/api/eventStream'
 import { getDownloadProgress, requestDownloads } from '@/api/tasks'
+import { useToast } from '@/stores/toast'
 import DownloadPage from '@/pages/DownloadPage.vue'
 import type { DownloadProgressSnapshot, EventEnvelope } from '@/types/api'
 
@@ -38,6 +39,11 @@ function snapshotFixture(
   }
 }
 
+/** 当前展示中的 toast 文案列表。 */
+function toastMessages(): string[] {
+  return useToast().visible.value.map((item) => item.message)
+}
+
 function mountPage() {
   return mount(DownloadPage, {
     global: { plugins: [createVuetify()] },
@@ -47,6 +53,7 @@ function mountPage() {
 describe('DownloadPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    useToast().clear()
     vi.mocked(getDownloadProgress).mockResolvedValue({ active: null })
   })
 
@@ -81,8 +88,8 @@ describe('DownloadPage', () => {
     await flushPromises()
 
     expect(requestDownloads).toHaveBeenCalledWith(['100', '200'])
-    expect(wrapper.text()).toContain('已提交 1 个，正在加入队列')
-    expect(wrapper.text()).toContain('1 个已有活动任务（200）')
+    expect(toastMessages().join('')).toContain('已提交 1 个，正在加入队列')
+    expect(toastMessages().join('')).toContain('1 个已有活动任务（200）')
     expect((wrapper.find('textarea').element as HTMLTextAreaElement).value).toBe('')
     wrapper.unmount()
   })
@@ -105,7 +112,7 @@ describe('DownloadPage', () => {
     await submitButton!.trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('1 个已被拉黑跳过（100）')
+    expect(toastMessages().join('')).toContain('1 个已被拉黑跳过（100）')
     wrapper.unmount()
   })
 

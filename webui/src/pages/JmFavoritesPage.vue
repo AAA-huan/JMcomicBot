@@ -11,12 +11,14 @@ import {
 import type { JmAccount, JmFavorite, JmImport } from '@/api/jmFavorites'
 import EmptyState from '@/components/EmptyState.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
+import { useToast } from '@/stores/toast'
 import { copyText } from '@/utils/clipboard'
 import { formatDateTime } from '@/utils/format'
 
 const route = useRoute()
 const router = useRouter()
 const { mobile } = useDisplay()
+const toast = useToast()
 const pageSizeOptions = [20, 50, 100]
 const account = ref<JmAccount>({ connected: false })
 const username = ref('')
@@ -36,7 +38,6 @@ const busy = ref(false)
 const downloading = ref(false)
 const importingToLibrary = ref(false)
 const error = ref('')
-const notice = ref('')
 const running = computed(() => jobs.value.some((job) => job.status === 'running'))
 const selectedIds = computed(() => [...new Set(selected.value)])
 // 当前页可勾选项：未下载项的漫画 ID 去重
@@ -199,7 +200,6 @@ async function logout(): Promise<void> {
 async function importFavorites(): Promise<void> {
   busy.value = true
   error.value = ''
-  notice.value = ''
   try {
     const job = await startJmImport(selectedFolders.value)
     jobs.value = [job, ...jobs.value].slice(0, 20)
@@ -216,7 +216,6 @@ async function importToLibrary(): Promise<void> {
   if (mangaIds.length === 0) return
   importingToLibrary.value = true
   error.value = ''
-  notice.value = ''
   try {
     const result = await importJmFavoritesToLibrary(mangaIds)
     const imported = new Set(mangaIds)
@@ -226,7 +225,7 @@ async function importToLibrary(): Promise<void> {
     const already = result.already_count > 0
       ? `，${result.already_count} 本已在漫画库`
       : ''
-    notice.value = `已导入 ${result.imported_count} 本到漫画库${already}。可继续选择下载。`
+    toast.success(`已导入 ${result.imported_count} 本到漫画库${already}。可继续选择下载。`)
     selected.value = []
   } catch (err) {
     error.value = errorMessage(err)
@@ -238,7 +237,6 @@ async function importToLibrary(): Promise<void> {
 async function download(): Promise<void> {
   downloading.value = true
   error.value = ''
-  notice.value = ''
   try {
     const result = await requestJmDownloads(selectedIds.value)
     const skipped = result.skipped_blacklisted.length > 0
@@ -247,7 +245,7 @@ async function download(): Promise<void> {
     const downloaded = result.skipped_downloaded.length > 0
       ? `，${result.skipped_downloaded.length} 本已下载跳过`
       : ''
-    notice.value = `已加入下载队列 ${result.queued_count} 本，已有任务 ${result.duplicate_count} 本${skipped}${downloaded}。可在任务管理页查看进度，完成后刷新本页。`
+    toast.success(`已加入下载队列 ${result.queued_count} 本，已有任务 ${result.duplicate_count} 本${skipped}${downloaded}。可在任务管理页查看进度，完成后刷新本页。`)
     selected.value = []
   } catch (err) {
     error.value = errorMessage(err)
@@ -272,10 +270,8 @@ async function copySelectedIds(): Promise<void> {
   const ids = selectedIds.value.join(',')
   if (!ids) return
   const ok = await copyText(ids)
-  notice.value = ok
-    ? `已复制 ${selectedIds.value.length} 个漫画 ID`
-    : '复制失败，请手动选择并复制'
-  error.value = ''
+  if (ok) toast.success(`已复制 ${selectedIds.value.length} 个漫画 ID`)
+  else toast.error('复制失败，请手动选择并复制')
 }
 
 function applyFilters(): void {
@@ -297,7 +293,6 @@ onBeforeUnmount(() => { disposed = true; if (timer !== undefined) clearTimeout(t
       <v-btn variant="text" to="/library">漫画库</v-btn>
     </div>
     <v-alert v-if="error" type="error" variant="tonal" closable class="mb-4" @click:close="error = ''">{{ error }}</v-alert>
-    <v-alert v-if="notice" type="success" variant="tonal" closable class="mb-4" @click:close="notice = ''">{{ notice }}</v-alert>
 
     <v-card class="mb-4">
       <v-card-title>登录 JM 天堂账号</v-card-title>

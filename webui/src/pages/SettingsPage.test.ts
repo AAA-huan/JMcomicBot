@@ -21,8 +21,16 @@ import {
   updateSetting,
 } from '@/api/settings'
 import SettingsPage from '@/pages/SettingsPage.vue'
+import { useToast } from '@/stores/toast'
 import type { ReadingSettingUpdate, ReadingSettings } from '@/reader/types'
 import type { SettingView } from '@/types/api'
+
+const toast = useToast()
+
+/** 当前展示中的 toast 文案列表。 */
+function toastMessages(): string[] {
+  return toast.visible.value.map((item) => item.message)
+}
 
 const DEFAULT_READER_SETTINGS: ReadingSettings = {
   reading_mode: 'normal',
@@ -41,6 +49,7 @@ function makeReaderSettings(
 }
 
 beforeEach(() => {
+  toast.clear()
   vi.mocked(getReaderSettings).mockReset()
   vi.mocked(getReaderSettings).mockResolvedValue(makeReaderSettings())
   vi.mocked(updateReaderSettings).mockReset()
@@ -232,8 +241,8 @@ it('option.yml 编辑器加载内容、保存后提示生效', async () => {
   expect(updateOptionFile).toHaveBeenCalledWith(
     'download:\n  image:\n    suffix: .png\n',
   )
-  expect(wrapper.text()).toContain('已保存')
-  expect(wrapper.text()).toContain('无需重启')
+  expect(toastMessages().join('\n')).toContain('option.yml 已保存')
+  expect(toastMessages().join('\n')).toContain('无需重启')
   wrapper.unmount()
   vi.unstubAllGlobals()
 })
@@ -256,7 +265,7 @@ it('option.yml 保存失败显示错误信息', async () => {
   findEnabledButtonByText('保存').click()
   await flushPromises()
 
-  expect(wrapper.text()).toContain('YAML 解析失败')
+  expect(toastMessages().join('\n')).toContain('网络请求失败：YAML 解析失败')
   wrapper.unmount()
   vi.unstubAllGlobals()
 })
@@ -321,8 +330,8 @@ it('阅读偏好加载后仅在有改动时允许保存六项设置', async () =
     dark_background: true,
     prefetch_pages: 1,
   })
-  expect(wrapper.text()).toContain('阅读偏好已保存')
-  expect(wrapper.text()).toContain('无需重启')
+  expect(toastMessages().join('\n')).toContain('阅读偏好已保存')
+  expect(toastMessages().join('\n')).toContain('无需重启')
   // 保存成功后恢复干净状态，按钮再次禁用
   expect(findEnabledButtonByText('保存阅读偏好')).toBeUndefined()
   wrapper.unmount()
@@ -453,7 +462,7 @@ it('阅读偏好保存失败显示错误并保留未保存改动', async () => {
   findEnabledButtonByText('保存阅读偏好').click()
   await flushPromises()
 
-  expect(wrapper.text()).toContain('阅读设置保存被拒绝')
+  expect(toastMessages().join('\n')).toContain('网络请求失败：阅读设置保存被拒绝')
   expect(findEnabledButtonByText('保存阅读偏好')).toBeDefined()
   wrapper.unmount()
   vi.unstubAllGlobals()

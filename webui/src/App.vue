@@ -3,6 +3,7 @@ import { computed, watchEffect } from 'vue'
 import { useRoute } from 'vue-router'
 import { useTheme } from 'vuetify'
 
+import ToastHost from '@/components/ToastHost.vue'
 import BlankLayout from '@/layouts/BlankLayout.vue'
 import DefaultLayout from '@/layouts/DefaultLayout.vue'
 import ReaderLayout from '@/layouts/ReaderLayout.vue'
@@ -27,6 +28,7 @@ watchEffect(() => {
   <component :is="layout">
     <router-view />
   </component>
+  <ToastHost />
 </template>
 
 <style>

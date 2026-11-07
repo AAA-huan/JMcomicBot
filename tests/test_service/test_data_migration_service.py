@@ -90,11 +90,9 @@ def test_export_zip_contains_consistent_db_and_metadata(db_manager, tmp_path) ->
 
     assert result.path.exists()
     assert result.filename.startswith("data-export-")
-    assert result.filename.endswith(
-        "-schema0030_add_reading_setting_prefetch_pages.zip"
-    )
+    assert result.filename.endswith("-schema0032_manga_folders.zip")
     assert result.file_size_bytes == result.path.stat().st_size
-    assert result.schema_revision == "0030_add_reading_setting_prefetch_pages"
+    assert result.schema_revision == "0032_manga_folders"
     with ZipFile(result.path) as archive:
         names = archive.namelist()
     assert len(names) == 2
@@ -102,7 +100,7 @@ def test_export_zip_contains_consistent_db_and_metadata(db_manager, tmp_path) ->
     assert next(name for name in names if name.endswith(".db")).startswith("main-")
     payload, db_bytes, db_name = _read_export(result.path)
     assert payload["format_version"] == 1
-    assert payload["schema_revision"] == "0030_add_reading_setting_prefetch_pages"
+    assert payload["schema_revision"] == "0032_manga_folders"
     assert payload["db_filename"] == db_name
     assert payload["db_sha256"] == _db_hash(db_bytes)
     assert payload["exported_at"].endswith("Z")
@@ -149,8 +147,8 @@ def test_validate_import_returns_preview_and_path_warnings(
 
     preview = target_service.validate_import(result.path)
 
-    assert preview.schema_revision == "0030_add_reading_setting_prefetch_pages"
-    assert preview.current_schema_revision == "0030_add_reading_setting_prefetch_pages"
+    assert preview.schema_revision == "0032_manga_folders"
+    assert preview.current_schema_revision == "0032_manga_folders"
     assert preview.table_counts["manga"] == 0
     assert preview.exported_at.endswith("Z")
     assert len(preview.path_warnings) == 2

@@ -94,11 +94,18 @@ def create_manga_router(
         search: Optional[str] = None,
         manga_status: Annotated[Optional[str], Query(alias="status")] = None,
         tag: Optional[str] = None,
-        sort: str = "downloaded_at_desc",
+        sort: str = "downloaded_at",
+        order: Annotated[str, Query(pattern="^(asc|desc)$")] = "desc",
         favorite_only: bool = False,
         history_only: bool = False,
         blacklist_only: bool = False,
+        folder_id: Annotated[Optional[int], Query(ge=1)] = None,
     ) -> dict[str, object]:
+        # 伪状态「已下载未收藏」在路由层拆解为 已下载 + 未收藏筛选，
+        # 不进入仓储状态白名单，其余非法状态仍由白名单校验拒绝为 400。
+        unfavorite_only = manga_status == "downloaded_unfavorited"
+        if unfavorite_only:
+            manga_status = "downloaded"
         try:
             return asdict(
                 dependencies.manga_query_service.list(
@@ -108,9 +115,12 @@ def create_manga_router(
                     manga_status,
                     tag,
                     sort,
+                    order,
                     favorite_only=favorite_only,
+                    unfavorite_only=unfavorite_only,
                     history_only=history_only,
                     blacklist_only=blacklist_only,
+                    folder_id=folder_id,
                     admin_id=authenticated.admin_id,
                 )
             )

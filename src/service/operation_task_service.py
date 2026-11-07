@@ -52,6 +52,12 @@ _AUDIT_EVENT_NAMES: Dict[str, Dict[str, str]] = {
         "failed": "manga.blacklist_failed",
         "cancelled": "manga.blacklist_cancelled",
     },
+    "send": {
+        "requested": "send.requested",
+        "succeeded": "send.completed",
+        "failed": "send.failed",
+        "cancelled": "send.cancelled",
+    },
 }
 
 
@@ -106,8 +112,12 @@ class OperationTaskService:
         task_type: str,
         context: OperationContext,
         manga_id: Optional[str] = None,
+        summary: Optional[str] = None,
     ) -> TaskResult:
-        """创建任务，并记录请求事件和审计。"""
+        """创建任务，并记录请求事件和审计。
+
+        summary 传入时覆盖按类型生成的默认摘要（如发送任务含文件名与目标）。
+        """
         if task_type == "download" and manga_id is not None:
             active = self.task_repo.find_active_download(manga_id)
             if active is not None:
@@ -117,6 +127,7 @@ class OperationTaskService:
             context.source,
             context.actor_user_id or "",
             manga_id,
+            summary,
         )
         self.event_repo.append(task.id, f"{task_type}.requested", "queued")
         self.audit_repo.record(

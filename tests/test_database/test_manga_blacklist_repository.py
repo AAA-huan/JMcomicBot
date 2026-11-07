@@ -137,7 +137,8 @@ def test_manga_repository_blacklist_only_includes_deleted(
         search=None,
         status=None,
         tag=None,
-        sort="id_asc",
+        sort="id",
+        order="asc",
         blacklist_only=True,
     )
     assert total == 1
