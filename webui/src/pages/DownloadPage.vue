@@ -5,6 +5,7 @@ import { errorMessage } from '@/api/client'
 import { useConnectionSubscription, useEventSubscription } from '@/api/eventStream'
 import { getDownloadProgress, requestDownloads } from '@/api/tasks'
 import EmptyState from '@/components/EmptyState.vue'
+import { useToast } from '@/stores/toast'
 import type {
   DownloadChapterProgress,
   DownloadProgressEventData,
@@ -13,9 +14,8 @@ import type {
 import { formatElapsed, parseBackendTime, parseMangaIds } from '@/utils/format'
 
 const downloadInput = ref('')
+const toast = useToast()
 const submitting = ref(false)
-const requestError = ref('')
-const requestNotice = ref('')
 
 const snapshot = ref<DownloadProgressSnapshot | null>(null)
 const progressError = ref('')
@@ -90,15 +90,13 @@ async function loadProgress(): Promise<void> {
 
 async function submitDownload(): Promise<void> {
   if (submitting.value) return
-  requestError.value = ''
-  requestNotice.value = ''
   const mangaIds = parseMangaIds(downloadInput.value)
   if (mangaIds.length === 0) {
-    requestError.value = '请输入至少一个漫画 ID'
+    toast.error('请输入至少一个漫画 ID')
     return
   }
   if (mangaIds.length > 100) {
-    requestError.value = '单次最多请求 100 个漫画'
+    toast.error('单次最多请求 100 个漫画')
     return
   }
 
@@ -124,10 +122,10 @@ async function submitDownload(): Promise<void> {
         `${result.duplicate_count} 个已有活动任务（${duplicates.join('、')}）`,
       )
     }
-    requestNotice.value = parts.join('，')
+    toast.success(parts.join('，'))
     downloadInput.value = ''
   } catch (err) {
-    requestError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     submitting.value = false
   }
@@ -175,12 +173,6 @@ onBeforeUnmount(() => {
             :disabled="submitting"
             hide-details="auto"
           />
-          <v-alert v-if="requestError" type="error" variant="tonal" class="mt-3">
-            {{ requestError }}
-          </v-alert>
-          <v-alert v-if="requestNotice" type="success" variant="tonal" class="mt-3">
-            {{ requestNotice }}
-          </v-alert>
         </v-card-text>
         <v-card-actions>
           <v-spacer />

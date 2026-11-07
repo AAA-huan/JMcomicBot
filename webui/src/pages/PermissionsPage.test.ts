@@ -9,9 +9,18 @@ vi.mock('@/api/permissions', () => ({
 import { ApiError } from '@/api/client'
 import { getPermissions, getAdminQQ, linkAdminQQ, unlinkAdminQQ } from '@/api/permissions'
 import PermissionsPage from '@/pages/PermissionsPage.vue'
+import { useToast } from '@/stores/toast'
+
+const toast = useToast()
+
+/** 当前展示中的 toast 文案列表。 */
+function toastMessages(): string[] {
+  return toast.visible.value.map((item) => item.message)
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
+  toast.clear()
   vi.mocked(getPermissions).mockResolvedValue({ scopes: {}, cached_users: [], cached_groups: [] })
   vi.mocked(getAdminQQ).mockResolvedValue({ qq_id: null })
 })
@@ -27,7 +36,7 @@ it('输入非法时不发请求，关联后显示 QQ 并可立即解绑', async 
   await wrapper.findAll('input')[0]!.setValue('00123')
   await wrapper.findAll('button').find(button => button.text() === '关联 QQ')!.trigger('click')
   expect(linkAdminQQ).not.toHaveBeenCalled()
-  expect(wrapper.text()).toContain('不能含前导零')
+  expect(toastMessages()).toContain('QQ 号必须是 1–20 位正整数数字，不能含前导零')
   vi.mocked(linkAdminQQ).mockResolvedValue({ qq_id: '12345', changed: true })
   await wrapper.findAll('input')[0]!.setValue('12345')
   await wrapper.findAll('button').find(button => button.text() === '关联 QQ')!.trigger('click')
@@ -48,7 +57,7 @@ it('更换失败展示原因并保留当前关联', async () => {
   await wrapper.findAll('input')[0]!.setValue('67890')
   await wrapper.findAll('button').find(button => button.text() === '更换关联')!.trigger('click')
   await flushPromises()
-  expect(wrapper.text()).toContain('该 QQ 号在全局黑名单中')
+  expect(toastMessages()).toContain('该 QQ 号在全局黑名单中')
   expect(wrapper.text()).toContain('当前关联：12345')
   wrapper.unmount()
 })

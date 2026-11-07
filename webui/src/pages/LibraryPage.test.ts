@@ -29,7 +29,15 @@ import { setFavorite } from '@/api/favorites'
 import { requestDownloads } from '@/api/tasks'
 import { ApiError } from '@/api/client'
 import LibraryPage from '@/pages/LibraryPage.vue'
+import { useToast } from '@/stores/toast'
 import type { Manga } from '@/types/api'
+
+const toast = useToast()
+
+/** 当前展示中的 toast 文案列表。 */
+function toastMessages(): string[] {
+  return toast.visible.value.map((item) => item.message)
+}
 
 function mangaFixture(id: string, title: string): Manga {
   return {
@@ -84,6 +92,7 @@ async function mountPage(initialPath = '/library') {
 describe('LibraryPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    toast.clear()
     document.body.innerHTML = ''
   })
 
@@ -145,7 +154,7 @@ describe('LibraryPage', () => {
     await download.trigger('click')
     await flushPromises()
     expect(requestDownloads).toHaveBeenCalledWith(['300'])
-    expect(wrapper.text()).toContain('已提交 1 个，正在加入队列')
+    expect(toastMessages()).toContain('已提交 1 个，正在加入队列')
     wrapper.unmount()
   })
 
@@ -239,7 +248,7 @@ describe('LibraryPage', () => {
     const { wrapper } = await mountPage()
     await wrapper.find('[aria-label="收藏"]').trigger('click')
     await flushPromises()
-    expect(wrapper.text()).toContain('收藏保存失败')
+    expect(toastMessages()).toContain('收藏保存失败')
     expect(wrapper.find('[aria-label="收藏"]').exists()).toBe(true)
     vi.mocked(setFavorite).mockResolvedValueOnce({ manga_id: '100', is_favorite: true, changed: true })
     await wrapper.find('[aria-label="收藏"]').trigger('click')

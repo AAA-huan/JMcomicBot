@@ -30,7 +30,15 @@ import type {
 } from '@/api/jmSearch'
 import { requestDownloads } from '@/api/tasks'
 import AuthorSearchPage from '@/pages/AuthorSearchPage.vue'
+import { useToast } from '@/stores/toast'
 import { copyText } from '@/utils/clipboard'
+
+const toast = useToast()
+
+/** 当前展示中的 toast 文案列表。 */
+function toastMessages(): string[] {
+  return toast.visible.value.map((item) => item.message)
+}
 
 function localStatus(overrides: Partial<JmLocalStatus> = {}): JmLocalStatus {
   return { exists: false, status: null, favorited: false, downloaded: false, ...overrides }
@@ -115,6 +123,7 @@ function buttonWithText(wrapper: VueWrapper, text: string) {
 describe('AuthorSearchPage', () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    toast.clear()
     document.body.innerHTML = ''
     // 列表对象会被收藏操作原地更新，每个用例开始前恢复初始本地状态
     for (const album of albums) album.local = localStatus()
@@ -165,13 +174,13 @@ describe('AuthorSearchPage', () => {
     await buttonWithText(wrapper, '下载选中').trigger('click')
     await flushPromises()
     expect(requestDownloads).toHaveBeenCalledWith(['100', '200'])
-    expect(wrapper.text()).toContain('已提交 1 个，正在加入队列')
+    expect(toastMessages().join('')).toContain('已提交 1 个，正在加入队列')
 
     await buttonWithText(wrapper, '全选').trigger('click')
     await buttonWithText(wrapper, '复制 ID').trigger('click')
     await flushPromises()
     expect(copyText).toHaveBeenCalledWith('100,200')
-    expect(wrapper.text()).toContain('已复制 2 个漫画 ID')
+    expect(toastMessages().join('')).toContain('已复制 2 个漫画 ID')
     wrapper.unmount()
   })
 
@@ -257,7 +266,7 @@ describe('AuthorSearchPage', () => {
     await flushPromises()
 
     expect(favoriteJmAlbums).toHaveBeenCalledWith(['100'])
-    expect(wrapper.text()).toContain('已收藏 1 本')
+    expect(toastMessages().join('')).toContain('已收藏 1 本')
     const button = wrapper.find('[aria-label="收藏 漫画一"]')
     expect(button.text()).toContain('已收藏')
     expect(button.attributes()).toHaveProperty('disabled')
@@ -277,7 +286,7 @@ describe('AuthorSearchPage', () => {
     await flushPromises()
 
     expect(favoriteJmAlbums).toHaveBeenCalledWith(['100', '200'])
-    expect(wrapper.text()).toContain('已收藏 1 本，1 本已在本地')
+    expect(toastMessages().join('')).toContain('已收藏 1 本，1 本已在本地')
     wrapper.unmount()
   })
 
@@ -292,7 +301,7 @@ describe('AuthorSearchPage', () => {
     await wrapper.find('[aria-label="收藏 漫画二"]').trigger('click')
     await flushPromises()
 
-    expect(wrapper.text()).toContain('200: 漫画不存在或已下架')
+    expect(toastMessages().join('')).toContain('200: 漫画不存在或已下架')
     expect(wrapper.find('[aria-label="收藏 漫画二"]').text()).toContain('收藏')
     wrapper.unmount()
   })

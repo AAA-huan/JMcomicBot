@@ -18,6 +18,7 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
 import { useSystemStore } from '@/stores/system'
+import { useToast } from '@/stores/toast'
 import type { OperationTask } from '@/types/api'
 import { copyText } from '@/utils/clipboard'
 import { formatDateTime } from '@/utils/format'
@@ -34,6 +35,7 @@ const route = useRoute()
 const router = useRouter()
 const { mobile } = useDisplay()
 const system = useSystemStore()
+const toast = useToast()
 
 const pageSizeOptions = [20, 50, 100]
 const typeOptions = [
@@ -61,8 +63,6 @@ const total = ref(0)
 const pages = ref(0)
 const loading = ref(false)
 const error = ref('')
-const actionError = ref('')
-const actionNotice = ref('')
 
 const filters = ref({
   taskType: '',
@@ -136,15 +136,13 @@ const pauseLoading = ref(false)
 async function toggleQueuePause(): Promise<void> {
   if (pauseLoading.value) return
   pauseLoading.value = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     const result = downloadPaused.value
       ? await resumeDownloadQueue()
       : await pauseDownloadQueue()
-    actionNotice.value = result.paused
+    toast.success(result.paused
       ? '下载队列已暂停，当前任务完成后不再开始新任务'
-      : '下载队列已恢复，将继续处理排队任务'
+      : '下载队列已恢复，将继续处理排队任务')
     // 立即更新本地状态，服务端队列事件随后保持一致
     if (system.status) {
       system.status.download_queue = {
@@ -153,7 +151,7 @@ async function toggleQueuePause(): Promise<void> {
       }
     }
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     pauseLoading.value = false
   }
@@ -233,15 +231,13 @@ async function confirmCancel(): Promise<void> {
   const target = cancelTarget.value
   if (!target) return
   cancelLoading.value = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     await cancelTask(target.id)
-    actionNotice.value = '任务已取消'
+    toast.success('任务已取消')
     cancelDialog.value = false
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     cancelDialog.value = false
   } finally {
     cancelLoading.value = false
@@ -250,15 +246,13 @@ async function confirmCancel(): Promise<void> {
 
 async function confirmCancelQueued(): Promise<void> {
   cancelQueuedLoading.value = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     const result = await cancelQueuedTasks()
-    actionNotice.value = `已取消 ${result.cancelled_count} 个排队任务`
+    toast.success(`已取消 ${result.cancelled_count} 个排队任务`)
     cancelQueuedDialog.value = false
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     cancelQueuedDialog.value = false
   } finally {
     cancelQueuedLoading.value = false
@@ -280,26 +274,22 @@ async function copySelectedIds(): Promise<void> {
   const ids = [...new Set(selectedTasks.map((task) => task.manga_id!))].join(',')
   if (!ids) return
   const ok = await copyText(ids)
-  actionError.value = ''
-  actionNotice.value = ok
-    ? `已复制 ${new Set(selectedTasks.map((t) => t.manga_id)).size} 个漫画 ID`
-    : '复制失败，请手动选择并复制'
+  if (ok) toast.success(`已复制 ${new Set(selectedTasks.map((t) => t.manga_id)).size} 个漫画 ID`)
+  else toast.error('复制失败，请手动选择并复制')
 }
 
 async function batchCancel(): Promise<void> {
   const targets = cancelableSelected.value
   if (targets.length === 0) return
   batchLoading.value = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     const result = await cancelTasks(targets.map((task) => task.id))
     const succeeded = result.items.filter((item) => item.status === 'cancelled').length
     const failed = result.failed_count
-    actionNotice.value = `已取消 ${succeeded} 个任务${failed > 0 ? `，${failed} 个失败` : ''}`
+    toast.success(`已取消 ${succeeded} 个任务${failed > 0 ? `，${failed} 个失败` : ''}`)
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     batchLoading.value = false
   }
@@ -309,19 +299,17 @@ async function batchRetry(): Promise<void> {
   const targets = retryableSelected.value
   if (targets.length === 0) return
   batchLoading.value = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     const result = await retryTasks(targets.map((task) => task.id))
     const succeeded = result.items.filter((item) => item.status === 'requeued').length
     const downloaded = result.items.filter((item) => item.status === 'already_downloaded').length
     const failed = result.failed_count - downloaded
     const downloadedNotice = downloaded > 0 ? `，${downloaded} 个已下载跳过` : ''
-    actionNotice.value = `已重新入队 ${succeeded} 个任务${downloadedNotice}${failed > 0 ? `，${failed} 个失败` : ''}`
+    toast.success(`已重新入队 ${succeeded} 个任务${downloadedNotice}${failed > 0 ? `，${failed} 个失败` : ''}`)
     selected.value = []
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     batchLoading.value = false
   }
@@ -362,28 +350,6 @@ watch(
       <template #append>
         <v-btn size="small" variant="text" @click="load">重试</v-btn>
       </template>
-    </v-alert>
-    <v-alert
-      v-if="actionError"
-      type="error"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionError = ''"
-    >
-      {{ actionError }}
-    </v-alert>
-    <v-alert
-      v-if="actionNotice"
-      type="success"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionNotice = ''"
-    >
-      {{ actionNotice }}
     </v-alert>
 
     <v-row dense class="mb-4">

@@ -14,6 +14,7 @@ import {
 import type { ImportPreview, RepairResult } from '@/api/maintenance'
 import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import IdScrollWindow from '@/components/IdScrollWindow.vue'
+import { useToast } from '@/stores/toast'
 import type { OperationTask, ScanResultView, VerifyResult } from '@/types/api'
 import { formatDateTime, parseMangaIds } from '@/utils/format'
 
@@ -28,9 +29,7 @@ const TABLE_LABELS: Record<string, string> = {
   audit_event: '审计事件',
 }
 
-const actionError = ref('')
-const actionNotice = ref('')
-
+const toast = useToast()
 const scanOptions = reactive({ dry_run: false, enrich: false, read_pages: false, check_chapters: false })
 const repairPreview = ref(false)
 const repairResult = ref<RepairResult | null>(null)
@@ -50,10 +49,9 @@ useEventSubscription((event) => {
 
 async function runVerify(): Promise<void> {
   if (verifyLoading.value) return
-  actionError.value = ''
   const ids = parseMangaIds(verifyInput.value)
   if (verifyScope.value === 'selected' && (!ids.length || ids.length > 100)) {
-    actionError.value = '请输入 1 到 100 个漫画 ID'
+    toast.error('请输入 1 到 100 个漫画 ID')
     return
   }
   verifyLoading.value = true
@@ -62,7 +60,7 @@ async function runVerify(): Promise<void> {
   try {
     verifyResult.value = await verifyLibrary(verifyScope.value === 'all' ? null : ids)
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     verifyLoading.value = false
   }
@@ -72,28 +70,24 @@ const repairDialog = ref(false)
 const repairLoading = ref(false)
 
 async function runScan(): Promise<void> {
-  actionError.value = ''
-  actionNotice.value = ''
   scanLoading.value = true
   try {
     scanResult.value = await scanLibrary({ ...scanOptions, check_chapters: scanOptions.enrich && scanOptions.check_chapters })
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     scanLoading.value = false
   }
 }
 
 async function confirmRepair(): Promise<void> {
-  actionError.value = ''
-  actionNotice.value = ''
   repairLoading.value = true
   try {
     const result = await repairLibrary(repairPreview.value)
     repairResult.value = result
     repairDialog.value = false
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     repairDialog.value = false
   } finally {
     repairLoading.value = false
@@ -111,8 +105,6 @@ const importRestarting = ref(false)
 
 async function runExport(): Promise<void> {
   if (exportLoading.value || importRestarting.value) return
-  actionError.value = ''
-  actionNotice.value = ''
   exportLoading.value = true
   try {
     const { blob, filename } = await exportData()
@@ -125,9 +117,9 @@ async function runExport(): Promise<void> {
     anchor.click()
     anchor.remove()
     URL.revokeObjectURL(objectUrl)
-    actionNotice.value = `数据已导出：${downloadName}`
+    toast.success(`数据已导出：${downloadName}`)
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     exportLoading.value = false
   }
@@ -145,11 +137,9 @@ async function handleImportFile(event: Event): Promise<void> {
   input.value = ''
   importPreview.value = null
   importFile.value = null
-  actionError.value = ''
-  actionNotice.value = ''
   if (!file) return
   if (!file.name.toLowerCase().endsWith('.zip')) {
-    actionError.value = '请选择导出生成的 .zip 数据包'
+    toast.error('请选择导出生成的 .zip 数据包')
     return
   }
   importFile.value = file
@@ -158,7 +148,7 @@ async function handleImportFile(event: Event): Promise<void> {
     importPreview.value = await validateDataImport(file)
   } catch (err) {
     importFile.value = null
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     importValidating.value = false
   }
@@ -166,8 +156,6 @@ async function handleImportFile(event: Event): Promise<void> {
 
 async function confirmImport(): Promise<void> {
   if (!importFile.value || importLoading.value || importRestarting.value) return
-  actionError.value = ''
-  actionNotice.value = ''
   importLoading.value = true
   try {
     // 使用与校验时相同的 File 对象再次上传，后端会重新校验后替换整库
@@ -175,9 +163,9 @@ async function confirmImport(): Promise<void> {
     importDialog.value = false
     importPreview.value = null
     importRestarting.value = true
-    actionNotice.value = '数据库导入完成，服务正在重启，请稍后刷新页面。'
+    toast.info('数据库导入完成，服务正在重启，请稍后刷新页面。', { persistent: true })
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     importDialog.value = false
   } finally {
     importLoading.value = false
@@ -187,29 +175,6 @@ async function confirmImport(): Promise<void> {
 
 <template>
   <div>
-    <v-alert
-      v-if="actionError"
-      type="error"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionError = ''"
-    >
-      {{ actionError }}
-    </v-alert>
-    <v-alert
-      v-if="actionNotice"
-      type="success"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionNotice = ''"
-    >
-      {{ actionNotice }}
-    </v-alert>
-
     <v-row dense>
       <v-col cols="12" md="6">
         <v-card class="pa-4 h-100 d-flex flex-column">

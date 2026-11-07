@@ -19,6 +19,7 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import PaginationBar from '@/components/PaginationBar.vue'
 import { useCoverPreview } from '@/stores/coverPreview'
+import { useToast } from '@/stores/toast'
 import type { Manga } from '@/types/api'
 import { copyText } from '@/utils/clipboard'
 import { formatDateTime } from '@/utils/format'
@@ -30,6 +31,7 @@ import {
 } from '@/utils/labels'
 
 const { coverPreview } = useCoverPreview()
+const toast = useToast()
 const route = useRoute()
 const router = useRouter()
 const { mobile } = useDisplay()
@@ -94,8 +96,6 @@ const libraryListCache: LibraryListCache = {
   pages: 0,
 }
 
-const actionError = ref('')
-const actionNotice = ref('')
 const favoriteBusy = reactive<Record<string, boolean>>({})
 const blacklistBusy = reactive<Record<string, boolean>>({})
 
@@ -265,14 +265,12 @@ function clearSearch(): void {
 }
 
 async function requestDownloadIds(ids: string[]): Promise<void> {
-  actionError.value = ''
-  actionNotice.value = ''
   if (ids.length === 0) {
-    actionError.value = '请输入至少一个漫画 ID'
+    toast.error('请输入至少一个漫画 ID')
     return
   }
   if (ids.length > 100) {
-    actionError.value = '单次最多请求 100 个漫画'
+    toast.error('单次最多请求 100 个漫画')
     return
   }
   try {
@@ -296,10 +294,10 @@ async function requestDownloadIds(ids: string[]): Promise<void> {
         `${result.duplicate_count} 个已有活动任务（${duplicates.join('、')}）`,
       )
     }
-    actionNotice.value = parts.join('，')
+    toast.success(parts.join('，'))
     selected.value = []
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   }
 }
 
@@ -307,28 +305,24 @@ async function copySelectedIds(): Promise<void> {
   if (selectedCount.value === 0) return
   const ids = [...new Set(selected.value)].join(',')
   const ok = await copyText(ids)
-  actionError.value = ''
-  actionNotice.value = ok
-    ? `已复制 ${selectedCount.value} 个漫画 ID`
-    : '复制失败，请手动选择并复制'
+  if (ok) toast.success(`已复制 ${selectedCount.value} 个漫画 ID`)
+  else toast.error('复制失败，请手动选择并复制')
 }
 
 /** 服务端确认成功后更新状态，失败时保留原收藏状态。 */
 async function toggleFavorite(manga: Manga): Promise<void> {
   if (favoriteBusy[manga.id]) return
   favoriteBusy[manga.id] = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     const result = await setFavorite(manga.id, !manga.is_favorite)
     manga.is_favorite = result.is_favorite
-    actionNotice.value = result.is_favorite ? `已收藏《${manga.title}》` : `已取消收藏《${manga.title}》`
+    toast.success(result.is_favorite ? `已收藏《${manga.title}》` : `已取消收藏《${manga.title}》`)
     if (filters.favoriteOnly && !result.is_favorite) {
       if (mangas.value.length === 1 && filters.page > 1) updateQuery({ page: filters.page - 1 })
       else await load()
     }
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     favoriteBusy[manga.id] = false
   }
@@ -357,25 +351,23 @@ async function confirmBlacklist(): Promise<void> {
   if (!target || blacklistBusy[target.id]) return
   blacklistLoading.value = true
   blacklistBusy[target.id] = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     const result = blacklistMode.value === 'add'
       ? await blacklistManga(target.id)
       : await unblacklistManga(target.id)
     if (result.changed) {
-      actionNotice.value = blacklistMode.value === 'add'
+      toast.success(blacklistMode.value === 'add'
         ? `已将《${target.title}》加入黑名单`
-        : `已将《${target.title}》移出黑名单`
+        : `已将《${target.title}》移出黑名单`)
     } else {
-      actionNotice.value = blacklistMode.value === 'add'
+      toast.success(blacklistMode.value === 'add'
         ? `《${target.title}》已在黑名单中`
-        : `《${target.title}》不在黑名单中`
+        : `《${target.title}》不在黑名单中`)
     }
     blacklistDialog.value = false
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     blacklistDialog.value = false
   } finally {
     blacklistLoading.value = false
@@ -395,18 +387,16 @@ async function confirmBatchBlacklist(): Promise<void> {
     ? selectedBlacklistedIds.value
     : [...selected.value]
   if (ids.length === 0) {
-    actionError.value = '选中的漫画中没有已拉黑项'
+    toast.error('选中的漫画中没有已拉黑项')
     batchBlacklistDialog.value = false
     return
   }
   if (ids.length > 100) {
-    actionError.value = '单次最多操作 100 个漫画'
+    toast.error('单次最多操作 100 个漫画')
     batchBlacklistDialog.value = false
     return
   }
   batchBlacklistLoading.value = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     const result = batchBlacklistMode.value === 'add'
       ? await batchBlacklistMangas(ids)
@@ -418,11 +408,11 @@ async function confirmBatchBlacklist(): Promise<void> {
         ? `，${result.unchanged_count} 个已在黑名单`
         : `，${result.unchanged_count} 个不在黑名单`
     }
-    actionNotice.value = notice
+    toast.success(notice)
     batchBlacklistDialog.value = false
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     batchBlacklistDialog.value = false
   } finally {
     batchBlacklistLoading.value = false
@@ -433,15 +423,13 @@ async function confirmDelete(): Promise<void> {
   const target = deleteTarget.value
   if (!target) return
   deleteLoading.value = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     const result = await deleteManga(target.id)
-    actionNotice.value = `已删除《${target.title}》及 ${result.deleted_file_count} 个文件`
+    toast.success(`已删除《${target.title}》及 ${result.deleted_file_count} 个文件`)
     deleteDialog.value = false
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     deleteDialog.value = false
   } finally {
     deleteLoading.value = false
@@ -451,13 +439,11 @@ async function confirmDelete(): Promise<void> {
 async function confirmBatchDelete(): Promise<void> {
   if (selectedCount.value === 0) return
   if (selectedCount.value > 100) {
-    actionError.value = '单次最多删除 100 个漫画'
+    toast.error('单次最多删除 100 个漫画')
     batchDeleteDialog.value = false
     return
   }
   batchDeleteLoading.value = true
-  actionError.value = ''
-  actionNotice.value = ''
   try {
     const result = await batchDeleteMangas(selected.value)
     if (result.failed_count > 0) {
@@ -465,14 +451,14 @@ async function confirmBatchDelete(): Promise<void> {
         .filter((item) => !item.succeeded)
         .map((item) => `${item.manga_id}（${item.error_message ?? item.error_code ?? '未知错误'}）`)
         .join('、')
-      actionError.value = `批量删除完成：成功 ${result.succeeded_count} 个，失败 ${result.failed_count} 个：${failed}`
+      toast.error(`批量删除完成：成功 ${result.succeeded_count} 个，失败 ${result.failed_count} 个：${failed}`)
     } else {
-      actionNotice.value = `已删除 ${result.succeeded_count} 个漫画`
+      toast.success(`已删除 ${result.succeeded_count} 个漫画`)
     }
     batchDeleteDialog.value = false
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     batchDeleteDialog.value = false
   } finally {
     batchDeleteLoading.value = false
@@ -511,28 +497,6 @@ watch(
       <template #append>
         <v-btn size="small" variant="text" @click="load">重试</v-btn>
       </template>
-    </v-alert>
-    <v-alert
-      v-if="actionError"
-      type="error"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionError = ''"
-    >
-      {{ actionError }}
-    </v-alert>
-    <v-alert
-      v-if="actionNotice"
-      type="success"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionNotice = ''"
-    >
-      {{ actionNotice }}
     </v-alert>
 
     <v-card class="mb-4">

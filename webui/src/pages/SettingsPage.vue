@@ -5,6 +5,7 @@ import { errorMessage } from '@/api/client'
 import { getReaderSettings, updateReaderSettings } from '@/api/reader'
 import { getOptionFile, listSettings, updateOptionFile, updateSetting } from '@/api/settings'
 import EmptyState from '@/components/EmptyState.vue'
+import { useToast } from '@/stores/toast'
 import { PREFETCH_OPTIONS, type ReadingSettings } from '@/reader/types'
 import type { SettingValue, SettingView } from '@/types/api'
 import {
@@ -20,11 +21,10 @@ const READING_MODE_OPTIONS = [
   { value: 'scroll', title: '滚动模式', description: '上→下阅读，下滑 / ArrowDown 翻下页' },
 ] as const
 
+const toast = useToast()
 const items = ref<SettingView[]>([])
 const loading = ref(false)
 const error = ref('')
-const actionError = ref('')
-const actionNotice = ref('')
 
 const editDialog = ref(false)
 const editKey = ref('')
@@ -42,7 +42,6 @@ const optionContent = ref('')
 const optionLoading = ref(false)
 const optionSaving = ref(false)
 const optionError = ref('')
-const optionNotice = ref('')
 const optionDirty = ref(false)
 
 // 阅读器偏好设置状态，与阅读器工具栏共用同一份后端数据
@@ -60,7 +59,6 @@ const readerLoaded = ref<ReadingSettings | null>(null)
 const readerLoading = ref(false)
 const readerSaving = ref(false)
 const readerError = ref('')
-const readerNotice = ref('')
 
 const readerDirty = computed(() => {
   const form = readerForm.value
@@ -131,14 +129,13 @@ async function loadOption(): Promise<void> {
 async function saveOption(): Promise<void> {
   optionSaving.value = true
   optionError.value = ''
-  optionNotice.value = ''
   try {
     const result = await updateOptionFile(optionContent.value)
     optionContent.value = result.content
     optionDirty.value = false
-    optionNotice.value = 'option.yml 已保存，下一个下载任务即生效（无需重启）'
+    toast.success('option.yml 已保存，下一个下载任务即生效（无需重启）')
   } catch (err) {
-    optionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     optionSaving.value = false
   }
@@ -190,9 +187,7 @@ async function saveSetting(): Promise<void> {
   saving.value = true
   try {
     const view = await updateSetting(editKey.value, payload)
-    actionNotice.value = `${view.title} 已更新（${
-      SETTING_EFFECT_LABELS[view.effect] ?? view.effect
-    }）`
+    toast.success(`${view.title} 已更新（${SETTING_EFFECT_LABELS[view.effect] ?? view.effect}）`)
     editDialog.value = false
     await load()
   } catch (err) {
@@ -221,7 +216,6 @@ async function saveReader(): Promise<void> {
   if (!form || !readerLoaded.value) return
   readerSaving.value = true
   readerError.value = ''
-  readerNotice.value = ''
   try {
     const updated = await updateReaderSettings({
       reading_mode: form.reading_mode,
@@ -233,9 +227,9 @@ async function saveReader(): Promise<void> {
     })
     readerForm.value = { ...updated }
     readerLoaded.value = { ...updated }
-    readerNotice.value = '阅读偏好已保存，进入阅读器立即生效（无需重启）'
+    toast.success('阅读偏好已保存，进入阅读器立即生效（无需重启）')
   } catch (err) {
-    readerError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     readerSaving.value = false
   }
@@ -256,28 +250,6 @@ onMounted(() => {
         <v-btn size="small" variant="text" @click="load">重试</v-btn>
       </template>
     </v-alert>
-    <v-alert
-      v-if="actionError"
-      type="error"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionError = ''"
-    >
-      {{ actionError }}
-    </v-alert>
-    <v-alert
-      v-if="actionNotice"
-      type="success"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionNotice = ''"
-    >
-      {{ actionNotice }}
-    </v-alert>
 
     <v-progress-linear v-if="loading" indeterminate class="mb-4" />
 
@@ -296,17 +268,6 @@ onMounted(() => {
           <template #append>
             <v-btn size="small" variant="text" @click="loadReader">重试</v-btn>
           </template>
-        </v-alert>
-        <v-alert
-          v-if="readerNotice"
-          type="success"
-          variant="tonal"
-          density="comfortable"
-          closable
-          class="mb-3"
-          @click:close="readerNotice = ''"
-        >
-          {{ readerNotice }}
         </v-alert>
         <v-progress-linear v-if="readerLoading" indeterminate class="mb-3" />
         <p class="text-body-2 text-medium-emphasis mb-4">
@@ -493,17 +454,6 @@ onMounted(() => {
           class="mb-3"
         >
           {{ optionError }}
-        </v-alert>
-        <v-alert
-          v-if="optionNotice"
-          type="success"
-          variant="tonal"
-          density="comfortable"
-          closable
-          class="mb-3"
-          @click:close="optionNotice = ''"
-        >
-          {{ optionNotice }}
         </v-alert>
         <p class="text-body-2 text-medium-emphasis mb-2">
           jmcomic 下载器配置；保存后下一个下载任务即生效，无需重启。img2pdf 与进度插件由程序自动注入并覆盖关键项。

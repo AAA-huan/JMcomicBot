@@ -18,6 +18,7 @@ import ConfirmDialog from '@/components/ConfirmDialog.vue'
 import EmptyState from '@/components/EmptyState.vue'
 import MangaCover from '@/components/MangaCover.vue'
 import { useCoverPreview } from '@/stores/coverPreview'
+import { useToast } from '@/stores/toast'
 import type { Manga, MangaFile, ReadingProgress } from '@/types/api'
 import { formatBytes, formatDateTime, parseTags } from '@/utils/format'
 import {
@@ -33,6 +34,7 @@ const { coverPreview } = useCoverPreview()
 const route = useRoute()
 const router = useRouter()
 const { mobile } = useDisplay()
+const toast = useToast()
 
 const mangaId = String(route.params.mangaId ?? '')
 
@@ -43,8 +45,6 @@ const coverFile = computed(() => manga.value?.files
   .slice().sort((left, right) => left.id - right.id)[0])
 const loading = ref(false)
 const error = ref('')
-const notice = ref('')
-const actionError = ref('')
 const actionLoading = ref(false)
 
 const editDialog = ref(false)
@@ -134,7 +134,7 @@ async function submitEdit(): Promise<void> {
       tags: parseTags(editForm.tags),
     })
     editDialog.value = false
-    notice.value = '元数据已更新'
+    toast.success('元数据已更新')
   } catch (err) {
     editError.value = errorMessage(err)
   } finally {
@@ -153,22 +153,20 @@ function searchSameAuthor(): void {
 }
 
 async function handleDownload(): Promise<void> {
-  actionError.value = ''
-  notice.value = ''
   actionLoading.value = true
   try {
     const result = await requestDownloads([mangaId])
     if (result.skipped_blacklisted.length > 0) {
-      notice.value = '该漫画已被拉黑，下载请求已跳过'
+      toast.success('该漫画已被拉黑，下载请求已跳过')
     } else if (result.skipped_downloaded.length > 0) {
-      notice.value = '该漫画已下载，本次请求已跳过'
+      toast.success('该漫画已下载，本次请求已跳过')
     } else if (result.duplicate_count > 0) {
-      notice.value = '该漫画已有进行中的下载任务'
+      toast.success('该漫画已有进行中的下载任务')
     } else {
-      notice.value = '已加入下载队列'
+      toast.success('已加入下载队列')
     }
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     actionLoading.value = false
   }
@@ -176,12 +174,11 @@ async function handleDownload(): Promise<void> {
 
 async function confirmDelete(): Promise<void> {
   deleteLoading.value = true
-  actionError.value = ''
   try {
     await deleteManga(mangaId)
     await router.replace({ name: 'library', query: route.query })
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     deleteDialog.value = false
   } finally {
     deleteLoading.value = false
@@ -192,15 +189,13 @@ async function confirmDelete(): Promise<void> {
 async function toggleFavorite(): Promise<void> {
   if (!manga.value || favoriteBusy.value) return
   favoriteBusy.value = true
-  actionError.value = ''
-  notice.value = ''
   const title = manga.value.title
   try {
     const result = await setFavorite(manga.value.id, !manga.value.is_favorite)
     if (manga.value) manga.value.is_favorite = result.is_favorite
-    notice.value = result.is_favorite ? `已收藏《${title}》` : `已取消收藏《${title}》`
+    toast.success(result.is_favorite ? `已收藏《${title}》` : `已取消收藏《${title}》`)
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
   } finally {
     favoriteBusy.value = false
   }
@@ -216,20 +211,18 @@ function askBlacklist(): void {
 async function confirmBlacklist(): Promise<void> {
   if (!manga.value || blacklistLoading.value) return
   blacklistLoading.value = true
-  actionError.value = ''
-  notice.value = ''
   const title = manga.value.title
   try {
     const result = blacklistMode.value === 'add'
       ? await blacklistManga(manga.value.id)
       : await unblacklistManga(manga.value.id)
-    notice.value = blacklistMode.value === 'add'
+    toast.success(blacklistMode.value === 'add'
       ? (result.changed ? `已将《${title}》加入黑名单` : `《${title}》已在黑名单中`)
-      : (result.changed ? `已将《${title}》移出黑名单` : `《${title}》不在黑名单中`)
+      : (result.changed ? `已将《${title}》移出黑名单` : `《${title}》不在黑名单中`))
     blacklistDialog.value = false
     await load()
   } catch (err) {
-    actionError.value = errorMessage(err)
+    toast.error(errorMessage(err))
     blacklistDialog.value = false
   } finally {
     blacklistLoading.value = false
@@ -258,28 +251,6 @@ onMounted(load)
       <template #append>
         <v-btn size="small" variant="text" @click="load">重试</v-btn>
       </template>
-    </v-alert>
-    <v-alert
-      v-if="actionError"
-      type="error"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="actionError = ''"
-    >
-      {{ actionError }}
-    </v-alert>
-    <v-alert
-      v-if="notice"
-      type="success"
-      variant="tonal"
-      density="comfortable"
-      closable
-      class="mb-4"
-      @click:close="notice = ''"
-    >
-      {{ notice }}
     </v-alert>
 
     <v-progress-linear v-if="loading" indeterminate class="mb-4" />

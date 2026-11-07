@@ -39,7 +39,13 @@ import { getReadingProgress } from '@/api/files'
 import { setFavorite } from '@/api/favorites'
 import { blacklistManga, getManga } from '@/api/mangas'
 import MangaDetailPage from '@/pages/MangaDetailPage.vue'
+import { useToast } from '@/stores/toast'
 import type { Manga } from '@/types/api'
+
+/** 当前展示中的 toast 文案列表。 */
+function toastMessages(): string[] {
+  return useToast().visible.value.map((item) => item.message)
+}
 
 function mangaFixture(): Manga {
   return {
@@ -69,6 +75,7 @@ function mangaFixture(): Manga {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  useToast().clear()
   document.body.innerHTML = ''
   window.localStorage.clear()
   vi.mocked(getManga).mockResolvedValue(mangaFixture())
@@ -172,7 +179,7 @@ it('收藏按钮调用收藏接口并更新按钮状态', async () => {
   await flushPromises()
 
   expect(setFavorite).toHaveBeenCalledWith('100', true)
-  expect(wrapper.text()).toContain('已收藏《测试漫画》')
+  expect(toastMessages()).toContain('已收藏《测试漫画》')
   expect(wrapper.text()).toContain('取消收藏')
   wrapper.unmount()
 })
